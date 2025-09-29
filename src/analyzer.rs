@@ -4,6 +4,72 @@ pub(crate) struct BetterAnalyzer {}
 
 // ----- Below formulas are taken from ISO 226:2023 -----
 
+fn spl_to_phon(frequency: f32, db_spl: f32) -> f32 {
+    let (alpha_f, l_u, t_f) = approximate_coefficients(frequency);
+
+    (100.0 / 3.0)
+        * f32::log2(
+            ((10.0_f32.powf(alpha_f * ((db_spl + l_u) / 10.0))
+                - 10.0_f32.powf(alpha_f * ((t_f + l_u) / 10.0)))
+                / (4.0e-10_f32).powf(0.3 - alpha_f))
+                + 10.0_f32.powf(0.072),
+        )
+}
+
+const MIN_COMPLETE_NORM_PHON: f32 = 20.0;
+const MAX_COMPLETE_NORM_PHON: f32 = 80.0;
+
+const NORM_FREQUENCIES: &[f32] = &[
+    20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0, 400.0,
+    500.0, 630.0, 800.0, 1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0,
+    8000.0, 10000.0, 12500.0,
+];
+
+const MIN_NORM_FREQUENCY: f32 = NORM_FREQUENCIES[0];
+const MAX_NORM_FREQUENCY: f32 = NORM_FREQUENCIES[NORM_FREQUENCIES.len() - 1];
+const NORM_FREQUENCY_COUNT: usize = NORM_FREQUENCIES.len();
+
+const ALPHA_F: &[f32] = &[
+    0.635, 0.602, 0.569, 0.537, 0.509, 0.482, 0.456, 0.433, 0.412, 0.391, 0.373, 0.357, 0.343,
+    0.330, 0.320, 0.311, 0.303, 0.300, 0.295, 0.292, 0.290, 0.290, 0.289, 0.289, 0.289, 0.293,
+    0.303, 0.323, 0.354,
+];
+
+const L_U: &[f32] = &[
+    -31.5, -27.2, -23.1, -19.3, -16.1, -13.1, -10.4, -8.2, -6.3, -4.6, -3.2, -2.1, -1.2, -0.5, 0.0,
+    0.4, 0.5, 0.0, -2.7, -4.2, -1.2, 1.4, 2.3, 1.0, -2.3, -7.2, -11.2, -10.9, -3.5,
+];
+
+const T_F: &[f32] = &[
+    78.1, 68.7, 59.5, 51.1, 44.0, 37.5, 31.5, 26.5, 22.1, 17.9, 14.4, 11.4, 8.6, 6.2, 4.4, 3.0,
+    2.2, 2.4, 3.5, 1.7, -1.3, -4.2, -6.0, -5.4, -1.5, 6.0, 12.6, 13.9, 12.3,
+];
+
+fn approximate_coefficients(frequency: f32) -> (f32, f32, f32) {
+    let frequency = frequency.clamp(MIN_NORM_FREQUENCY, MAX_NORM_FREQUENCY);
+
+    for i in 0..NORM_FREQUENCY_COUNT {
+        let ii = i + 1;
+
+        if NORM_FREQUENCIES[i] == frequency {
+            return (ALPHA_F[i], L_U[i], T_F[i]);
+        }
+
+        if NORM_FREQUENCIES[i] < frequency && frequency < NORM_FREQUENCIES[ii] {
+            let k =
+                (frequency - NORM_FREQUENCIES[i]) / (NORM_FREQUENCIES[ii] - NORM_FREQUENCIES[i]);
+
+            return (
+                (ALPHA_F[ii] - ALPHA_F[i]) * k + ALPHA_F[i],
+                (L_U[ii] - L_U[i]) * k + L_U[i],
+                (T_F[ii] - T_F[i]) * k + T_F[i],
+            );
+        }
+    }
+
+    panic!()
+}
+
 // ----- Below algorithms are taken from https://codepen.io/TF3RDL/pen/MWLzPoO -----
 
 fn map_value(x: f32, min: f32, max: f32, target_min: f32, target_max: f32) -> f32 {
