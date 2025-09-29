@@ -23,7 +23,7 @@
 - use VQT transform
 	- take into account https://en.wikipedia.org/wiki/Just-noticeable_difference and https://en.wikipedia.org/wiki/Auditory_masking when turning parameters
 		- minimum temporal resolution: somewhere between 50-200 ms (see: https://wiki.hydrogenaudio.org/index.php?title=Masking#Temporal_masking, https://ccrma.stanford.edu/~jos/bosse/Human_Audio_Perception_Masking.html)
-- perform loudness normalization
+- aim for 60dB of dynamic range, use loudness normalization
 - overlay channel CQTs, use color coding (similar to ffmpeg showcqt)
 
 ### look into
