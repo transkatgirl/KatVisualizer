@@ -23,7 +23,7 @@
 - use VQT transform
 	- take into account https://en.wikipedia.org/wiki/Just-noticeable_difference and https://en.wikipedia.org/wiki/Auditory_masking when turning parameters
 		- minimum temporal resolution: somewhere between 50-200 ms (see: https://wiki.hydrogenaudio.org/index.php?title=Masking#Temporal_masking, https://ccrma.stanford.edu/~jos/bosse/Human_Audio_Perception_Masking.html)
-- aim for 60dB of dynamic range, use loudness normalization
+- use loudness normalization
 - overlay channel CQTs, use color coding (similar to ffmpeg showcqt)
 
 ### look into
@@ -44,12 +44,12 @@
 
 ## UX
 - allow tuning all key parameters (within the limits of human hearing):
-	- erb scale (default), bark scale, or logarithmic (octave) scale
-	- time-domain / frequency-domain resolution tradeoff
-	- dynamic range / filter side lobe tradeoff
-	- minimum & maximum frequencies
+	- erb scale (default), bark scale, mel scale, or logarithmic (octave) scale
+	- time-domain / frequency-domain resolution tradeoff (default of 75ms - 200ms)
+	- dynamic range / filter side lobe tradeoff (default of 60dB dynamic range)
+	- minimum & maximum frequencies (default of 20Hz - 20kHz)
 	- scroll speed
-	- weighting curve listening volume
+	- weighting curve listening volume (default of 85dB)
 	- color mapping
 	- latency offset
 - allow changing settings in real time
