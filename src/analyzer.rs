@@ -1,13 +1,49 @@
 use std::{collections::VecDeque, f32::consts::PI};
 
-pub(crate) struct BetterAnalyzer {}
+pub struct BetterAnalyzer {}
+
+impl BetterAnalyzer {
+    pub fn new() -> Self {
+        todo!()
+    }
+}
 
 // ----- Below formulas are taken from ISO 226:2023 -----
+
+struct PrecomputedNormalizer {
+    alpha_f: f32,
+    l_u: f32,
+    param_1: f32,
+    param_2: f32,
+    param_3: f32,
+}
+
+impl PrecomputedNormalizer {
+    fn new(frequency: f32) -> Self {
+        let (alpha_f, l_u, t_f) = approximate_coefficients(frequency);
+
+        Self {
+            alpha_f,
+            l_u,
+            param_1: 10.0_f32.powf(alpha_f * ((t_f + l_u) / 10.0)),
+            param_2: (4.0e-10_f32).powf(0.3 - alpha_f),
+            param_3: 10.0_f32.powf(0.072),
+        }
+    }
+    fn spl_to_phon(&self, db_spl: f32) -> f32 {
+        NORM_MULTIPLE
+            * f32::log2(
+                ((10.0_f32.powf(self.alpha_f * ((db_spl + self.l_u) / 10.0)) - self.param_1)
+                    / self.param_2)
+                    + self.param_3,
+            )
+    }
+}
 
 fn spl_to_phon(frequency: f32, db_spl: f32) -> f32 {
     let (alpha_f, l_u, t_f) = approximate_coefficients(frequency);
 
-    (100.0 / 3.0)
+    NORM_MULTIPLE
         * f32::log2(
             ((10.0_f32.powf(alpha_f * ((db_spl + l_u) / 10.0))
                 - 10.0_f32.powf(alpha_f * ((t_f + l_u) / 10.0)))
@@ -18,6 +54,7 @@ fn spl_to_phon(frequency: f32, db_spl: f32) -> f32 {
 
 const MIN_COMPLETE_NORM_PHON: f32 = 20.0;
 const MAX_COMPLETE_NORM_PHON: f32 = 80.0;
+const NORM_MULTIPLE: f32 = 100.0 / 3.0;
 
 const NORM_FREQUENCIES: &[f32] = &[
     20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0, 400.0,
