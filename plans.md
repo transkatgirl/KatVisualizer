@@ -28,9 +28,6 @@
 
 ### look into
 - ac-3 window (https://www.atsc.org/wp-content/uploads/2015/03/A52-201212-17.pdf, https://ieeexplore.ieee.org/document/842996)
-- bark scale
-- erb scale
-	- https://en.wikipedia.org/wiki/Equivalent_rectangular_bandwidth
 - non-linear color mapping, similar to ffmpeg showcqt color mapping and https://github.com/hqrrr/PerceptoMap
 - time-frequency reassignment, like https://github.com/hqrrr/PerceptoMap
 
@@ -47,6 +44,7 @@
 
 ## UX
 - allow tuning all key parameters (within the limits of human hearing):
+	- erb scale (default), bark scale, or logarithmic (octave) scale
 	- time-domain / frequency-domain resolution tradeoff
 	- dynamic range / filter side lobe tradeoff
 	- minimum & maximum frequencies
@@ -79,12 +77,12 @@
 	- transform = variable q
 	- window = hann or hamming
 	- time res = min 75ms, max 200ms
-	- smoothing time constant = -600 db / second
+	- target smoothing time constant = -450 db / second
 		- 75 = -300 db / second @ 120 fps
 		- 65 = -450 db / second @ 120 fps
 		- 56 = -600 db / second @ 120 fps, -300 db / second @ 60 fps
 		- 42 = -450 db / second @ 60 fps
 		- 32 = -600 db / second @ 60 fps
 	- bands per octave = 30
-	- amplitude = 0dB - 70dB
+	- amplitude = 0dB - 60dB, 1, 0.495 custom window function
 	- frequency scale = ERB or log (octaves)
