@@ -19,6 +19,7 @@
 	- 1, 0.499 = 95dB
 	- 1, 0.5 = 100dB
 	- subtract ~15dB to account for weighting function
+	- see also: https://web.archive.org/web/20210122032400/http://hyperphysics.phy-astr.gsu.edu/hbase/sound/mask.html#c3, https://pmc.ncbi.nlm.nih.gov/articles/PMC4753356/#sec6-2331216516630549
 - use ISO 226:2023 equal loudness curve
 - use VQT transform
 	- take into account https://en.wikipedia.org/wiki/Just-noticeable_difference and https://en.wikipedia.org/wiki/Auditory_masking when turning parameters
