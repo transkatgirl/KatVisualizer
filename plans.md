@@ -38,6 +38,7 @@
 - take advantage of WCG & HDR
 - take advantage of high refresh rate and high resolution
 - use window zero-padding to interpolate spectral data, like https://www.dsprelated.com/freebooks/sasp/Spectral_Interpolation.html
+	- unsure how viable this is from a compute standpoint; this needs to run in real time
 
 ## synchronization
 - use cpal::OutputStreamTimestamp.playback to get audio playback offset
@@ -47,10 +48,10 @@
 ## UX
 - allow tuning all key parameters (within the limits of human hearing):
 	- time-domain / frequency-domain resolution tradeoff
+	- dynamic range / filter side lobe tradeoff
 	- minimum & maximum frequencies
 	- scroll speed
-	- weighting curve
-		- if ISO 226:2023, listening volume
+	- weighting curve listening volume
 	- color mapping
 	- latency offset
 - allow changing settings in real time
@@ -58,7 +59,7 @@
 - show frequency and amplitude on hover
 	- show musical notes from frequency
 - allow showing frequency / musical note overlay
-- add options for basic feature extraction:
+- (after implementing core features) add options for basic feature extraction:
 	- chroma (see https://librosa.org/doc/latest/generated/librosa.feature.chroma_cens.html)
 	- spectral centroid
 	- bpm
