@@ -46,6 +46,7 @@
 ## UX
 - allow tuning all key parameters (within the limits of human hearing):
 	- erb scale (default), bark scale, mel scale, or logarithmic (octave) scale
+		- see: https://web.archive.org/web/20110427105916/http://www.ling.su.se/staff/hartmut/bark.htm
 	- time-domain / frequency-domain resolution tradeoff (default of 75ms - 200ms)
 	- dynamic range / filter side lobe tradeoff (default of 60dB dynamic range)
 	- minimum & maximum frequencies (default of 20Hz - 20kHz)
