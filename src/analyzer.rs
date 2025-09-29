@@ -1,10 +1,102 @@
-use std::{collections::VecDeque, f32::consts::PI};
+use std::f32::consts::PI;
 
-pub struct BetterAnalyzer {}
+pub struct BetterAnalyzerConfiguration {
+    pub resolution: usize,
+    pub start_frequency: f32,
+    pub end_frequency: f32,
+    pub log_frequency_scale: bool,
+
+    pub listening_volume: f32,
+
+    pub sample_rate: usize,
+    pub time_resolution: (f32, f32),
+    pub dynamic_range: f32,
+}
+
+pub struct BetterAnalyzer {
+    config: BetterAnalyzerConfiguration,
+    transform: VQsDFT,
+    frequency_bands: Vec<(f32, f32, f32)>,
+    normalizers: Vec<PrecomputedNormalizer>,
+}
 
 impl BetterAnalyzer {
-    pub fn new() -> Self {
-        todo!()
+    pub fn new(config: BetterAnalyzerConfiguration) -> Self {
+        let frequency_scale = if config.log_frequency_scale {
+            FrequencyScale::Logarithmic
+        } else {
+            FrequencyScale::Erb
+        };
+
+        let frequency_bands = frequency_scale.generate_bands(
+            config.resolution,
+            config.start_frequency,
+            config.end_frequency,
+            0.5,
+        );
+
+        let normalizers: Vec<_> = frequency_bands
+            .iter()
+            .map(|band| PrecomputedNormalizer::new(band.center))
+            .collect();
+
+        let normalized_160hz =
+            spl_to_phon(160.0, config.listening_volume) - config.listening_volume;
+
+        let window = if config.dynamic_range >= (95.0 + normalized_160hz) {
+            [1.0, 0.5]
+        } else if config.dynamic_range >= (85.0 + normalized_160hz) {
+            [1.0, 0.499]
+        } else if config.dynamic_range >= (80.0 + normalized_160hz) {
+            [1.0, 0.4982]
+        } else if config.dynamic_range >= (75.0 + normalized_160hz) {
+            [1.0, 0.497]
+        } else if config.dynamic_range >= (70.0 + normalized_160hz) {
+            [1.0, 0.495]
+        } else if config.dynamic_range >= (65.0 + normalized_160hz) {
+            [1.0, 0.493]
+        } else {
+            [1.0, 0.49]
+        };
+
+        let transform = VQsDFT::new(
+            &frequency_bands,
+            &window,
+            config.time_resolution.0,
+            1.0,
+            config.time_resolution.1,
+            config.sample_rate,
+        );
+
+        let frequency_bands: Vec<_> = frequency_bands
+            .iter()
+            .map(|band| (band.low, band.center, band.high))
+            .collect();
+
+        Self {
+            config,
+            transform,
+            frequency_bands,
+            normalizers,
+        }
+    }
+    pub fn config(&self) -> &BetterAnalyzerConfiguration {
+        &self.config
+    }
+    pub fn frequencies(&self) -> &[(f32, f32, f32)] {
+        &self.frequency_bands
+    }
+    pub fn analyze(&mut self, samples: &[f32], listening_volume: f32) -> &[f32] {
+        self.transform.analyze(samples);
+        for (output, normalizer) in self
+            .transform
+            .spectrum_data
+            .iter_mut()
+            .zip(self.normalizers.iter())
+        {
+            *output = normalizer.spl_to_phon(*output + listening_volume) - listening_volume
+        }
+        &self.transform.spectrum_data
     }
 }
 
