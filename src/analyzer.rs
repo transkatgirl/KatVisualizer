@@ -16,12 +16,24 @@ pub struct BetterAnalyzerConfiguration {
 pub struct BetterAnalyzer {
     config: BetterAnalyzerConfiguration,
     transform: VQsDFT,
+    buffer_size: usize,
     frequency_bands: Vec<(f32, f32, f32)>,
     normalizers: Vec<PrecomputedNormalizer>,
 }
 
 impl BetterAnalyzer {
-    pub fn new(config: BetterAnalyzerConfiguration) -> Self {
+    pub fn new(mut config: BetterAnalyzerConfiguration) -> Self {
+        config.start_frequency = config.start_frequency.max(0.0);
+        assert!(config.end_frequency > config.start_frequency);
+        assert!(config.resolution > 0);
+        config.listening_volume = config
+            .listening_volume
+            .clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON);
+        assert!(config.sample_rate > 0);
+        assert!(config.time_resolution.0 <= 1000.0);
+        assert!(config.time_resolution.1 <= 1000.0);
+        assert!(config.dynamic_range > 0.0);
+
         let frequency_scale = if config.log_frequency_scale {
             FrequencyScale::Logarithmic
         } else {
@@ -75,6 +87,7 @@ impl BetterAnalyzer {
 
         Self {
             config,
+            buffer_size: transform.buffer.len(),
             transform,
             frequency_bands,
             normalizers,
@@ -87,7 +100,8 @@ impl BetterAnalyzer {
         &self.frequency_bands
     }
     pub fn analyze(&mut self, samples: &[f32], listening_volume: f32) -> &[f32] {
-        self.transform.analyze(samples);
+        self.transform
+            .analyze(&samples[..self.buffer_size.min(samples.len())]);
         for (output, normalizer) in self
             .transform
             .spectrum_data
