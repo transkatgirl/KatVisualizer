@@ -99,11 +99,14 @@ impl BetterAnalyzer {
     pub fn config(&self) -> &BetterAnalyzerConfiguration {
         &self.config
     }
-    pub fn buffer_size(&self) -> usize {
+    pub fn chunk_size(&self) -> usize {
         self.buffer_size
     }
     pub fn frequencies(&self) -> &[(f32, f32, f32)] {
         &self.frequency_bands
+    }
+    pub fn clear_buffers(&mut self) {
+        self.transform.reset();
     }
     pub fn analyze(&mut self, samples: impl Iterator<Item = f32>, listening_volume: f32) -> &[f32] {
         self.transform.analyze(samples);
@@ -376,7 +379,17 @@ impl VQsDFT {
             buffer_index: buffer_size,
         }
     }
-
+    fn reset(&mut self) {
+        self.buffer.fill(0.0);
+        self.buffer_index = self.buffer.len() - 1;
+        self.coeffs.iter_mut().for_each(|coeff| {
+            coeff.coeffs1.fill((0.0, 0.0));
+            coeff.coeffs2.fill((0.0, 0.0));
+            coeff.coeffs3.fill((0.0, 0.0));
+            coeff.coeffs4.fill((0.0, 0.0));
+            coeff.coeffs5.fill((0.0, 0.0));
+        });
+    }
     fn analyze(&mut self, samples: impl Iterator<Item = f32>) -> &[f32] {
         self.spectrum_data.fill(0.0);
 
