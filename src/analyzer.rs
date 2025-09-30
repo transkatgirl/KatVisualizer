@@ -9,8 +9,6 @@ pub struct BetterAnalyzerConfiguration {
     pub end_frequency: f32,
     pub log_frequency_scale: bool,
 
-    pub listening_volume: f32,
-
     pub sample_rate: usize,
     pub time_resolution: (f32, f32),
     pub dynamic_range: f32,
@@ -29,9 +27,6 @@ impl BetterAnalyzer {
         config.start_frequency = config.start_frequency.max(0.0);
         assert!(config.end_frequency > config.start_frequency);
         assert!(config.resolution > 0);
-        config.listening_volume = config
-            .listening_volume
-            .clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON);
         assert!(config.sample_rate > 0);
         assert!(config.time_resolution.0 <= 1000.0);
         assert!(config.time_resolution.1 <= 1000.0);
@@ -55,8 +50,7 @@ impl BetterAnalyzer {
             .map(|band| PrecomputedNormalizer::new(band.center))
             .collect();
 
-        let normalized_160hz =
-            spl_to_phon(160.0, config.listening_volume) - config.listening_volume;
+        let normalized_160hz = spl_to_phon(160.0, 20.0) - 20.0;
 
         let window = if config.dynamic_range >= (95.0 + normalized_160hz) {
             [1.0, 0.5]
@@ -108,7 +102,13 @@ impl BetterAnalyzer {
     pub fn clear_buffers(&mut self) {
         self.transform.reset();
     }
-    pub fn analyze(&mut self, samples: impl Iterator<Item = f32>, listening_volume: f32) -> &[f32] {
+    pub fn analyze(
+        &mut self,
+        samples: impl Iterator<Item = f32>,
+        mut listening_volume: f32,
+    ) -> &[f32] {
+        listening_volume = listening_volume.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON);
+
         self.transform.analyze(samples);
         for (output, normalizer) in self
             .transform
