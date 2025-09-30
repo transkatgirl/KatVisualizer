@@ -1,7 +1,7 @@
 use nih_plug::prelude::*;
 
-use katvisualizer::Gain;
+use katvisualizer::MyPlugin;
 
 fn main() {
-    nih_export_standalone::<Gain>();
+    nih_export_standalone::<MyPlugin>();
 }
