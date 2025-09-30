@@ -1,5 +1,8 @@
 use std::f32::consts::PI;
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
 pub struct BetterAnalyzerConfiguration {
     pub resolution: usize,
     pub start_frequency: f32,
@@ -96,12 +99,14 @@ impl BetterAnalyzer {
     pub fn config(&self) -> &BetterAnalyzerConfiguration {
         &self.config
     }
+    pub fn buffer_size(&self) -> usize {
+        self.buffer_size
+    }
     pub fn frequencies(&self) -> &[(f32, f32, f32)] {
         &self.frequency_bands
     }
-    pub fn analyze(&mut self, samples: &[f32], listening_volume: f32) -> &[f32] {
-        self.transform
-            .analyze(&samples[..self.buffer_size.min(samples.len())]);
+    pub fn analyze(&mut self, samples: impl Iterator<Item = f32>, listening_volume: f32) -> &[f32] {
+        self.transform.analyze(samples);
         for (output, normalizer) in self
             .transform
             .spectrum_data
@@ -284,7 +289,6 @@ struct VQsDFT {
     spectrum_data: Vec<f32>,
 }
 
-//#[derive(Clone, Copy)]
 struct VQsDFTCoeffs {
     period: f32,
     twiddles: Vec<(f32, f32)>,
@@ -373,14 +377,14 @@ impl VQsDFT {
         }
     }
 
-    fn analyze(&mut self, samples: &[f32]) -> &[f32] {
+    fn analyze(&mut self, samples: impl Iterator<Item = f32>) -> &[f32] {
         self.spectrum_data.fill(0.0);
 
         let buffer_len = self.buffer.len();
 
         for sample in samples {
             self.buffer_index = ((self.buffer_index + 1) % buffer_len + buffer_len) % buffer_len;
-            self.buffer[self.buffer_index] = *sample;
+            self.buffer[self.buffer_index] = sample;
 
             for i in 0..self.coeffs.len() {
                 let coeff = &mut self.coeffs[i];
