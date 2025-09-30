@@ -1,0 +1,56 @@
+[package]
+name    = "katvisualizer"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+members = [
+	"xtask",
+]
+
+[lib]
+crate-type = [
+	"cdylib",
+	"lib",
+]
+
+[dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95", features = [
+	"assert_process_allocs",
+	"standalone",
+] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95" }
+atomic_float = "0.1"
+
+# egui = "0.26"
+# egui-wgpu = "0.26.0"
+# egui-winit = { version = "0.26", default-features = false, features = [
+# 	"links",
+# ] }
+#
+# pixels = "0.15.0"
+#
+# env_logger         = "0.10"
+# error-iter         = "0.4"
+# log                = "0.4"
+# winit              = "0.29"
+# winit_input_helper = "0.15"
+#
+# cpal = "0.16.0"
+# qdft = { git = "https://github.com/jurihock/qdft.git", rev = "682f15392d7cc227229c1af48cef01a583616a53" }
+# dasp-rs = "0.1.1"
+# ebur128 = "0.1.10"
+# fundsp = "0.20.0"
+# rfd = "0.15.4"
+# scirs2-interpolate = "0.1.0-beta.2"
+# rubato = "0.16.2"
+# libsoxr = "0.2.9"
+# anyhow = "1.0.100"
+# hound = "3.5.1"
+# symphonia = "0.5.4"
+# ringbuf = "0.4.8"
+# realfft = "3.5.0"
+
+#[profile.release]
+#opt-level = 3
+#lto       = true
