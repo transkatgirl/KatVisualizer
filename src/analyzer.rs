@@ -150,7 +150,7 @@ impl PrecomputedNormalizer {
     }
 }
 
-fn spl_to_phon(frequency: f32, db_spl: f32) -> f32 {
+/*fn spl_to_phon(frequency: f32, db_spl: f32) -> f32 {
     let (alpha_f, l_u, t_f) = approximate_coefficients(frequency);
 
     NORM_MULTIPLE
@@ -160,7 +160,7 @@ fn spl_to_phon(frequency: f32, db_spl: f32) -> f32 {
                 / (4.0e-10_f32).powf(0.3 - alpha_f))
                 + 10.0_f32.powf(0.072),
         )
-}
+}*/
 
 const MIN_COMPLETE_NORM_PHON: f32 = 20.0;
 const MAX_COMPLETE_NORM_PHON: f32 = 80.0;
@@ -226,8 +226,8 @@ fn map_value(x: f32, min: f32, max: f32, target_min: f32, target_max: f32) -> f3
 enum FrequencyScale {
     Logarithmic,
     Erb,
-    Bark,
-    Mel,
+    /*Bark,
+    Mel,*/
 }
 
 impl FrequencyScale {
@@ -235,16 +235,16 @@ impl FrequencyScale {
         match self {
             Self::Logarithmic => x.log2(),
             Self::Erb => (1.0 + 0.00437 * x).log2(),
-            Self::Bark => (26.81 * x) / (1960.0 + x) - 0.53,
-            Self::Mel => (1.0 + x / 700.0).log2(),
+            /*Self::Bark => (26.81 * x) / (1960.0 + x) - 0.53,
+            Self::Mel => (1.0 + x / 700.0).log2(),*/
         }
     }
     fn inv_scale(&self, x: f32) -> f32 {
         match self {
             Self::Logarithmic => 2.0_f32.powf(x),
             Self::Erb => (1.0 / 0.00437) * ((x.log2()) - 1.0),
-            Self::Bark => 1960.0 / (26.81 / (x + 0.53) - 1.0),
-            Self::Mel => 700.0 * ((x.log2()) - 1.0),
+            /*Self::Bark => 1960.0 / (26.81 / (x + 0.53) - 1.0),
+            Self::Mel => 700.0 * ((x.log2()) - 1.0),*/
         }
     }
     fn generate_bands(&self, n: usize, low: f32, high: f32, bandwidth: f32) -> Vec<FrequencyBand> {
@@ -281,13 +281,13 @@ impl FrequencyScale {
     }
 }
 
-const HANN_WINDOW: &[f32] = &[1.0, 0.5];
+/*const HANN_WINDOW: &[f32] = &[1.0, 0.5];
 #[allow(clippy::excessive_precision)]
-const HAMMING_WINDOW: &[f32] = &[1.0, 0.4259434938430786];
+const HAMMING_WINDOW: &[f32] = &[1.0, 0.4259434938430786];*/
 #[allow(clippy::excessive_precision)]
 const BLACKMAN_WINDOW: &[f32] = &[1.0, 0.595257580280304, 0.0952545627951622];
 #[allow(clippy::excessive_precision)]
-const NUTTALL_WINDOW: &[f32] = &[
+/*const NUTTALL_WINDOW: &[f32] = &[
     1.0,
     0.6850073933601379,
     0.20272639393806458,
@@ -300,8 +300,7 @@ const FLAT_TOP_WINDOW: &[f32] = &[
     0.6430955529212952,
     0.19387830793857574,
     0.016120079904794693,
-];
-
+];*/
 #[derive(Clone)]
 struct VQsDFT {
     coeffs: Vec<VQsDFTCoeffs>,
