@@ -7,6 +7,7 @@ use nih_plug_egui::{
 };
 use std::{
     collections::HashMap,
+    mem,
     sync::{
         Arc, Mutex,
         atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
@@ -17,10 +18,14 @@ use crate::analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration};
 
 mod analyzer;
 
+type AnalyzerOutput = (Vec<f32>, Vec<f32>);
+
 pub struct MyPlugin {
     params: Arc<PluginParams>,
     helper: util::StftHelper<0>,
     analyzers: Arc<Mutex<Option<(BetterAnalyzer, BetterAnalyzer)>>>,
+    analyzer_scratchpad: AnalyzerOutput,
+    analyzer_output: Arc<Mutex<AnalyzerOutput>>,
     block_size: usize,
 }
 
@@ -41,6 +46,11 @@ impl Default for MyPlugin {
             params: Arc::new(PluginParams::default()),
             helper: StftHelper::new(2, 96000, 0),
             analyzers: Arc::new(Mutex::new(None)),
+            analyzer_scratchpad: (Vec::with_capacity(96000), Vec::with_capacity(96000)),
+            analyzer_output: Arc::new(Mutex::new((
+                Vec::with_capacity(96000),
+                Vec::with_capacity(96000),
+            ))),
             block_size: 0,
         }
     }
@@ -202,35 +212,30 @@ impl Plugin for MyPlugin {
                     };
 
                     let output = analyzer.analyze(buffer.iter().cloned(), 80.0);
+
+                    #[allow(clippy::collapsible_else_if)]
+                    if channel_idx == 0 {
+                        if self.analyzer_scratchpad.0.len() == output.len() {
+                            self.analyzer_scratchpad.0.copy_from_slice(buffer);
+                        } else {
+                            self.analyzer_scratchpad.0.clear();
+                            self.analyzer_scratchpad.0.extend_from_slice(buffer);
+                        }
+                    } else {
+                        if self.analyzer_scratchpad.1.len() == output.len() {
+                            self.analyzer_scratchpad.1.copy_from_slice(buffer);
+                        } else {
+                            self.analyzer_scratchpad.1.clear();
+                            self.analyzer_scratchpad.1.extend_from_slice(buffer);
+                        }
+                    }
                 });
+
+            let mut output_lock = self.analyzer_output.lock().unwrap();
+
+            mem::swap(&mut output_lock.0, &mut self.analyzer_scratchpad.0);
+            mem::swap(&mut output_lock.1, &mut self.analyzer_scratchpad.1);
         }
-
-        /*for channel_samples in buffer.iter_samples() {
-            let mut amplitude = 0.0;
-            let num_samples = channel_samples.len();
-
-            let gain = self.params.gain.smoothed.next();
-            for sample in channel_samples {
-                *sample *= gain;
-                amplitude += *sample;
-            }
-
-            // To save resources, a plugin can (and probably should!) only perform expensive
-            // calculations that are only displayed on the GUI while the GUI is open
-            if self.params.editor_state.is_open() {
-                amplitude = (amplitude / num_samples as f32).abs();
-                let current_peak_meter = self.peak_meter.load(std::sync::atomic::Ordering::Relaxed);
-                let new_peak_meter = if amplitude > current_peak_meter {
-                    amplitude
-                } else {
-                    current_peak_meter * self.peak_meter_decay_weight
-                        + amplitude * (1.0 - self.peak_meter_decay_weight)
-                };
-
-                self.peak_meter
-                    .store(new_peak_meter, std::sync::atomic::Ordering::Relaxed)
-            }
-        }*/
 
         ProcessStatus::Normal
     }
