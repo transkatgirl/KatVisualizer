@@ -11,7 +11,6 @@ pub struct BetterAnalyzerConfiguration {
 
     pub sample_rate: usize,
     pub time_resolution: (f32, f32),
-    pub dynamic_range: f32,
 }
 
 pub struct BetterAnalyzer {
@@ -30,7 +29,6 @@ impl BetterAnalyzer {
         assert!(config.sample_rate > 0);
         assert!(config.time_resolution.0 <= 1000.0);
         assert!(config.time_resolution.1 <= 1000.0);
-        assert!(config.dynamic_range > 0.0);
 
         let frequency_scale = if config.log_frequency_scale {
             FrequencyScale::Logarithmic
@@ -50,27 +48,9 @@ impl BetterAnalyzer {
             .map(|band| PrecomputedNormalizer::new(band.center))
             .collect();
 
-        let normalized_160hz = spl_to_phon(160.0, 20.0) - 20.0;
-
-        let window = if config.dynamic_range >= (95.0 + normalized_160hz) {
-            [1.0, 0.5]
-        } else if config.dynamic_range >= (85.0 + normalized_160hz) {
-            [1.0, 0.499]
-        } else if config.dynamic_range >= (80.0 + normalized_160hz) {
-            [1.0, 0.4982]
-        } else if config.dynamic_range >= (75.0 + normalized_160hz) {
-            [1.0, 0.497]
-        } else if config.dynamic_range >= (70.0 + normalized_160hz) {
-            [1.0, 0.495]
-        } else if config.dynamic_range >= (65.0 + normalized_160hz) {
-            [1.0, 0.493]
-        } else {
-            [1.0, 0.49]
-        };
-
         let transform = VQsDFT::new(
             &frequency_bands,
-            &window,
+            BLACKMAN_WINDOW,
             config.time_resolution.0,
             1.0,
             config.time_resolution.1,
@@ -286,6 +266,27 @@ impl FrequencyScale {
     }
 }
 
+const HANN_WINDOW: &[f32] = &[1.0, 0.5];
+#[allow(clippy::excessive_precision)]
+const HAMMING_WINDOW: &[f32] = &[1.0, 0.4259434938430786];
+#[allow(clippy::excessive_precision)]
+const BLACKMAN_WINDOW: &[f32] = &[1.0, 0.595257580280304, 0.0952545627951622];
+#[allow(clippy::excessive_precision)]
+const NUTTALL_WINDOW: &[f32] = &[
+    1.0,
+    0.6850073933601379,
+    0.20272639393806458,
+    0.017719272524118423,
+];
+#[allow(clippy::excessive_precision)]
+const FLAT_TOP_WINDOW: &[f32] = &[
+    1.0,
+    0.966312825679779,
+    0.6430955529212952,
+    0.19387830793857574,
+    0.016120079904794693,
+];
+
 struct VQsDFT {
     coeffs: Vec<VQsDFTCoeffs>,
     buffer: Vec<f32>,
@@ -354,7 +355,7 @@ impl VQsDFT {
                         let k = (x.center * period) / sample_rate_f32 + i_f32;
                         let fid = -2.0 * PI * k;
                         let twid = (2.0 * PI * k) / period;
-                        let reson = 2.0 * f32::cos((2.0 * PI * k) / period);
+                        let reson = 2.0 * f32::cos(twid);
 
                         fiddles.push((f32::cos(fid), f32::sin(fid)));
                         twiddles.push((f32::cos(twid), f32::sin(twid)));
