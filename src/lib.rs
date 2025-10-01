@@ -17,6 +17,7 @@ use std::{
 use crate::analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration};
 
 mod analyzer;
+mod editor;
 
 type AnalyzerOutput = (Vec<f32>, Vec<f32>);
 
@@ -65,10 +66,10 @@ impl Default for PluginParams {
 }
 
 impl Plugin for MyPlugin {
-    const NAME: &'static str = "Gain GUI (egui)";
-    const VENDOR: &'static str = "Moist Plugins GmbH";
-    const URL: &'static str = "https://youtu.be/dQw4w9WgXcQ";
-    const EMAIL: &'static str = "info@example.com";
+    const NAME: &'static str = "KatVisualizer";
+    const VENDOR: &'static str = "transkatgirl";
+    const URL: &'static str = "https://github.com/transkatgirl/katvisualizer";
+    const EMAIL: &'static str = "08detour_dial@icloud.com";
 
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -269,12 +270,12 @@ impl MyPlugin {
 }
 
 impl ClapPlugin for MyPlugin {
-    const CLAP_ID: &'static str = "com.moist-plugins-gmbh-egui.gain-gui";
-    const CLAP_DESCRIPTION: Option<&'static str> = Some("A smoothed gain parameter example plugin");
+    const CLAP_ID: &'static str = "com.transkatgirl.katvisualizer";
+    const CLAP_DESCRIPTION: Option<&'static str> = None;
     const CLAP_MANUAL_URL: Option<&'static str> = Some(Self::URL);
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
     const CLAP_FEATURES: &'static [ClapFeature] = &[
-        ClapFeature::AudioEffect,
+        ClapFeature::Analyzer,
         ClapFeature::Stereo,
         ClapFeature::Mono,
         ClapFeature::Utility,
@@ -282,9 +283,9 @@ impl ClapPlugin for MyPlugin {
 }
 
 impl Vst3Plugin for MyPlugin {
-    const VST3_CLASS_ID: [u8; 16] = *b"GainGuiYeahBoyyy";
+    const VST3_CLASS_ID: [u8; 16] = *b"transkatgirlVizu";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
-        &[Vst3SubCategory::Fx, Vst3SubCategory::Tools];
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Analyzer];
 }
 
 nih_export_clap!(MyPlugin);
