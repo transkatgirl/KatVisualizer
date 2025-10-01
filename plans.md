@@ -9,16 +9,7 @@
 - allow visualizing arbitrary audio devices
 
 ## processing
-- switch window function based on chosen dynamic range
-- window function raw dynamic range
-	- 1, 0.49 = 65dB
-	- 1, 0.493 = 70dB
-	- 1, 0.495 = 75dB
-	- 1, 0.497 = 80dB
-	- 1, 0.4982 = 85dB
-	- 1, 0.499 = 95dB
-	- 1, 0.5 = 100dB
-	- subtract ~15dB to account for weighting function
+- window function: blackman
 	- see also: https://web.archive.org/web/20210122032400/http://hyperphysics.phy-astr.gsu.edu/hbase/sound/mask.html#c3, https://pmc.ncbi.nlm.nih.gov/articles/PMC4753356/#sec6-2331216516630549
 - use ISO 226:2023 equal loudness curve
 - use VQT transform
@@ -75,16 +66,4 @@
 - https://github.com/willianjusten/awesome-audio-visualization?tab=readme-ov-file
 - https://github.com/mfcc64/showcqt-js?tab=readme-ov-file
 - https://codepen.io/TF3RDL/pen/poQJwRW
-- https://codepen.io/TF3RDL/pen/MWLzPoO
-	- transform = variable q
-	- window = hann or hamming
-	- time res = min 75ms, max 200ms
-	- target smoothing time constant = -450 db / second
-		- 75 = -300 db / second @ 120 fps
-		- 65 = -450 db / second @ 120 fps
-		- 56 = -600 db / second @ 120 fps, -300 db / second @ 60 fps
-		- 42 = -450 db / second @ 60 fps
-		- 32 = -600 db / second @ 60 fps
-	- bands per octave = 30
-	- amplitude = 0dB - 60dB, 1, 0.495 custom window function
-	- frequency scale = ERB or log (octaves)
+- https://codepen.io/transkatgirl/pen/XJXdRvr
