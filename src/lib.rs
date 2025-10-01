@@ -182,27 +182,28 @@ impl Plugin for MyPlugin {
         _aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        let mut lock = self.analyzers.lock().unwrap();
-        let analyzers = lock.as_mut().unwrap();
+        if let Ok(mut lock) = self.analyzers.try_lock() {
+            let analyzers = lock.as_mut().unwrap();
 
-        let block_size = analyzers.0.chunk_size();
+            let block_size = analyzers.0.chunk_size();
 
-        if block_size != self.block_size {
-            self.block_size = block_size;
-            self.helper.set_block_size(self.block_size);
-            context.set_latency_samples(self.helper.latency_samples());
+            if block_size != self.block_size {
+                self.block_size = block_size;
+                self.helper.set_block_size(self.block_size);
+                context.set_latency_samples(self.helper.latency_samples());
+            }
+
+            self.helper
+                .process_analyze_only(buffer, self.block_size / 4, |channel_idx, buffer| {
+                    let analyzer = if channel_idx == 0 {
+                        &mut analyzers.0
+                    } else {
+                        &mut analyzers.1
+                    };
+
+                    let output = analyzer.analyze(buffer.iter().cloned(), 80.0);
+                });
         }
-
-        self.helper
-            .process_analyze_only(buffer, self.block_size / 4, |channel_idx, buffer| {
-                let analyzer = if channel_idx == 0 {
-                    &mut analyzers.0
-                } else {
-                    &mut analyzers.1
-                };
-
-                let output = analyzer.analyze(buffer.iter().cloned(), 80.0);
-            });
 
         /*for channel_samples in buffer.iter_samples() {
             let mut amplitude = 0.0;
