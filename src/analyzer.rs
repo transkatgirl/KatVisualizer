@@ -104,6 +104,7 @@ impl BetterAnalyzer {
         listening_volume = listening_volume.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON);
 
         self.transform.analyze(samples);
+
         for (output, normalizer) in self
             .transform
             .spectrum_data
@@ -242,9 +243,9 @@ impl FrequencyScale {
     fn inv_scale(&self, x: f32) -> f32 {
         match self {
             Self::Logarithmic => 2.0_f32.powf(x),
-            Self::Erb => (1.0 / 0.00437) * ((x.log2()) - 1.0),
+            Self::Erb => (1.0 / 0.00437) * ((2.0_f32.powf(x)) - 1.0),
             /*Self::Bark => 1960.0 / (26.81 / (x + 0.53) - 1.0),
-            Self::Mel => 700.0 * ((x.log2()) - 1.0),*/
+            Self::Mel => 700.0 * ((2.0_f32.powf(x)) - 1.0),*/
         }
     }
     fn generate_bands(&self, n: usize, low: f32, high: f32, bandwidth: f32) -> Vec<FrequencyBand> {
@@ -414,13 +415,13 @@ impl VQsDFT {
         let buffer_len = self.buffer.len();
 
         for sample in samples {
-            self.buffer_index = ((self.buffer_index + 1) % buffer_len + buffer_len) % buffer_len;
+            self.buffer_index = (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
             self.buffer[self.buffer_index] = sample;
 
             for i in 0..self.coeffs.len() {
                 let coeff = &mut self.coeffs[i];
                 let kernel_length = coeff.coeffs1.len();
-                let oldest = ((self.buffer_index - coeff.period as usize) % buffer_len
+                let oldest = (((self.buffer_index - coeff.period as usize) % buffer_len)
                     + buffer_len)
                     % buffer_len;
                 let latest = self.buffer_index;
