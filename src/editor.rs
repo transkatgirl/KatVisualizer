@@ -47,7 +47,7 @@ pub fn create(
                                 },
                                 max: Pos2 {
                                     x: (i as f32 * 10.0) + 10.0,
-                                    y: left[i],
+                                    y: left[i].max(right[i]),
                                 },
                             },
                             CornerRadius::ZERO,

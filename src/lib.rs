@@ -131,7 +131,7 @@ impl Plugin for MyPlugin {
             }
 
             self.helper
-                .process_analyze_only(buffer, self.block_size / 4, |channel_idx, buffer| {
+                .process_analyze_only(buffer, 4, |channel_idx, buffer| {
                     let analyzer = if channel_idx == 0 {
                         &mut analyzers.0
                     } else {
