@@ -19,8 +19,11 @@
 - overlay channel CQTs, use color coding (similar to ffmpeg showcqt)
 
 ### look into
+- alternative frequency scales
+	- see: https://www.dsprelated.com/freebooks/sasp/Directions_Improvements.html, https://pubmed.ncbi.nlm.nih.gov/39930567/
 - ac-3 window (https://www.atsc.org/wp-content/uploads/2015/03/A52-201212-17.pdf, https://ieeexplore.ieee.org/document/842996)
 - non-linear color mapping, similar to ffmpeg showcqt color mapping and https://github.com/hqrrr/PerceptoMap
+	- see: https://pmc.ncbi.nlm.nih.gov/articles/PMC1431718/
 - time-frequency reassignment, like https://github.com/hqrrr/PerceptoMap
 
 ## rendering
