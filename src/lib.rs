@@ -1,75 +1,55 @@
-use nih_plug::prelude::*;
+use nih_plug::{prelude::*, util::StftHelper};
 use nih_plug_egui::{
     EguiState, create_egui_editor,
     egui::{self, Vec2},
     resizable_window::ResizableWindow,
     widgets,
 };
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
+    },
+};
 
-/// The time it takes for the peak meter to decay by 12 dB after switching to complete silence.
-const PEAK_METER_DECAY_MS: f64 = 150.0;
+use crate::analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration};
 
-/// This is mostly identical to the gain example, minus some fluff, and with a GUI.
+mod analyzer;
+
 pub struct MyPlugin {
-    params: Arc<GainParams>,
-
-    /// Needed to normalize the peak meter's response based on the sample rate.
-    peak_meter_decay_weight: f32,
-    /// The current data for the peak meter. This is stored as an [`Arc`] so we can share it between
-    /// the GUI and the audio processing parts. If you have more state to share, then it's a good
-    /// idea to put all of that in a struct behind a single `Arc`.
-    ///
-    /// This is stored as voltage gain.
-    peak_meter: Arc<AtomicF32>,
+    params: Arc<PluginParams>,
+    helper: util::StftHelper<0>,
+    analyzers: Arc<Mutex<Option<(BetterAnalyzer, BetterAnalyzer)>>>,
+    block_size: usize,
 }
 
 #[derive(Params)]
-pub struct GainParams {
-    /// The editor state, saved together with the parameter state so the custom scaling can be
-    /// restored.
+pub struct PluginParams {
     #[persist = "editor-state"]
     editor_state: Arc<EguiState>,
-
-    #[id = "gain"]
+    /*#[id = "gain"]
     pub gain: FloatParam,
 
-    // TODO: Remove this parameter when we're done implementing the widgets
     #[id = "foobar"]
-    pub some_int: IntParam,
+    pub some_int: IntParam,*/
 }
 
 impl Default for MyPlugin {
     fn default() -> Self {
         Self {
-            params: Arc::new(GainParams::default()),
-
-            peak_meter_decay_weight: 1.0,
-            peak_meter: Arc::new(AtomicF32::new(util::MINUS_INFINITY_DB)),
+            params: Arc::new(PluginParams::default()),
+            helper: StftHelper::new(2, 96000, 0),
+            analyzers: Arc::new(Mutex::new(None)),
+            block_size: 0,
         }
     }
 }
 
-impl Default for GainParams {
+impl Default for PluginParams {
     fn default() -> Self {
         Self {
             editor_state: EguiState::from_size(300, 180),
-
-            // See the main gain example for more details
-            gain: FloatParam::new(
-                "Gain",
-                util::db_to_gain(0.0),
-                FloatRange::Skewed {
-                    min: util::db_to_gain(-30.0),
-                    max: util::db_to_gain(30.0),
-                    factor: FloatRange::gain_skew_factor(-30.0, 30.0),
-                },
-            )
-            .with_smoother(SmoothingStyle::Logarithmic(50.0))
-            .with_unit(" dB")
-            .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
-            .with_string_to_value(formatters::s2v_f32_gain_to_db()),
-            some_int: IntParam::new("Something", 3, IntRange::Linear { min: 0, max: 3 }),
         }
     }
 }
@@ -105,7 +85,7 @@ impl Plugin for MyPlugin {
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        let params = self.params.clone();
+        /*let params = self.params.clone();
         let peak_meter = self.peak_meter.clone();
         let egui_state = params.editor_state.clone();
         create_egui_editor(
@@ -167,20 +147,31 @@ impl Plugin for MyPlugin {
                         );
                     });
             },
-        )
+        )*/
+
+        None
     }
 
     fn initialize(
         &mut self,
         _audio_io_layout: &AudioIOLayout,
         buffer_config: &BufferConfig,
-        _context: &mut impl InitContext<Self>,
+        context: &mut impl InitContext<Self>,
     ) -> bool {
-        // After `PEAK_METER_DECAY_MS` milliseconds of pure silence, the peak meter's value should
-        // have dropped by 12 dB
-        self.peak_meter_decay_weight = 0.25f64
-            .powf((buffer_config.sample_rate as f64 * PEAK_METER_DECAY_MS / 1000.0).recip())
-            as f32;
+        let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
+            resolution: 300,
+            start_frequency: 20.0,
+            end_frequency: 20000.0,
+            log_frequency_scale: false,
+            sample_rate: buffer_config.sample_rate as usize,
+            time_resolution: (75.0, 200.0),
+        });
+        self.block_size = analyzer.chunk_size();
+
+        self.analyzers = Arc::new(Mutex::new(Some((analyzer.clone(), analyzer))));
+
+        self.helper.set_block_size(self.block_size);
+        context.set_latency_samples(self.helper.latency_samples());
 
         true
     }
@@ -189,9 +180,31 @@ impl Plugin for MyPlugin {
         &mut self,
         buffer: &mut Buffer,
         _aux: &mut AuxiliaryBuffers,
-        _context: &mut impl ProcessContext<Self>,
+        context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        for channel_samples in buffer.iter_samples() {
+        let mut lock = self.analyzers.lock().unwrap();
+        let analyzers = lock.as_mut().unwrap();
+
+        let block_size = analyzers.0.chunk_size();
+
+        if block_size != self.block_size {
+            self.block_size = block_size;
+            self.helper.set_block_size(self.block_size);
+            context.set_latency_samples(self.helper.latency_samples());
+        }
+
+        self.helper
+            .process_analyze_only(buffer, self.block_size / 4, |channel_idx, buffer| {
+                let analyzer = if channel_idx == 0 {
+                    &mut analyzers.0
+                } else {
+                    &mut analyzers.1
+                };
+
+                let output = analyzer.analyze(buffer.iter().cloned(), 80.0);
+            });
+
+        /*for channel_samples in buffer.iter_samples() {
             let mut amplitude = 0.0;
             let num_samples = channel_samples.len();
 
@@ -216,9 +229,36 @@ impl Plugin for MyPlugin {
                 self.peak_meter
                     .store(new_peak_meter, std::sync::atomic::Ordering::Relaxed)
             }
-        }
+        }*/
 
         ProcessStatus::Normal
+    }
+}
+
+impl MyPlugin {
+    fn update_config(
+        &self,
+        resolution: usize,
+        start_frequency: f32,
+        end_frequency: f32,
+        log_frequency_scale: bool,
+        time_resolution: (f32, f32),
+    ) {
+        let mut lock = self.analyzers.lock().unwrap();
+        let analyzers = lock.as_mut().unwrap();
+        let sample_rate = analyzers.0.config().sample_rate;
+
+        let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
+            resolution,
+            start_frequency,
+            end_frequency,
+            log_frequency_scale,
+            sample_rate,
+            time_resolution,
+        });
+
+        analyzers.0 = analyzer.clone();
+        analyzers.1 = analyzer;
     }
 }
 

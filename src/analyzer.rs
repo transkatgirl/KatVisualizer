@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BetterAnalyzerConfiguration {
     pub resolution: usize,
     pub start_frequency: f32,
@@ -13,6 +13,20 @@ pub struct BetterAnalyzerConfiguration {
     pub time_resolution: (f32, f32),
 }
 
+impl Default for BetterAnalyzerConfiguration {
+    fn default() -> Self {
+        Self {
+            resolution: 300,
+            start_frequency: 20.0,
+            end_frequency: 20000.0,
+            log_frequency_scale: false,
+            sample_rate: 48000,
+            time_resolution: (75.0, 200.0),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct BetterAnalyzer {
     config: BetterAnalyzerConfiguration,
     transform: VQsDFT,
@@ -105,6 +119,7 @@ impl BetterAnalyzer {
 
 // ----- Below formulas are taken from ISO 226:2023 -----
 
+#[derive(Clone)]
 struct PrecomputedNormalizer {
     alpha_f: f32,
     l_u: f32,
@@ -287,6 +302,7 @@ const FLAT_TOP_WINDOW: &[f32] = &[
     0.016120079904794693,
 ];
 
+#[derive(Clone)]
 struct VQsDFT {
     coeffs: Vec<VQsDFTCoeffs>,
     buffer: Vec<f32>,
@@ -294,6 +310,7 @@ struct VQsDFT {
     spectrum_data: Vec<f32>,
 }
 
+#[derive(Clone)]
 struct VQsDFTCoeffs {
     period: f32,
     twiddles: Vec<(f32, f32)>,
