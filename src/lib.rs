@@ -1,9 +1,7 @@
 use nih_plug::{prelude::*, util::StftHelper};
 use nih_plug_egui::EguiState;
-use std::{
-    mem,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
+use triple_buffer::{Input, Output, triple_buffer};
 
 use crate::analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration};
 
@@ -17,8 +15,8 @@ pub struct MyPlugin {
     params: Arc<PluginParams>,
     helper: util::StftHelper<0>,
     analyzers: AnalyzerSet,
-    analyzer_scratchpad: AnalyzerOutput,
-    analyzer_output: Arc<Mutex<AnalyzerOutput>>,
+    analyzer_input: Input<AnalyzerOutput>,
+    analyzer_output: Arc<Mutex<Output<AnalyzerOutput>>>,
     block_size: usize,
 }
 
@@ -30,15 +28,15 @@ pub struct PluginParams {
 
 impl Default for MyPlugin {
     fn default() -> Self {
+        let (analyzer_input, analyzer_output) =
+            triple_buffer(&(Vec::with_capacity(96000), Vec::with_capacity(96000)));
+
         Self {
             params: Arc::new(PluginParams::default()),
             helper: StftHelper::new(2, 96000, 0),
             analyzers: Arc::new(Mutex::new(None)),
-            analyzer_scratchpad: (Vec::with_capacity(96000), Vec::with_capacity(96000)),
-            analyzer_output: Arc::new(Mutex::new((
-                Vec::with_capacity(96000),
-                Vec::with_capacity(96000),
-            ))),
+            analyzer_input,
+            analyzer_output: Arc::new(Mutex::new(analyzer_output)),
             block_size: 0,
         }
     }
@@ -86,6 +84,7 @@ impl Plugin for MyPlugin {
         editor::create(
             self.params.clone(),
             AnalyzerSetWrapper::new(self.analyzers.clone()),
+            self.analyzer_output.clone(),
             async_executor,
         )
     }
@@ -141,28 +140,25 @@ impl Plugin for MyPlugin {
 
                     let output = analyzer.analyze(buffer.iter().cloned(), 80.0);
 
+                    let mut write_buffer = self.analyzer_input.input_buffer_publisher();
+
                     #[allow(clippy::collapsible_else_if)]
                     if channel_idx == 0 {
-                        if self.analyzer_scratchpad.0.len() == output.len() {
-                            self.analyzer_scratchpad.0.copy_from_slice(buffer);
+                        if write_buffer.0.len() == output.len() {
+                            write_buffer.0.copy_from_slice(buffer);
                         } else {
-                            self.analyzer_scratchpad.0.clear();
-                            self.analyzer_scratchpad.0.extend_from_slice(buffer);
+                            write_buffer.0.clear();
+                            write_buffer.0.extend_from_slice(buffer);
                         }
                     } else {
-                        if self.analyzer_scratchpad.1.len() == output.len() {
-                            self.analyzer_scratchpad.1.copy_from_slice(buffer);
+                        if write_buffer.1.len() == output.len() {
+                            write_buffer.1.copy_from_slice(buffer);
                         } else {
-                            self.analyzer_scratchpad.1.clear();
-                            self.analyzer_scratchpad.1.extend_from_slice(buffer);
+                            write_buffer.1.clear();
+                            write_buffer.1.extend_from_slice(buffer);
                         }
                     }
                 });
-
-            let mut output_lock = self.analyzer_output.lock().unwrap();
-
-            mem::swap(&mut output_lock.0, &mut self.analyzer_scratchpad.0);
-            mem::swap(&mut output_lock.1, &mut self.analyzer_scratchpad.1);
         }
 
         ProcessStatus::Normal
