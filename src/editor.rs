@@ -38,16 +38,32 @@ pub fn create(
                     let mut lock = analyzer_output.lock().unwrap();
                     let (left, right) = lock.read();
 
-                    for i in 0..left.len() {
+                    let bands = left.iter().zip(right.iter()).enumerate();
+
+                    for (i, (left, right)) in bands {
                         painter.rect_filled(
                             Rect {
                                 min: Pos2 {
-                                    x: i as f32 * 10.0,
+                                    x: i as f32,
                                     y: 0.0,
                                 },
                                 max: Pos2 {
-                                    x: (i as f32 * 10.0) + 10.0,
-                                    y: left[i].max(right[i]),
+                                    x: i as f32 + 1.0,
+                                    y: *left,
+                                },
+                            },
+                            CornerRadius::ZERO,
+                            Color32::BLUE,
+                        );
+                        painter.rect_filled(
+                            Rect {
+                                min: Pos2 {
+                                    x: i as f32,
+                                    y: 0.0,
+                                },
+                                max: Pos2 {
+                                    x: i as f32 + 1.0,
+                                    y: *right,
                                 },
                             },
                             CornerRadius::ZERO,

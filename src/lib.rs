@@ -96,7 +96,7 @@ impl Plugin for MyPlugin {
         context: &mut impl InitContext<Self>,
     ) -> bool {
         let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
-            resolution: 300,
+            resolution: 100,
             start_frequency: 20.0,
             end_frequency: 20000.0,
             log_frequency_scale: false,
@@ -130,6 +130,8 @@ impl Plugin for MyPlugin {
                 context.set_latency_samples(self.helper.latency_samples());
             }
 
+            let mut write_buffer = self.analyzer_input.input_buffer_publisher();
+
             self.helper
                 .process_analyze_only(buffer, 4, |channel_idx, buffer| {
                     let analyzer = if channel_idx == 0 {
@@ -139,8 +141,6 @@ impl Plugin for MyPlugin {
                     };
 
                     let output = analyzer.analyze(buffer.iter().cloned(), 80.0);
-
-                    let mut write_buffer = self.analyzer_input.input_buffer_publisher();
 
                     #[allow(clippy::collapsible_else_if)]
                     if channel_idx == 0 {
