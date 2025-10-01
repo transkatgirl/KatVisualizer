@@ -116,7 +116,8 @@ impl BetterAnalyzer {
             .iter_mut()
             .zip(self.normalizers.iter())
         {
-            *output = normalizer.spl_to_phon(*output + listening_volume) - listening_volume
+            *output = normalizer.spl_to_phon((20.0 * f32::log10(*output)) + listening_volume)
+                - listening_volume
         }
         &self.transform.spectrum_data
     }
