@@ -36,14 +36,14 @@ pub fn create(
             ResizableWindow::new("res-wind")
                 .min_size(Vec2::new(128.0, 128.0))
                 .show(egui_ctx, egui_state.as_ref(), |ui| {
-                    let painter = ui.painter();
+                    let start = Instant::now();
 
-                    let now = Instant::now();
+                    let painter = ui.painter();
 
                     let mut lock = analyzer_output.lock().unwrap();
                     let (left, right, processing_duration, timestamp) = lock.read();
 
-                    let buffering_duration = now.duration_since(*timestamp);
+                    let buffering_duration = start.duration_since(*timestamp);
 
                     let bands = left.iter().zip(right.iter()).enumerate();
 
@@ -101,7 +101,7 @@ pub fn create(
                         painter.text(
                             Pos2 {
                                 x: max_x - 32.0,
-                                y: 48.0,
+                                y: 64.0,
                             },
                             Align2::RIGHT_BOTTOM,
                             format!(
@@ -123,7 +123,7 @@ pub fn create(
                         painter.text(
                             Pos2 {
                                 x: max_x - 32.0,
-                                y: 64.0,
+                                y: 80.0,
                             },
                             Align2::RIGHT_BOTTOM,
                             format!(
@@ -147,7 +147,6 @@ pub fn create(
                     let mut last_frame = last_frame.lock().unwrap();
                     let now = Instant::now();
                     let frame_elapsed = now.duration_since(*last_frame);
-
                     painter.text(
                         Pos2 {
                             x: max_x - 32.0,
@@ -162,6 +161,26 @@ pub fn create(
                         if frame_elapsed > Duration::from_millis(33) {
                             Color32::RED
                         } else if frame_elapsed > Duration::from_millis(18) {
+                            Color32::YELLOW
+                        } else {
+                            Color32::from_rgb(224, 224, 224)
+                        },
+                    );
+                    let draw_elapsed = now.duration_since(start);
+                    painter.text(
+                        Pos2 {
+                            x: max_x - 32.0,
+                            y: 48.0,
+                        },
+                        Align2::RIGHT_BOTTOM,
+                        format!("{:.1}ms composite", draw_elapsed.as_secs_f64() * 1000.0),
+                        FontId {
+                            size: 12.0,
+                            family: egui::FontFamily::Monospace,
+                        },
+                        if draw_elapsed > Duration::from_millis(4) {
+                            Color32::RED
+                        } else if draw_elapsed > Duration::from_millis(2) {
                             Color32::YELLOW
                         } else {
                             Color32::from_rgb(224, 224, 224)
