@@ -145,17 +145,17 @@ impl Plugin for MyPlugin {
                     #[allow(clippy::collapsible_else_if)]
                     if channel_idx == 0 {
                         if write_buffer.0.len() == output.len() {
-                            write_buffer.0.copy_from_slice(buffer);
+                            write_buffer.0.copy_from_slice(output);
                         } else {
                             write_buffer.0.clear();
-                            write_buffer.0.extend_from_slice(buffer);
+                            write_buffer.0.extend_from_slice(output);
                         }
                     } else {
                         if write_buffer.1.len() == output.len() {
-                            write_buffer.1.copy_from_slice(buffer);
+                            write_buffer.1.copy_from_slice(output);
                         } else {
                             write_buffer.1.clear();
-                            write_buffer.1.extend_from_slice(buffer);
+                            write_buffer.1.extend_from_slice(output);
                         }
                     }
                 });
