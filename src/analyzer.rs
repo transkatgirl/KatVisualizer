@@ -2,8 +2,6 @@ use std::f64::consts::PI;
 
 use serde::{Deserialize, Serialize};
 
-// TODO: Evaluate switching to f64
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BetterAnalyzerConfiguration {
     pub resolution: usize,
