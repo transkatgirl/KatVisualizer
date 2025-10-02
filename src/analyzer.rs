@@ -113,8 +113,8 @@ impl BetterAnalyzer {
             .iter_mut()
             .zip(self.normalizers.iter())
         {
-            // *output = normalizer.spl_to_phon((20.0 * f64::log10(*output)) + listening_volume) - listening_volume
-            *output = 20.0 * f64::log10(*output) // ! FIXME
+            *output = normalizer.spl_to_phon((20.0 * f64::log10(*output)) + listening_volume)
+                - listening_volume
         }
 
         &self.transform.spectrum_data
@@ -146,7 +146,7 @@ impl PrecomputedNormalizer {
     }
     fn spl_to_phon(&self, db_spl: f64) -> f64 {
         NORM_MULTIPLE
-            * f64::log2(
+            * f64::log10(
                 ((10.0_f64.powf(self.alpha_f * ((db_spl + self.l_u) / 10.0)) - self.param_1)
                     / self.param_2)
                     + self.param_3,
@@ -158,7 +158,7 @@ impl PrecomputedNormalizer {
     let (alpha_f, l_u, t_f) = approximate_coefficients(frequency);
 
     NORM_MULTIPLE
-        * f64::log2(
+        * f64::log10(
             ((10.0_f64.powf(alpha_f * ((db_spl + l_u) / 10.0))
                 - 10.0_f64.powf(alpha_f * ((t_f + l_u) / 10.0)))
                 / (4.0e-10_f64).powf(0.3 - alpha_f))
