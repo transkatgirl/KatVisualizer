@@ -120,7 +120,7 @@ impl Plugin for MyPlugin {
         if let Ok(mut lock) = self.analyzers.try_lock() {
             let analyzers = lock.as_mut().unwrap();
 
-            let mut write_buffer = self.analyzer_input.input_buffer_publisher();
+            let dual_channel = buffer.channels() == 2;
 
             self.helper
                 .process_analyze_only(buffer, 1, |channel_idx, buffer| {
@@ -132,6 +132,8 @@ impl Plugin for MyPlugin {
 
                     let output = analyzer.analyze(buffer.iter().map(|s| *s as f64), 80.0);
 
+                    let write_buffer = self.analyzer_input.input_buffer_mut();
+
                     #[allow(clippy::collapsible_else_if)]
                     if channel_idx == 0 {
                         if write_buffer.0.len() == output.len() {
@@ -140,6 +142,9 @@ impl Plugin for MyPlugin {
                             write_buffer.0.clear();
                             write_buffer.0.extend_from_slice(output);
                         }
+                        if !dual_channel {
+                            self.analyzer_input.publish();
+                        }
                     } else {
                         if write_buffer.1.len() == output.len() {
                             write_buffer.1.copy_from_slice(output);
@@ -147,6 +152,7 @@ impl Plugin for MyPlugin {
                             write_buffer.1.clear();
                             write_buffer.1.extend_from_slice(output);
                         }
+                        self.analyzer_input.publish();
                     }
                 });
         }
