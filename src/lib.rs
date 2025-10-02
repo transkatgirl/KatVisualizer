@@ -9,7 +9,7 @@ pub mod analyzer;
 mod editor;
 
 type AnalyzerSet = Arc<Mutex<Option<(BetterAnalyzer, BetterAnalyzer)>>>;
-type AnalyzerOutput = (Vec<f32>, Vec<f32>);
+type AnalyzerOutput = (Vec<f64>, Vec<f64>);
 
 pub struct MyPlugin {
     params: Arc<PluginParams>,
@@ -140,7 +140,7 @@ impl Plugin for MyPlugin {
                         &mut analyzers.1
                     };
 
-                    let output = analyzer.analyze(buffer.iter().cloned(), 80.0);
+                    let output = analyzer.analyze(buffer.iter().map(|s| *s as f64), 80.0);
 
                     #[allow(clippy::collapsible_else_if)]
                     if channel_idx == 0 {
@@ -178,10 +178,10 @@ impl AnalyzerSetWrapper {
     pub(crate) fn update_config(
         &self,
         resolution: usize,
-        start_frequency: f32,
-        end_frequency: f32,
+        start_frequency: f64,
+        end_frequency: f64,
         log_frequency_scale: bool,
-        time_resolution: (f32, f32),
+        time_resolution: (f64, f64),
     ) {
         let mut lock = self.analyzers.lock().unwrap();
         let analyzers = lock.as_mut().unwrap();

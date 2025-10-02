@@ -1,4 +1,4 @@
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 
 use serde::{Deserialize, Serialize};
 
@@ -7,12 +7,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BetterAnalyzerConfiguration {
     pub resolution: usize,
-    pub start_frequency: f32,
-    pub end_frequency: f32,
+    pub start_frequency: f64,
+    pub end_frequency: f64,
     pub log_frequency_scale: bool,
 
     pub sample_rate: usize,
-    pub time_resolution: (f32, f32),
+    pub time_resolution: (f64, f64),
 }
 
 impl Default for BetterAnalyzerConfiguration {
@@ -33,7 +33,7 @@ pub struct BetterAnalyzer {
     config: BetterAnalyzerConfiguration,
     transform: VQsDFT,
     buffer_size: usize,
-    frequency_bands: Vec<(f32, f32, f32)>,
+    frequency_bands: Vec<(f64, f64, f64)>,
     normalizers: Vec<PrecomputedNormalizer>,
 }
 
@@ -92,7 +92,7 @@ impl BetterAnalyzer {
     pub fn chunk_size(&self) -> usize {
         self.buffer_size
     }
-    pub fn frequencies(&self) -> &[(f32, f32, f32)] {
+    pub fn frequencies(&self) -> &[(f64, f64, f64)] {
         &self.frequency_bands
     }
     pub fn clear_buffers(&mut self) {
@@ -100,9 +100,9 @@ impl BetterAnalyzer {
     }
     pub fn analyze(
         &mut self,
-        samples: impl Iterator<Item = f32>,
-        mut listening_volume: f32,
-    ) -> &[f32] {
+        samples: impl Iterator<Item = f64>,
+        mut listening_volume: f64,
+    ) -> &[f64] {
         listening_volume = listening_volume.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON);
 
         self.transform.analyze(samples);
@@ -113,8 +113,8 @@ impl BetterAnalyzer {
             .iter_mut()
             .zip(self.normalizers.iter())
         {
-            *output = normalizer.spl_to_phon((20.0 * f32::log10(*output)) + listening_volume)
-                - listening_volume
+            // *output = normalizer.spl_to_phon((20.0 * f64::log10(*output)) + listening_volume) - listening_volume
+            *output = 20.0 * f64::log10(*output) // ! FIXME
         }
 
         &self.transform.spectrum_data
@@ -125,78 +125,78 @@ impl BetterAnalyzer {
 
 #[derive(Clone)]
 struct PrecomputedNormalizer {
-    alpha_f: f32,
-    l_u: f32,
-    param_1: f32,
-    param_2: f32,
-    param_3: f32,
+    alpha_f: f64,
+    l_u: f64,
+    param_1: f64,
+    param_2: f64,
+    param_3: f64,
 }
 
 impl PrecomputedNormalizer {
-    fn new(frequency: f32) -> Self {
+    fn new(frequency: f64) -> Self {
         let (alpha_f, l_u, t_f) = approximate_coefficients(frequency);
 
         Self {
             alpha_f,
             l_u,
-            param_1: 10.0_f32.powf(alpha_f * ((t_f + l_u) / 10.0)),
-            param_2: (4.0e-10_f32).powf(0.3 - alpha_f),
-            param_3: 10.0_f32.powf(0.072),
+            param_1: 10.0_f64.powf(alpha_f * ((t_f + l_u) / 10.0)),
+            param_2: (4.0e-10_f64).powf(0.3 - alpha_f),
+            param_3: 10.0_f64.powf(0.072),
         }
     }
-    fn spl_to_phon(&self, db_spl: f32) -> f32 {
+    fn spl_to_phon(&self, db_spl: f64) -> f64 {
         NORM_MULTIPLE
-            * f32::log2(
-                ((10.0_f32.powf(self.alpha_f * ((db_spl + self.l_u) / 10.0)) - self.param_1)
+            * f64::log2(
+                ((10.0_f64.powf(self.alpha_f * ((db_spl + self.l_u) / 10.0)) - self.param_1)
                     / self.param_2)
                     + self.param_3,
             )
     }
 }
 
-/*fn spl_to_phon(frequency: f32, db_spl: f32) -> f32 {
+/*fn spl_to_phon(frequency: f64, db_spl: f64) -> f64 {
     let (alpha_f, l_u, t_f) = approximate_coefficients(frequency);
 
     NORM_MULTIPLE
-        * f32::log2(
-            ((10.0_f32.powf(alpha_f * ((db_spl + l_u) / 10.0))
-                - 10.0_f32.powf(alpha_f * ((t_f + l_u) / 10.0)))
-                / (4.0e-10_f32).powf(0.3 - alpha_f))
-                + 10.0_f32.powf(0.072),
+        * f64::log2(
+            ((10.0_f64.powf(alpha_f * ((db_spl + l_u) / 10.0))
+                - 10.0_f64.powf(alpha_f * ((t_f + l_u) / 10.0)))
+                / (4.0e-10_f64).powf(0.3 - alpha_f))
+                + 10.0_f64.powf(0.072),
         )
 }*/
 
-const MIN_COMPLETE_NORM_PHON: f32 = 20.0;
-const MAX_COMPLETE_NORM_PHON: f32 = 80.0;
-const NORM_MULTIPLE: f32 = 100.0 / 3.0;
+const MIN_COMPLETE_NORM_PHON: f64 = 20.0;
+const MAX_COMPLETE_NORM_PHON: f64 = 80.0;
+const NORM_MULTIPLE: f64 = 100.0 / 3.0;
 
-const NORM_FREQUENCIES: &[f32] = &[
+const NORM_FREQUENCIES: &[f64] = &[
     20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0, 400.0,
     500.0, 630.0, 800.0, 1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0,
     8000.0, 10000.0, 12500.0,
 ];
 
-const MIN_NORM_FREQUENCY: f32 = NORM_FREQUENCIES[0];
-const MAX_NORM_FREQUENCY: f32 = NORM_FREQUENCIES[NORM_FREQUENCIES.len() - 1];
+const MIN_NORM_FREQUENCY: f64 = NORM_FREQUENCIES[0];
+const MAX_NORM_FREQUENCY: f64 = NORM_FREQUENCIES[NORM_FREQUENCIES.len() - 1];
 const NORM_FREQUENCY_COUNT: usize = NORM_FREQUENCIES.len();
 
-const ALPHA_F: &[f32] = &[
+const ALPHA_F: &[f64] = &[
     0.635, 0.602, 0.569, 0.537, 0.509, 0.482, 0.456, 0.433, 0.412, 0.391, 0.373, 0.357, 0.343,
     0.330, 0.320, 0.311, 0.303, 0.300, 0.295, 0.292, 0.290, 0.290, 0.289, 0.289, 0.289, 0.293,
     0.303, 0.323, 0.354,
 ];
 
-const L_U: &[f32] = &[
+const L_U: &[f64] = &[
     -31.5, -27.2, -23.1, -19.3, -16.1, -13.1, -10.4, -8.2, -6.3, -4.6, -3.2, -2.1, -1.2, -0.5, 0.0,
     0.4, 0.5, 0.0, -2.7, -4.2, -1.2, 1.4, 2.3, 1.0, -2.3, -7.2, -11.2, -10.9, -3.5,
 ];
 
-const T_F: &[f32] = &[
+const T_F: &[f64] = &[
     78.1, 68.7, 59.5, 51.1, 44.0, 37.5, 31.5, 26.5, 22.1, 17.9, 14.4, 11.4, 8.6, 6.2, 4.4, 3.0,
     2.2, 2.4, 3.5, 1.7, -1.3, -4.2, -6.0, -5.4, -1.5, 6.0, 12.6, 13.9, 12.3,
 ];
 
-fn approximate_coefficients(frequency: f32) -> (f32, f32, f32) {
+fn approximate_coefficients(frequency: f64) -> (f64, f64, f64) {
     let frequency = frequency.clamp(MIN_NORM_FREQUENCY, MAX_NORM_FREQUENCY);
 
     for i in 0..NORM_FREQUENCY_COUNT {
@@ -223,7 +223,7 @@ fn approximate_coefficients(frequency: f32) -> (f32, f32, f32) {
 
 // ----- Below algorithms are taken from https://codepen.io/TF3RDL/pen/MWLzPoO -----
 
-fn map_value(x: f32, min: f32, max: f32, target_min: f32, target_max: f32) -> f32 {
+fn map_value(x: f64, min: f64, max: f64, target_min: f64, target_max: f64) -> f64 {
     (x - min) / (max - min) * (target_max - target_min) + target_min
 }
 
@@ -235,7 +235,7 @@ enum FrequencyScale {
 }
 
 impl FrequencyScale {
-    fn scale(&self, x: f32) -> f32 {
+    fn scale(&self, x: f64) -> f64 {
         match self {
             Self::Logarithmic => x.log2(),
             Self::Erb => (1.0 + 0.00437 * x).log2(),
@@ -243,19 +243,19 @@ impl FrequencyScale {
             Self::Mel => (1.0 + x / 700.0).log2(),*/
         }
     }
-    fn inv_scale(&self, x: f32) -> f32 {
+    fn inv_scale(&self, x: f64) -> f64 {
         match self {
-            Self::Logarithmic => 2.0_f32.powf(x),
-            Self::Erb => (1.0 / 0.00437) * ((2.0_f32.powf(x)) - 1.0),
+            Self::Logarithmic => 2.0_f64.powf(x),
+            Self::Erb => (1.0 / 0.00437) * ((2.0_f64.powf(x)) - 1.0),
             /*Self::Bark => 1960.0 / (26.81 / (x + 0.53) - 1.0),
-            Self::Mel => 700.0 * ((2.0_f32.powf(x)) - 1.0),*/
+            Self::Mel => 700.0 * ((2.0_f64.powf(x)) - 1.0),*/
         }
     }
-    fn generate_bands(&self, n: usize, low: f32, high: f32, bandwidth: f32) -> Vec<FrequencyBand> {
+    fn generate_bands(&self, n: usize, low: f64, high: f64, bandwidth: f64) -> Vec<FrequencyBand> {
         (0..n)
             .map(|i| {
-                let i = i as f32;
-                let target_max = (n - 1) as f32;
+                let i = i as f64;
+                let target_max = (n - 1) as f64;
 
                 FrequencyBand {
                     low: self.inv_scale(map_value(
@@ -285,20 +285,20 @@ impl FrequencyScale {
     }
 }
 
-/*const HANN_WINDOW: &[f32] = &[1.0, 0.5];
+/*const HANN_WINDOW: &[f64] = &[1.0, 0.5];
 #[allow(clippy::excessive_precision)]
-const HAMMING_WINDOW: &[f32] = &[1.0, 0.4259434938430786];*/
+const HAMMING_WINDOW: &[f64] = &[1.0, 0.4259434938430786];*/
 #[allow(clippy::excessive_precision)]
-const BLACKMAN_WINDOW: &[f32] = &[1.0, 0.595257580280304, 0.0952545627951622];
+const BLACKMAN_WINDOW: &[f64] = &[1.0, 0.595257580280304, 0.0952545627951622];
 #[allow(clippy::excessive_precision)]
-/*const NUTTALL_WINDOW: &[f32] = &[
+/*const NUTTALL_WINDOW: &[f64] = &[
     1.0,
     0.6850073933601379,
     0.20272639393806458,
     0.017719272524118423,
 ];
 #[allow(clippy::excessive_precision)]
-const FLAT_TOP_WINDOW: &[f32] = &[
+const FLAT_TOP_WINDOW: &[f64] = &[
     1.0,
     0.966312825679779,
     0.6430955529212952,
@@ -308,43 +308,43 @@ const FLAT_TOP_WINDOW: &[f32] = &[
 #[derive(Clone)]
 struct VQsDFT {
     coeffs: Vec<VQsDFTCoeffs>,
-    gains: Vec<f32>,
-    buffer: Vec<f32>,
+    gains: Vec<f64>,
+    buffer: Vec<f64>,
     buffer_index: usize,
-    spectrum_data: Vec<f32>,
+    spectrum_data: Vec<f64>,
 }
 
 #[derive(Clone)]
 struct VQsDFTCoeffs {
-    period: f32,
-    twiddles: Vec<(f32, f32)>,
-    fiddles: Vec<(f32, f32)>,
-    reson_coeffs: Vec<f32>,
-    coeffs1: Vec<(f32, f32)>,
-    coeffs2: Vec<(f32, f32)>,
-    coeffs3: Vec<(f32, f32)>,
-    coeffs4: Vec<(f32, f32)>,
-    coeffs5: Vec<(f32, f32)>,
+    period: f64,
+    twiddles: Vec<(f64, f64)>,
+    fiddles: Vec<(f64, f64)>,
+    reson_coeffs: Vec<f64>,
+    coeffs1: Vec<(f64, f64)>,
+    coeffs2: Vec<(f64, f64)>,
+    coeffs3: Vec<(f64, f64)>,
+    coeffs4: Vec<(f64, f64)>,
+    coeffs5: Vec<(f64, f64)>,
 }
 
 struct FrequencyBand {
-    low: f32,
-    center: f32,
-    high: f32,
+    low: f64,
+    center: f64,
+    high: f64,
 }
 
 impl VQsDFT {
     fn new(
         freq_bands: &[FrequencyBand],
-        window: &[f32],
-        time_res: f32,
-        bandwidth: f32,
-        max_time_res: f32,
+        window: &[f64],
+        time_res: f64,
+        bandwidth: f64,
+        max_time_res: f64,
         sample_rate: usize,
     ) -> Self {
-        let sample_rate_f32 = sample_rate as f32;
-        let buffer_size = (sample_rate_f32 * max_time_res / 1000.0).round() as usize;
-        let buffer_size_f32 = buffer_size as f32;
+        let sample_rate_f64 = sample_rate as f64;
+        let buffer_size = (sample_rate_f64 * max_time_res / 1000.0).round() as usize;
+        let buffer_size_f64 = buffer_size as f64;
 
         let min_idx = -(window.len() as isize) + 1;
         let max_idx = window.len() as isize;
@@ -353,7 +353,7 @@ impl VQsDFT {
         VQsDFT {
             spectrum_data: vec![0.0; freq_bands.len()],
             gains: (min_idx..max_idx)
-                .map(|i| window[i.unsigned_abs()] * (-((i as f32).abs() % 2.0) * 2.0 + 1.0))
+                .map(|i| window[i.unsigned_abs()] * (-((i as f64).abs() % 2.0) * 2.0 + 1.0))
                 .collect(),
             coeffs: freq_bands
                 .iter()
@@ -362,23 +362,23 @@ impl VQsDFT {
                     let mut twiddles = Vec::with_capacity(items_per_band);
                     let mut reson_coeffs = Vec::with_capacity(items_per_band);
 
-                    let period = (f32::min(
-                        buffer_size_f32,
-                        sample_rate_f32
+                    let period = (f64::min(
+                        buffer_size_f64,
+                        sample_rate_f64
                             / (bandwidth * (x.high - x.low).abs() + 1.0 / (time_res / 1000.0)),
                     ))
                     .trunc();
 
                     for i in min_idx..max_idx {
-                        let i = i as f32;
+                        let i = i as f64;
 
-                        let k = (x.center * period) / sample_rate_f32 + i;
+                        let k = (x.center * period) / sample_rate_f64 + i;
                         let fid = -2.0 * PI * k;
                         let twid = (2.0 * PI * k) / period;
-                        let reson = 2.0 * f32::cos(twid);
+                        let reson = 2.0 * f64::cos(twid);
 
-                        fiddles.push((f32::cos(fid), f32::sin(fid)));
-                        twiddles.push((f32::cos(twid), f32::sin(twid)));
+                        fiddles.push((f64::cos(fid), f64::sin(fid)));
+                        twiddles.push((f64::cos(twid), f64::sin(twid)));
                         reson_coeffs.push(reson);
                     }
 
@@ -410,8 +410,10 @@ impl VQsDFT {
             coeff.coeffs5.fill((0.0, 0.0));
         });
     }
-    fn analyze(&mut self, samples: impl Iterator<Item = f32>) -> &[f32] {
+    fn analyze(&mut self, samples: impl Iterator<Item = f64>) -> &[f64] {
         self.spectrum_data.fill(0.0);
+
+        self.reset(); // ! FIXME
 
         let buffer_len = self.buffer.len();
 
@@ -461,7 +463,7 @@ impl VQsDFT {
                     sum.1 += coeff.coeffs3[j].1 * self.gains[j] / coeff.period;
                 }
                 self.spectrum_data[i] =
-                    f32::max(self.spectrum_data[i], sum.0.powi(2) + sum.1.powi(2));
+                    f64::max(self.spectrum_data[i], sum.0.powi(2) + sum.1.powi(2));
             }
         }
         self.spectrum_data.iter_mut().for_each(|x| *x = x.sqrt());

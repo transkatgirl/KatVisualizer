@@ -40,16 +40,18 @@ pub fn create(
 
                     let bands = left.iter().zip(right.iter()).enumerate();
 
+                    let max_y = painter.clip_rect().max.y;
+
                     for (i, (left, right)) in bands {
                         painter.rect_filled(
                             Rect {
                                 min: Pos2 {
-                                    x: i as f32,
-                                    y: 0.0,
+                                    x: i as f32 * 5.0,
+                                    y: (5.0 * 10.0) - (*left as f32 * 5.0),
                                 },
                                 max: Pos2 {
-                                    x: i as f32 + 1.0,
-                                    y: *left,
+                                    x: (i as f32 * 5.0) + 5.0,
+                                    y: max_y,
                                 },
                             },
                             CornerRadius::ZERO,
@@ -58,12 +60,12 @@ pub fn create(
                         painter.rect_filled(
                             Rect {
                                 min: Pos2 {
-                                    x: i as f32,
-                                    y: 0.0,
+                                    x: i as f32 * 5.0,
+                                    y: (5.0 * 10.0) - (*right as f32 * 5.0),
                                 },
                                 max: Pos2 {
-                                    x: i as f32 + 1.0,
-                                    y: *right,
+                                    x: (i as f32 * 5.0) + 5.0,
+                                    y: max_y,
                                 },
                             },
                             CornerRadius::ZERO,
