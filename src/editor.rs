@@ -1,12 +1,12 @@
 use nih_plug::{prelude::*, util::StftHelper};
 use nih_plug_egui::{
     EguiState, create_egui_editor,
-    egui::{self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, Vec2, Window},
+    egui::{self, Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Vec2, Window},
     resizable_window::ResizableWindow,
     widgets,
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     mem,
     sync::{
         Arc, Mutex,
@@ -18,6 +18,88 @@ use triple_buffer::Output;
 
 use crate::{AnalyzerOutput, AnalyzerSet, AnalyzerSetWrapper, MyPlugin, PluginParams};
 
+fn refresh_spectrogram_data(
+    spectrogram: &mut VecDeque<(Vec<f64>, Vec<f64>, Instant)>,
+    new: (&[f64], &[f64], Instant),
+) {
+    let (mut old_left, mut old_right, _) = spectrogram.pop_back().unwrap();
+
+    if old_left.len() == new.0.len() {
+        old_left.copy_from_slice(new.0);
+    } else {
+        old_left.clear();
+        old_left.extend_from_slice(new.0);
+    }
+    if old_right.len() == new.1.len() {
+        old_right.copy_from_slice(new.1);
+    } else {
+        old_right.clear();
+        old_right.extend_from_slice(new.1);
+    }
+    spectrogram.push_front((old_left, old_right, new.2));
+}
+
+fn draw_bargraph(
+    painter: &Painter,
+    (left, right): (&[f64], &[f64]),
+    bounds: Rect,
+    max_db: f32,
+    min_db: f32,
+) {
+    let bands = left.iter().zip(right.iter()).enumerate();
+
+    let width = bounds.max.x - bounds.min.x;
+    let height = bounds.max.y - bounds.min.y;
+
+    let db_height = height / (max_db - min_db);
+    let band_width = width / bands.len() as f32;
+
+    for (i, (left, right)) in bands {
+        painter.rect_filled(
+            Rect {
+                min: Pos2 {
+                    x: bounds.min.x + i as f32 * band_width,
+                    y: bounds.min.y + (max_db * db_height) - (*right as f32 * db_height),
+                },
+                max: Pos2 {
+                    x: bounds.min.x + i as f32 * band_width + band_width,
+                    y: bounds.max.y,
+                },
+            },
+            CornerRadius::ZERO,
+            Color32::from_rgb(128, 0, 128),
+        );
+        painter.rect_filled(
+            Rect {
+                min: Pos2 {
+                    x: bounds.min.x + i as f32 * band_width,
+                    y: bounds.min.y + (max_db * db_height) - (*left as f32 * db_height),
+                },
+                max: Pos2 {
+                    x: bounds.min.x + i as f32 * band_width + band_width,
+                    y: bounds.max.y,
+                },
+            },
+            CornerRadius::ZERO,
+            Color32::from_rgb(0, 128, 128),
+        );
+        painter.rect_filled(
+            Rect {
+                min: Pos2 {
+                    x: bounds.min.x + i as f32 * band_width,
+                    y: bounds.min.y + (3.0 * db_height) - (left.min(*right) as f32 * db_height),
+                },
+                max: Pos2 {
+                    x: bounds.min.x + i as f32 * band_width + band_width,
+                    y: bounds.max.y,
+                },
+            },
+            CornerRadius::ZERO,
+            Color32::from_rgb(224, 224, 224),
+        );
+    }
+}
+
 pub fn create(
     params: Arc<PluginParams>,
     analyzers: AnalyzerSetWrapper,
@@ -27,6 +109,15 @@ pub fn create(
     let egui_state = params.editor_state.clone();
 
     let last_frame = Mutex::new(Instant::now());
+
+    let spectrogram = Mutex::new(VecDeque::from(vec![
+        (
+            Vec::with_capacity(24000),
+            Vec::with_capacity(24000),
+            Instant::now(),
+        );
+        256
+    ]));
 
     create_egui_editor(
         egui_state.clone(),
@@ -40,62 +131,38 @@ pub fn create(
 
                     let painter = ui.painter();
 
-                    let mut lock = analyzer_output.lock().unwrap();
-                    let (left, right, processing_duration, timestamp) = lock.read();
+                    let mut spectrogram = spectrogram.lock().unwrap();
 
-                    let buffering_duration = start.duration_since(*timestamp);
+                    let (processing_duration, buffering_duration) = {
+                        let mut lock = analyzer_output.lock().unwrap();
+                        let (left, right, processing_duration, timestamp) = lock.read();
 
-                    let bands = left.iter().zip(right.iter()).enumerate();
+                        let processing_duration = *processing_duration;
+                        let buffering_duration = start.duration_since(*timestamp);
+
+                        refresh_spectrogram_data(&mut spectrogram, (left, right, *timestamp));
+
+                        (processing_duration, buffering_duration)
+                    };
+
+                    let (left, right, _) = spectrogram.front().unwrap();
 
                     let max_x = painter.clip_rect().max.x;
                     let max_y = painter.clip_rect().max.y;
-                    let db_width = painter.clip_rect().max.y / 80.0;
-                    let band_width = painter.clip_rect().max.x / bands.len() as f32;
 
-                    for (i, (left, right)) in bands {
-                        painter.rect_filled(
-                            Rect {
-                                min: Pos2 {
-                                    x: i as f32 * band_width,
-                                    y: (3.0 * db_width) - (*right as f32 * db_width),
-                                },
-                                max: Pos2 {
-                                    x: (i as f32 * band_width) + band_width,
-                                    y: max_y,
-                                },
+                    draw_bargraph(
+                        painter,
+                        (left, right),
+                        Rect {
+                            min: Pos2 { x: 0.0, y: 0.0 },
+                            max: Pos2 {
+                                x: max_x,
+                                y: max_y / 2.0,
                             },
-                            CornerRadius::ZERO,
-                            Color32::from_rgb(128, 0, 128),
-                        );
-                        painter.rect_filled(
-                            Rect {
-                                min: Pos2 {
-                                    x: i as f32 * band_width,
-                                    y: (3.0 * db_width) - (*left as f32 * db_width),
-                                },
-                                max: Pos2 {
-                                    x: (i as f32 * band_width) + band_width,
-                                    y: max_y,
-                                },
-                            },
-                            CornerRadius::ZERO,
-                            Color32::from_rgb(0, 128, 128),
-                        );
-                        painter.rect_filled(
-                            Rect {
-                                min: Pos2 {
-                                    x: i as f32 * band_width,
-                                    y: (3.0 * db_width) - (left.min(*right) as f32 * db_width),
-                                },
-                                max: Pos2 {
-                                    x: (i as f32 * band_width) + band_width,
-                                    y: max_y,
-                                },
-                            },
-                            CornerRadius::ZERO,
-                            Color32::from_rgb(224, 224, 224),
-                        );
-                    }
+                        },
+                        3.0,
+                        -80.0,
+                    );
 
                     if buffering_duration < Duration::from_millis(500) {
                         painter.text(
@@ -112,9 +179,9 @@ pub fn create(
                                 size: 12.0,
                                 family: egui::FontFamily::Monospace,
                             },
-                            if *processing_duration > Duration::from_millis(4) {
+                            if processing_duration > Duration::from_millis(4) {
                                 Color32::RED
-                            } else if *processing_duration > Duration::from_millis(3) {
+                            } else if processing_duration > Duration::from_millis(3) {
                                 Color32::YELLOW
                             } else {
                                 Color32::from_rgb(224, 224, 224)
