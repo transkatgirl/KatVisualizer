@@ -176,13 +176,13 @@ pub fn create(
                                 y: max_y / 2.0,
                             },
                         },
-                        3.0,
+                        0.0,
                         -80.0,
                     );
 
                     draw_spectrogram(
                         painter,
-                        &spectrogram,
+                        spectrogram,
                         Rect {
                             min: Pos2 {
                                 x: 0.0,
@@ -190,12 +190,15 @@ pub fn create(
                             },
                             max: Pos2 { x: max_x, y: max_y },
                         },
-                        3.0,
+                        0.0,
                         -80.0,
-                        Duration::from_millis(250),
+                        Duration::from_millis(333),
                     );
 
                     if buffering_duration < Duration::from_millis(500) {
+                        let processing_proportion =
+                            processing_duration.as_secs_f64() / (1.0 / 256.0);
+
                         painter.text(
                             Pos2 {
                                 x: max_x - 32.0,
@@ -203,16 +206,17 @@ pub fn create(
                             },
                             Align2::RIGHT_BOTTOM,
                             format!(
-                                "{:.1}ms processing",
-                                processing_duration.as_secs_f64() * 1000.0
+                                "{:.0}% ({:.1}ms) processing",
+                                processing_proportion * 100.0,
+                                processing_duration.as_secs_f64() * 1000.0,
                             ),
                             FontId {
                                 size: 12.0,
                                 family: egui::FontFamily::Monospace,
                             },
-                            if *processing_duration > Duration::from_secs_f32(0.0039) {
+                            if processing_proportion >= 1.0 {
                                 Color32::RED
-                            } else if *processing_duration > Duration::from_millis(3) {
+                            } else if processing_proportion >= 0.8 {
                                 Color32::YELLOW
                             } else {
                                 Color32::from_rgb(224, 224, 224)
