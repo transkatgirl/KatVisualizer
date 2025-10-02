@@ -17,7 +17,6 @@ pub struct MyPlugin {
     analyzers: AnalyzerSet,
     analyzer_input: Input<AnalyzerOutput>,
     analyzer_output: Arc<Mutex<Output<AnalyzerOutput>>>,
-    block_size: usize,
 }
 
 #[derive(Params)]
@@ -37,7 +36,6 @@ impl Default for MyPlugin {
             analyzers: Arc::new(Mutex::new(None)),
             analyzer_input,
             analyzer_output: Arc::new(Mutex::new(analyzer_output)),
-            block_size: 0,
         }
     }
 }
@@ -96,14 +94,13 @@ impl Plugin for MyPlugin {
         context: &mut impl InitContext<Self>,
     ) -> bool {
         let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
-            resolution: 200,
+            resolution: 250,
             start_frequency: 20.0,
             end_frequency: 20000.0,
             log_frequency_scale: false,
             sample_rate: buffer_config.sample_rate as usize,
             time_resolution: (75.0, 200.0),
         });
-        self.block_size = analyzer.chunk_size();
 
         self.analyzers = Arc::new(Mutex::new(Some((analyzer.clone(), analyzer))));
 
@@ -122,14 +119,6 @@ impl Plugin for MyPlugin {
     ) -> ProcessStatus {
         if let Ok(mut lock) = self.analyzers.try_lock() {
             let analyzers = lock.as_mut().unwrap();
-
-            let block_size = analyzers.0.chunk_size();
-
-            if block_size != self.block_size {
-                self.block_size = block_size;
-                self.helper.set_block_size(self.block_size);
-                context.set_latency_samples(self.helper.latency_samples());
-            }
 
             let mut write_buffer = self.analyzer_input.input_buffer_publisher();
 
