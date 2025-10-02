@@ -100,6 +100,60 @@ fn draw_bargraph(
     }
 }
 
+fn draw_spectrogram(
+    painter: &Painter,
+    spectrogram: &VecDeque<(Vec<f64>, Vec<f64>, Instant)>,
+    bounds: Rect,
+    max_db: f32,
+    min_db: f32,
+    duration: Duration,
+) {
+    let width = bounds.max.x - bounds.min.x;
+    let height = bounds.max.y - bounds.min.y;
+
+    let db_color_step = 255.0 / (max_db - min_db);
+    let second_height = height / duration.as_secs_f32();
+
+    let (_, _, now) = spectrogram.front().unwrap();
+
+    let mut last_elapsed = Duration::ZERO;
+
+    for (left, right, timestamp) in spectrogram {
+        let elapsed = now.duration_since(*timestamp);
+
+        if elapsed > duration {
+            break;
+        }
+
+        let bands = left.iter().zip(right.iter()).enumerate();
+
+        let band_width = width / bands.len() as f32;
+
+        for (i, (left, right)) in bands {
+            let intensity =
+                ((max_db - ((left + right) / 2.0) as f32) * db_color_step.round()) as u8;
+            let color = Color32::from_rgb(intensity, intensity, intensity); // TODO: Improve this
+
+            painter.rect_filled(
+                Rect {
+                    min: Pos2 {
+                        x: bounds.min.x + i as f32 * band_width,
+                        y: bounds.min.y + last_elapsed.as_secs_f32() * second_height,
+                    },
+                    max: Pos2 {
+                        x: bounds.min.x + i as f32 * band_width + band_width,
+                        y: bounds.min.y + (elapsed.as_secs_f32() * second_height).max(bounds.max.y),
+                    },
+                },
+                CornerRadius::ZERO,
+                color,
+            );
+        }
+
+        last_elapsed = elapsed;
+    }
+}
+
 pub fn create(
     params: Arc<PluginParams>,
     analyzers: AnalyzerSetWrapper,
@@ -162,6 +216,21 @@ pub fn create(
                         },
                         3.0,
                         -80.0,
+                    );
+
+                    draw_spectrogram(
+                        painter,
+                        &spectrogram,
+                        Rect {
+                            min: Pos2 {
+                                x: 0.0,
+                                y: max_y / 2.0,
+                            },
+                            max: Pos2 { x: max_x, y: max_y },
+                        },
+                        3.0,
+                        -80.0,
+                        Duration::from_millis(500),
                     );
 
                     if buffering_duration < Duration::from_millis(500) {
