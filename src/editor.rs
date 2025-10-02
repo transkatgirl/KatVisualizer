@@ -16,28 +16,7 @@ use std::{
 };
 use triple_buffer::Output;
 
-use crate::{AnalyzerOutput, AnalyzerSet, AnalyzerSetWrapper, MyPlugin, PluginParams};
-
-fn refresh_spectrogram_data(
-    spectrogram: &mut VecDeque<(Vec<f64>, Vec<f64>, Instant)>,
-    new: (&[f64], &[f64], Instant),
-) {
-    let (mut old_left, mut old_right, _) = spectrogram.pop_back().unwrap();
-
-    if old_left.len() == new.0.len() {
-        old_left.copy_from_slice(new.0);
-    } else {
-        old_left.clear();
-        old_left.extend_from_slice(new.0);
-    }
-    if old_right.len() == new.1.len() {
-        old_right.copy_from_slice(new.1);
-    } else {
-        old_right.clear();
-        old_right.extend_from_slice(new.1);
-    }
-    spectrogram.push_front((old_left, old_right, new.2));
-}
+use crate::{AnalyzerOutput, AnalyzerSet, AnalyzerSetWrapper, MyPlugin, PluginParams, Spectrogram};
 
 fn draw_bargraph(
     painter: &Painter,
@@ -102,7 +81,7 @@ fn draw_bargraph(
 
 fn draw_spectrogram(
     painter: &Painter,
-    spectrogram: &VecDeque<(Vec<f64>, Vec<f64>, Instant)>,
+    spectrogram: &VecDeque<(Vec<f64>, Vec<f64>, Duration, Instant)>,
     bounds: Rect,
     max_db: f32,
     min_db: f32,
@@ -114,11 +93,11 @@ fn draw_spectrogram(
     let db_color_step = 255.0 / (max_db - min_db);
     let second_height = height / duration.as_secs_f32();
 
-    let (_, _, now) = spectrogram.front().unwrap();
+    let (_, _, _, now) = spectrogram.front().unwrap();
 
     let mut last_elapsed = Duration::ZERO;
 
-    for (left, right, timestamp) in spectrogram {
+    for (left, right, _, timestamp) in spectrogram {
         let elapsed = now.duration_since(*timestamp);
 
         if elapsed > duration {
@@ -157,21 +136,12 @@ fn draw_spectrogram(
 pub fn create(
     params: Arc<PluginParams>,
     analyzers: AnalyzerSetWrapper,
-    analyzer_output: Arc<Mutex<Output<AnalyzerOutput>>>,
+    analyzer_output: Arc<Mutex<Output<Spectrogram>>>,
     async_executor: AsyncExecutor<MyPlugin>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
 
     let last_frame = Mutex::new(Instant::now());
-
-    let spectrogram = Mutex::new(VecDeque::from(vec![
-        (
-            Vec::with_capacity(24000),
-            Vec::with_capacity(24000),
-            Instant::now(),
-        );
-        256
-    ]));
 
     create_egui_editor(
         egui_state.clone(),
@@ -185,21 +155,13 @@ pub fn create(
 
                     let painter = ui.painter();
 
-                    let mut spectrogram = spectrogram.lock().unwrap();
+                    let mut lock = analyzer_output.lock().unwrap();
+                    let spectrogram = lock.read();
 
-                    let (processing_duration, buffering_duration) = {
-                        let mut lock = analyzer_output.lock().unwrap();
-                        let (left, right, processing_duration, timestamp) = lock.read();
+                    let (left, right, processing_duration, timestamp) =
+                        spectrogram.front().unwrap();
 
-                        let processing_duration = *processing_duration;
-                        let buffering_duration = start.duration_since(*timestamp);
-
-                        refresh_spectrogram_data(&mut spectrogram, (left, right, *timestamp));
-
-                        (processing_duration, buffering_duration)
-                    };
-
-                    let (left, right, _) = spectrogram.front().unwrap();
+                    let buffering_duration = start.duration_since(*timestamp);
 
                     let max_x = painter.clip_rect().max.x;
                     let max_y = painter.clip_rect().max.y;
@@ -230,7 +192,7 @@ pub fn create(
                         },
                         3.0,
                         -80.0,
-                        Duration::from_millis(500),
+                        Duration::from_millis(250),
                     );
 
                     if buffering_duration < Duration::from_millis(500) {
@@ -248,9 +210,9 @@ pub fn create(
                                 size: 12.0,
                                 family: egui::FontFamily::Monospace,
                             },
-                            if processing_duration > Duration::from_millis(4) {
+                            if *processing_duration > Duration::from_millis(4) {
                                 Color32::RED
-                            } else if processing_duration > Duration::from_millis(3) {
+                            } else if *processing_duration > Duration::from_millis(3) {
                                 Color32::YELLOW
                             } else {
                                 Color32::from_rgb(224, 224, 224)

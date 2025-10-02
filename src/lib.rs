@@ -1,6 +1,8 @@
 use nih_plug::{prelude::*, util::StftHelper};
 use nih_plug_egui::EguiState;
 use std::{
+    collections::VecDeque,
+    mem,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -13,13 +15,18 @@ mod editor;
 
 type AnalyzerSet = Arc<Mutex<Option<(BetterAnalyzer, BetterAnalyzer)>>>;
 type AnalyzerOutput = (Vec<f64>, Vec<f64>, Duration, Instant);
+type Spectrogram = VecDeque<AnalyzerOutput>;
+
+// TODO: Use f32 for spectrogram data
 
 pub struct MyPlugin {
     params: Arc<PluginParams>,
     helper: util::StftHelper<0>,
     analyzers: AnalyzerSet,
-    analyzer_input: Input<AnalyzerOutput>,
-    analyzer_output: Arc<Mutex<Output<AnalyzerOutput>>>,
+    buffer: AnalyzerOutput,
+    spectrogram: Spectrogram,
+    analyzer_input: Input<Spectrogram>,
+    analyzer_output: Arc<Mutex<Output<Spectrogram>>>,
 }
 
 #[derive(Params)]
@@ -30,17 +37,29 @@ pub struct PluginParams {
 
 impl Default for MyPlugin {
     fn default() -> Self {
-        let (analyzer_input, analyzer_output) = triple_buffer(&(
-            Vec::with_capacity(96000),
-            Vec::with_capacity(96000),
-            Duration::ZERO,
-            Instant::now(),
-        ));
+        let spectrogram = VecDeque::from(vec![
+            (
+                Vec::with_capacity(8192),
+                Vec::with_capacity(8192),
+                Duration::ZERO,
+                Instant::now(),
+            );
+            256
+        ]);
+
+        let (analyzer_input, analyzer_output) = triple_buffer(&spectrogram);
 
         Self {
             params: Arc::new(PluginParams::default()),
             helper: StftHelper::new(2, 96000, 0),
             analyzers: Arc::new(Mutex::new(None)),
+            spectrogram,
+            buffer: (
+                Vec::with_capacity(8192),
+                Vec::with_capacity(8192),
+                Duration::ZERO,
+                Instant::now(),
+            ),
             analyzer_input,
             analyzer_output: Arc::new(Mutex::new(analyzer_output)),
         }
@@ -129,12 +148,10 @@ impl Plugin for MyPlugin {
 
             let dual_channel = buffer.channels() == 2;
 
-            let mut start = Instant::now();
-
             self.helper
                 .process_analyze_only(buffer, 1, |channel_idx, buffer| {
                     let analyzer = if channel_idx == 0 {
-                        start = Instant::now();
+                        self.buffer.3 = Instant::now();
                         &mut analyzers.0
                     } else {
                         &mut analyzers.1
@@ -146,38 +163,70 @@ impl Plugin for MyPlugin {
 
                     #[allow(clippy::collapsible_else_if)]
                     if channel_idx == 0 {
-                        if write_buffer.0.len() == output.len() {
-                            write_buffer.0.copy_from_slice(output);
+                        if self.buffer.0.len() == output.len() {
+                            self.buffer.0.copy_from_slice(output);
                         } else {
-                            write_buffer.0.clear();
-                            write_buffer.0.extend_from_slice(output);
+                            self.buffer.0.clear();
+                            self.buffer.0.extend_from_slice(output);
                         }
                         if !dual_channel {
                             let finished = Instant::now();
-                            write_buffer.2 = finished.duration_since(start);
-                            write_buffer.3 = finished;
+                            self.buffer.2 = finished.duration_since(self.buffer.3);
+                            self.buffer.3 = finished;
 
-                            self.analyzer_input.publish();
+                            update_spectrogram(&self.buffer, &mut self.spectrogram);
+                            publish_updated_spectrogram(
+                                &self.spectrogram,
+                                &mut self.analyzer_input,
+                            );
                         }
                     } else {
-                        if write_buffer.1.len() == output.len() {
-                            write_buffer.1.copy_from_slice(output);
+                        if self.buffer.1.len() == output.len() {
+                            self.buffer.1.copy_from_slice(output);
                         } else {
-                            write_buffer.1.clear();
-                            write_buffer.1.extend_from_slice(output);
+                            self.buffer.1.clear();
+                            self.buffer.1.extend_from_slice(output);
                         }
 
                         let finished = Instant::now();
-                        write_buffer.2 = finished.duration_since(start);
-                        write_buffer.3 = finished;
+                        self.buffer.2 = finished.duration_since(self.buffer.3);
+                        self.buffer.3 = finished;
 
-                        self.analyzer_input.publish();
+                        update_spectrogram(&self.buffer, &mut self.spectrogram);
+                        publish_updated_spectrogram(&self.spectrogram, &mut self.analyzer_input);
                     }
                 });
         }
 
         ProcessStatus::Normal
     }
+}
+
+fn update_spectrogram(buffer: &AnalyzerOutput, spectrogram: &mut Spectrogram) {
+    let mut old = spectrogram.pop_back().unwrap();
+
+    if old.0.len() == buffer.0.len() {
+        old.0.copy_from_slice(&buffer.0);
+    } else {
+        old.0.clear();
+        old.0.extend_from_slice(&buffer.0);
+    }
+    if old.1.len() == buffer.1.len() {
+        old.1.copy_from_slice(&buffer.1);
+    } else {
+        old.1.clear();
+        old.1.extend_from_slice(&buffer.1);
+    }
+    old.2 = buffer.2;
+    old.3 = buffer.3;
+
+    spectrogram.push_front(old);
+}
+
+fn publish_updated_spectrogram(spectrogram: &Spectrogram, destination: &mut Input<Spectrogram>) {
+    let write_buffer = destination.input_buffer_mut();
+    mem::replace(write_buffer, spectrogram.clone());
+    destination.publish();
 }
 
 #[derive(Clone)]
