@@ -48,20 +48,6 @@ pub fn create(
                             Rect {
                                 min: Pos2 {
                                     x: i as f32 * band_width,
-                                    y: (5.0 * 10.0) - (*left as f32 * 5.0),
-                                },
-                                max: Pos2 {
-                                    x: (i as f32 * band_width) + band_width,
-                                    y: max_y,
-                                },
-                            },
-                            CornerRadius::ZERO,
-                            Color32::BLUE,
-                        );
-                        painter.rect_filled(
-                            Rect {
-                                min: Pos2 {
-                                    x: i as f32 * band_width,
                                     y: (5.0 * 10.0) - (*right as f32 * 5.0),
                                 },
                                 max: Pos2 {
@@ -70,8 +56,37 @@ pub fn create(
                                 },
                             },
                             CornerRadius::ZERO,
-                            Color32::RED,
+                            Color32::from_rgba_unmultiplied(255, 0, 255, 64),
                         );
+                        painter.rect_filled(
+                            Rect {
+                                min: Pos2 {
+                                    x: i as f32 * band_width,
+                                    y: (5.0 * 10.0) - (*left as f32 * 5.0),
+                                },
+                                max: Pos2 {
+                                    x: (i as f32 * band_width) + band_width,
+                                    y: max_y,
+                                },
+                            },
+                            CornerRadius::ZERO,
+                            Color32::from_rgba_unmultiplied(0, 255, 255, 64),
+                        );
+
+                        /*painter.rect_filled(
+                            Rect {
+                                min: Pos2 {
+                                    x: i as f32 * band_width,
+                                    y: (5.0 * 10.0) - (left.min(*right) as f32 * 5.0),
+                                },
+                                max: Pos2 {
+                                    x: (i as f32 * band_width) + band_width,
+                                    y: max_y,
+                                },
+                            },
+                            CornerRadius::ZERO,
+                            Color32::from_rgb(255, 255, 255),
+                        );*/
                     }
 
                     // TODO
