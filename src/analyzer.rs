@@ -116,6 +116,7 @@ impl BetterAnalyzer {
             *output = normalizer.spl_to_phon((20.0 * f32::log10(*output)) + listening_volume)
                 - listening_volume
         }
+
         &self.transform.spectrum_data
     }
 }
@@ -421,7 +422,8 @@ impl VQsDFT {
             for i in 0..self.coeffs.len() {
                 let coeff = &mut self.coeffs[i];
                 let kernel_length = coeff.coeffs1.len();
-                let oldest = (((self.buffer_index - coeff.period as usize) % buffer_len)
+                let oldest = (((self.buffer_index as isize - coeff.period as isize) as usize
+                    % buffer_len)
                     + buffer_len)
                     % buffer_len;
                 let latest = self.buffer_index;
