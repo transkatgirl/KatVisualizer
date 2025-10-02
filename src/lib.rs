@@ -107,7 +107,8 @@ impl Plugin for MyPlugin {
 
         self.analyzers = Arc::new(Mutex::new(Some((analyzer.clone(), analyzer))));
 
-        self.helper.set_block_size(self.block_size);
+        self.helper
+            .set_block_size((buffer_config.sample_rate as f64 * 10.0 / 1000.0).round() as usize);
         context.set_latency_samples(self.helper.latency_samples());
 
         true
@@ -133,7 +134,7 @@ impl Plugin for MyPlugin {
             let mut write_buffer = self.analyzer_input.input_buffer_publisher();
 
             self.helper
-                .process_analyze_only(buffer, 4, |channel_idx, buffer| {
+                .process_analyze_only(buffer, 1, |channel_idx, buffer| {
                     let analyzer = if channel_idx == 0 {
                         &mut analyzers.0
                     } else {
