@@ -39,8 +39,8 @@ impl Default for MyPlugin {
     fn default() -> Self {
         let spectrogram = VecDeque::from(vec![
             (
-                Vec::with_capacity(8192),
-                Vec::with_capacity(8192),
+                Vec::with_capacity(4096),
+                Vec::with_capacity(4096),
                 Duration::ZERO,
                 Instant::now(),
             );
@@ -55,8 +55,8 @@ impl Default for MyPlugin {
             analyzers: Arc::new(Mutex::new(None)),
             spectrogram,
             buffer: (
-                Vec::with_capacity(8192),
-                Vec::with_capacity(8192),
+                Vec::with_capacity(4096),
+                Vec::with_capacity(4096),
                 Duration::ZERO,
                 Instant::now(),
             ),
@@ -120,7 +120,7 @@ impl Plugin for MyPlugin {
         context: &mut impl InitContext<Self>,
     ) -> bool {
         let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
-            resolution: 280,
+            resolution: 270,
             start_frequency: 20.0,
             end_frequency: 20000.0,
             log_frequency_scale: false,
