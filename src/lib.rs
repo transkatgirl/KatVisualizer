@@ -1,6 +1,9 @@
 use nih_plug::{prelude::*, util::StftHelper};
 use nih_plug_egui::EguiState;
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 use triple_buffer::{Input, Output, triple_buffer};
 
 use crate::analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration};
@@ -9,7 +12,7 @@ pub mod analyzer;
 mod editor;
 
 type AnalyzerSet = Arc<Mutex<Option<(BetterAnalyzer, BetterAnalyzer)>>>;
-type AnalyzerOutput = (Vec<f64>, Vec<f64>);
+type AnalyzerOutput = (Vec<f64>, Vec<f64>, Duration, Instant);
 
 pub struct MyPlugin {
     params: Arc<PluginParams>,
@@ -27,8 +30,12 @@ pub struct PluginParams {
 
 impl Default for MyPlugin {
     fn default() -> Self {
-        let (analyzer_input, analyzer_output) =
-            triple_buffer(&(Vec::with_capacity(96000), Vec::with_capacity(96000)));
+        let (analyzer_input, analyzer_output) = triple_buffer(&(
+            Vec::with_capacity(96000),
+            Vec::with_capacity(96000),
+            Duration::ZERO,
+            Instant::now(),
+        ));
 
         Self {
             params: Arc::new(PluginParams::default()),
@@ -43,7 +50,7 @@ impl Default for MyPlugin {
 impl Default for PluginParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(900, 600),
+            editor_state: EguiState::from_size(1200, 900),
         }
     }
 }
@@ -94,7 +101,7 @@ impl Plugin for MyPlugin {
         context: &mut impl InitContext<Self>,
     ) -> bool {
         let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
-            resolution: 250,
+            resolution: 280,
             start_frequency: 20.0,
             end_frequency: 20000.0,
             log_frequency_scale: false,
@@ -122,9 +129,12 @@ impl Plugin for MyPlugin {
 
             let dual_channel = buffer.channels() == 2;
 
+            let mut start = Instant::now();
+
             self.helper
                 .process_analyze_only(buffer, 1, |channel_idx, buffer| {
                     let analyzer = if channel_idx == 0 {
+                        start = Instant::now();
                         &mut analyzers.0
                     } else {
                         &mut analyzers.1
@@ -143,6 +153,10 @@ impl Plugin for MyPlugin {
                             write_buffer.0.extend_from_slice(output);
                         }
                         if !dual_channel {
+                            let finished = Instant::now();
+                            write_buffer.2 = finished.duration_since(start);
+                            write_buffer.3 = finished;
+
                             self.analyzer_input.publish();
                         }
                     } else {
@@ -152,6 +166,11 @@ impl Plugin for MyPlugin {
                             write_buffer.1.clear();
                             write_buffer.1.extend_from_slice(output);
                         }
+
+                        let finished = Instant::now();
+                        write_buffer.2 = finished.duration_since(start);
+                        write_buffer.3 = finished;
+
                         self.analyzer_input.publish();
                     }
                 });
