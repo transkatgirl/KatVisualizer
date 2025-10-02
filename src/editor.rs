@@ -210,7 +210,7 @@ pub fn create(
                                 size: 12.0,
                                 family: egui::FontFamily::Monospace,
                             },
-                            if *processing_duration > Duration::from_millis(4) {
+                            if *processing_duration > Duration::from_secs_f32(0.0039) {
                                 Color32::RED
                             } else if *processing_duration > Duration::from_millis(3) {
                                 Color32::YELLOW
