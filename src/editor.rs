@@ -40,17 +40,18 @@ pub fn create(
 
                     let bands = left.iter().zip(right.iter()).enumerate();
 
+                    let band_width = painter.clip_rect().max.x / bands.len() as f32;
                     let max_y = painter.clip_rect().max.y;
 
                     for (i, (left, right)) in bands {
                         painter.rect_filled(
                             Rect {
                                 min: Pos2 {
-                                    x: i as f32 * 5.0,
+                                    x: i as f32 * band_width,
                                     y: (5.0 * 10.0) - (*left as f32 * 5.0),
                                 },
                                 max: Pos2 {
-                                    x: (i as f32 * 5.0) + 5.0,
+                                    x: (i as f32 * band_width) + band_width,
                                     y: max_y,
                                 },
                             },
@@ -60,11 +61,11 @@ pub fn create(
                         painter.rect_filled(
                             Rect {
                                 min: Pos2 {
-                                    x: i as f32 * 5.0,
+                                    x: i as f32 * band_width,
                                     y: (5.0 * 10.0) - (*right as f32 * 5.0),
                                 },
                                 max: Pos2 {
-                                    x: (i as f32 * 5.0) + 5.0,
+                                    x: (i as f32 * band_width) + band_width,
                                     y: max_y,
                                 },
                             },

@@ -96,7 +96,7 @@ impl Plugin for MyPlugin {
         context: &mut impl InitContext<Self>,
     ) -> bool {
         let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
-            resolution: 100,
+            resolution: 200,
             start_frequency: 20.0,
             end_frequency: 20000.0,
             log_frequency_scale: false,
@@ -108,7 +108,7 @@ impl Plugin for MyPlugin {
         self.analyzers = Arc::new(Mutex::new(Some((analyzer.clone(), analyzer))));
 
         self.helper
-            .set_block_size((buffer_config.sample_rate as f64 * 10.0 / 1000.0).round() as usize);
+            .set_block_size((buffer_config.sample_rate as f64 / 256.0).round() as usize);
         context.set_latency_samples(self.helper.latency_samples());
 
         true
