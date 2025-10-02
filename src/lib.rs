@@ -225,7 +225,7 @@ fn update_spectrogram(buffer: &AnalyzerOutput, spectrogram: &mut Spectrogram) {
 
 fn publish_updated_spectrogram(spectrogram: &Spectrogram, destination: &mut Input<Spectrogram>) {
     let write_buffer = destination.input_buffer_mut();
-    mem::replace(write_buffer, spectrogram.clone());
+    let _ = mem::replace(write_buffer, spectrogram.clone());
     destination.publish();
 }
 

@@ -98,7 +98,8 @@ fn draw_spectrogram(
     let mut last_elapsed = Duration::ZERO;
 
     for (left, right, _, timestamp) in spectrogram {
-        let elapsed = now.duration_since(*timestamp);
+        //let elapsed = now.duration_since(*timestamp);
+        let elapsed = last_elapsed + Duration::from_secs_f64(1.0 / 256.0);
 
         if elapsed > duration {
             break;
