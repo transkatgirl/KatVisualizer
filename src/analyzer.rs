@@ -2,6 +2,8 @@ use std::f32::consts::PI;
 
 use serde::{Deserialize, Serialize};
 
+// TODO: Evaluate switching to f64
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BetterAnalyzerConfiguration {
     pub resolution: usize,
@@ -305,6 +307,7 @@ const FLAT_TOP_WINDOW: &[f32] = &[
 #[derive(Clone)]
 struct VQsDFT {
     coeffs: Vec<VQsDFTCoeffs>,
+    gains: Vec<f32>,
     buffer: Vec<f32>,
     buffer_index: usize,
     spectrum_data: Vec<f32>,
@@ -321,7 +324,6 @@ struct VQsDFTCoeffs {
     coeffs3: Vec<(f32, f32)>,
     coeffs4: Vec<(f32, f32)>,
     coeffs5: Vec<(f32, f32)>,
-    gains: Vec<f32>,
 }
 
 struct FrequencyBand {
@@ -349,13 +351,15 @@ impl VQsDFT {
 
         VQsDFT {
             spectrum_data: vec![0.0; freq_bands.len()],
+            gains: (min_idx..max_idx)
+                .map(|i| window[i.unsigned_abs()] * (-((i as f32).abs() % 2.0) * 2.0 + 1.0))
+                .collect(),
             coeffs: freq_bands
                 .iter()
                 .map(|x| {
                     let mut fiddles = Vec::with_capacity(items_per_band);
                     let mut twiddles = Vec::with_capacity(items_per_band);
                     let mut reson_coeffs = Vec::with_capacity(items_per_band);
-                    let mut gains = Vec::with_capacity(items_per_band);
 
                     let period = (f32::min(
                         buffer_size_f32,
@@ -365,11 +369,9 @@ impl VQsDFT {
                     .trunc();
 
                     for i in min_idx..max_idx {
-                        let i_f32 = i as f32;
+                        let i = i as f32;
 
-                        let amplitude =
-                            window[i.unsigned_abs()] * (-(i_f32.abs() % 2.0) * 2.0 + 1.0);
-                        let k = (x.center * period) / sample_rate_f32 + i_f32;
+                        let k = (x.center * period) / sample_rate_f32 + i;
                         let fid = -2.0 * PI * k;
                         let twid = (2.0 * PI * k) / period;
                         let reson = 2.0 * f32::cos(twid);
@@ -377,7 +379,6 @@ impl VQsDFT {
                         fiddles.push((f32::cos(fid), f32::sin(fid)));
                         twiddles.push((f32::cos(twid), f32::sin(twid)));
                         reson_coeffs.push(reson);
-                        gains.push(amplitude);
                     }
 
                     VQsDFTCoeffs {
@@ -390,7 +391,6 @@ impl VQsDFT {
                         coeffs3: vec![(0.0, 0.0); items_per_band],
                         coeffs4: vec![(0.0, 0.0); items_per_band],
                         coeffs5: vec![(0.0, 0.0); items_per_band],
-                        gains,
                     }
                 })
                 .collect(),
@@ -455,8 +455,8 @@ impl VQsDFT {
                     coeff.coeffs4[j].0 = coeff.coeffs3[j].0;
                     coeff.coeffs4[j].1 = coeff.coeffs3[j].1;
 
-                    sum.0 += coeff.coeffs3[j].0 * coeff.gains[j] / coeff.period;
-                    sum.1 += coeff.coeffs3[j].1 * coeff.gains[j] / coeff.period;
+                    sum.0 += coeff.coeffs3[j].0 * self.gains[j] / coeff.period;
+                    sum.1 += coeff.coeffs3[j].1 * self.gains[j] / coeff.period;
                 }
                 self.spectrum_data[i] =
                     f32::max(self.spectrum_data[i], sum.0.powi(2) + sum.1.powi(2));
