@@ -413,9 +413,8 @@ impl VQsDFT {
     fn analyze(&mut self, samples: impl Iterator<Item = f64>) -> &[f64] {
         self.spectrum_data.fill(0.0);
 
-        self.reset(); // ! FIXME
-
         let buffer_len = self.buffer.len();
+        let buffer_len_int = buffer_len as isize;
 
         for sample in samples {
             self.buffer_index = (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
@@ -424,9 +423,9 @@ impl VQsDFT {
             for i in 0..self.coeffs.len() {
                 let coeff = &mut self.coeffs[i];
                 let kernel_length = coeff.coeffs1.len();
-                let oldest = (((self.buffer_index as isize - coeff.period as isize) as usize
-                    % buffer_len)
-                    + buffer_len)
+                let oldest = (((self.buffer_index as isize - coeff.period as isize)
+                    % buffer_len_int)
+                    + buffer_len_int) as usize
                     % buffer_len;
                 let latest = self.buffer_index;
                 let mut sum = (0.0, 0.0);
