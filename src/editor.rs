@@ -56,7 +56,7 @@ pub fn create(
                                 },
                             },
                             CornerRadius::ZERO,
-                            Color32::from_rgba_unmultiplied(255, 0, 255, 64),
+                            Color32::from_rgb(128, 0, 128),
                         );
                         painter.rect_filled(
                             Rect {
@@ -70,10 +70,9 @@ pub fn create(
                                 },
                             },
                             CornerRadius::ZERO,
-                            Color32::from_rgba_unmultiplied(0, 255, 255, 64),
+                            Color32::from_rgb(0, 128, 128),
                         );
-
-                        /*painter.rect_filled(
+                        painter.rect_filled(
                             Rect {
                                 min: Pos2 {
                                     x: i as f32 * band_width,
@@ -85,8 +84,8 @@ pub fn create(
                                 },
                             },
                             CornerRadius::ZERO,
-                            Color32::from_rgb(255, 255, 255),
-                        );*/
+                            Color32::from_rgb(224, 224, 224),
+                        );
                     }
 
                     // TODO
