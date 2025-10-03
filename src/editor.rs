@@ -158,7 +158,7 @@ pub fn create(
             color
         };
 
-        color.components[0] = map_value_f32(intensity, 0.0, 1.0, 0.1, color.components[0]);
+        color.components[0] = map_value_f32(intensity, 0.0, 1.0, 0.12, color.components[0]);
 
         convert_dynamic_color(color)
     };
@@ -197,7 +197,7 @@ pub fn create(
                             },
                         },
                         color_function,
-                        (0.0, -80.0),
+                        (0.0, -75.0),
                     );
 
                     draw_spectrogram(
@@ -211,7 +211,7 @@ pub fn create(
                             max: Pos2 { x: max_x, y: max_y },
                         },
                         color_function,
-                        (0.0, -80.0),
+                        (0.0, -75.0),
                         Duration::from_millis(333),
                     );
 
