@@ -150,7 +150,7 @@ impl Plugin for MyPlugin {
                         &mut analyzers.1
                     };
 
-                    let output = analyzer.analyze(buffer.iter().map(|s| *s as f64), 80.0);
+                    let output = analyzer.analyze(buffer.iter().map(|s| *s as f64), 0.0, 83.0);
 
                     #[allow(clippy::collapsible_else_if)]
                     if channel_idx == 0 {
