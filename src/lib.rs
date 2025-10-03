@@ -141,7 +141,7 @@ impl Plugin for MyPlugin {
         &mut self,
         buffer: &mut Buffer,
         _aux: &mut AuxiliaryBuffers,
-        context: &mut impl ProcessContext<Self>,
+        _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         if let Ok(mut lock) = self.analyzers.try_lock() {
             let analyzers = lock.as_mut().unwrap();
@@ -158,8 +158,6 @@ impl Plugin for MyPlugin {
                     };
 
                     let output = analyzer.analyze(buffer.iter().map(|s| *s as f64), 80.0);
-
-                    let write_buffer = self.analyzer_input.input_buffer_mut();
 
                     #[allow(clippy::collapsible_else_if)]
                     if channel_idx == 0 {

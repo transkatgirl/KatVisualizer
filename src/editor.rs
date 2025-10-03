@@ -1,26 +1,20 @@
-use color::{
-    AlphaColor, ColorSpace, ColorSpaceTag, DynamicColor, Flags, Interpolator, Rgba8, Srgb,
-};
-use nih_plug::{prelude::*, util::StftHelper};
+use color::{ColorSpaceTag, DynamicColor, Flags, Rgba8, Srgb};
+use nih_plug::prelude::*;
 use nih_plug_egui::{
     EguiState, create_egui_editor,
-    egui::{self, Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Rgba, Vec2, Window},
+    egui::{self, Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Vec2, Window},
     resizable_window::ResizableWindow,
     widgets,
 };
 use std::{
-    collections::{HashMap, VecDeque},
-    mem,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
-    },
+    collections::VecDeque,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use triple_buffer::Output;
 
 use crate::{
-    AnalyzerOutput, AnalyzerSet, AnalyzerSetWrapper, MyPlugin, PluginParams, Spectrogram,
+    AnalyzerSetWrapper, MyPlugin, PluginParams, Spectrogram,
     analyzer::{calculate_pan_and_volume, map_value_f32},
 };
 
@@ -143,34 +137,11 @@ pub fn create(
         flags: Flags::default(),
         components: [0.7, 0.16, 195.0, 1.0],
     };
-    /*let middle_color = DynamicColor {
-        cs: ColorSpaceTag::Oklch,
-        flags: Flags::default(),
-        components: [0.96, 0.0, 0.0, 1.0],
-    };*/
     let right_color = DynamicColor {
         cs: ColorSpaceTag::Oklch,
         flags: Flags::default(),
         components: [0.7, 0.16, 328.0, 1.0],
     };
-    /*let left_color_converted = convert_dynamic_color(left_color);
-    let middle_color_converted = convert_dynamic_color(middle_color);
-    let right_color_converted = convert_dynamic_color(right_color);
-    let left_right_color = left_color.interpolate(
-        right_color,
-        ColorSpaceTag::Oklch,
-        color::HueDirection::Shorter,
-    );
-    let left_middle_color = left_color.interpolate(
-        middle_color,
-        ColorSpaceTag::Oklch,
-        color::HueDirection::Shorter,
-    );
-    let right_middle_color = right_color.interpolate(
-        middle_color,
-        ColorSpaceTag::Oklch,
-        color::HueDirection::Shorter,
-    );*/
 
     let color_function = move |split: f32, intensity: f32| -> Color32 {
         let mut color = if split >= 0.0 {
