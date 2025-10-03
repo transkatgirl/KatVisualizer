@@ -115,21 +115,14 @@ impl Plugin for MyPlugin {
         context: &mut impl InitContext<Self>,
     ) -> bool {
         let analysis_chain = AnalysisChain::new(
-            BetterAnalyzerConfiguration {
-                resolution: 256,
-                start_frequency: 20.0,
-                end_frequency: 20000.0,
-                log_frequency_scale: false,
-                sample_rate: buffer_config.sample_rate as usize,
-                time_resolution: (75.0, 200.0),
-            },
-            0.0,
-            Some(85.0),
-            512.0,
+            &AnalysisChainConfig::default(),
+            buffer_config.sample_rate as usize,
         );
         context.set_latency_samples(analysis_chain.latency_samples);
         self.latency_samples = analysis_chain.latency_samples;
-        self.analysis_chain = Arc::new(Mutex::new(Some(analysis_chain)));
+
+        let mut analysis_chain_mutex = self.analysis_chain.lock().unwrap();
+        *analysis_chain_mutex = Some(analysis_chain);
 
         true
     }
@@ -186,38 +179,73 @@ fn publish_updated_spectrogram(spectrogram: &Spectrogram, destination: &mut Inpu
     destination.publish();
 }
 
+pub(crate) struct AnalysisChainConfig {
+    gain: f64,
+    listening_volume: f64,
+    normalize_amplitude: bool,
+    update_rate_hz: f64,
+
+    resolution: usize,
+    start_frequency: f64,
+    end_frequency: f64,
+    log_frequency_scale: bool,
+    time_resolution: (f64, f64),
+}
+
+impl Default for AnalysisChainConfig {
+    fn default() -> Self {
+        Self {
+            gain: 0.0,
+            listening_volume: 85.0,
+            normalize_amplitude: true,
+            update_rate_hz: 512.0,
+            resolution: 256,
+            start_frequency: 20.0,
+            end_frequency: 20000.0,
+            log_frequency_scale: false,
+            time_resolution: (75.0, 200.0),
+        }
+    }
+}
+
 pub(crate) struct AnalysisChain {
     chunker: StftHelper<0>,
     left_analyzer: BetterAnalyzer,
     right_analyzer: BetterAnalyzer,
     gain: f64,
+    update_rate: f64,
     listening_volume: Option<f64>,
     latency_samples: u32,
     chunk_duration: Duration,
 }
 
 impl AnalysisChain {
-    fn new(
-        config: BetterAnalyzerConfiguration,
-        gain: f64,
-        listening_volume: Option<f64>,
-        update_rate_hz: f64,
-    ) -> Self {
-        let sample_rate = config.sample_rate;
-
-        let analyzer = BetterAnalyzer::new(config);
+    fn new(config: &AnalysisChainConfig, sample_rate: usize) -> Self {
+        let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
+            resolution: config.resolution,
+            start_frequency: config.start_frequency,
+            end_frequency: config.end_frequency,
+            log_frequency_scale: config.log_frequency_scale,
+            sample_rate,
+            time_resolution: config.time_resolution,
+        });
 
         let mut chunker = StftHelper::new(2, sample_rate, 0);
-        chunker.set_block_size((sample_rate as f64 / update_rate_hz).round() as usize);
+        chunker.set_block_size((sample_rate as f64 / config.update_rate_hz).round() as usize);
 
         Self {
             latency_samples: chunker.latency_samples(),
             chunker,
             left_analyzer: analyzer.clone(),
             right_analyzer: analyzer,
-            gain,
-            listening_volume,
-            chunk_duration: Duration::from_secs_f64(1.0 / update_rate_hz),
+            gain: config.gain,
+            update_rate: config.update_rate_hz,
+            listening_volume: if config.normalize_amplitude {
+                Some(config.listening_volume)
+            } else {
+                None
+            },
+            chunk_duration: Duration::from_secs_f64(1.0 / config.update_rate_hz),
         }
     }
     fn analyze<F>(
@@ -268,39 +296,43 @@ impl AnalysisChain {
                 }
             });
     }
-    pub(crate) fn update_analysis_config(&mut self, gain: f64, listening_volume: Option<f64>) {
-        self.gain = gain;
-        self.listening_volume = listening_volume;
-    }
-    pub(crate) fn update_chunking_config(&mut self, update_rate_hz: f64) {
-        let sample_rate = self.left_analyzer.config().sample_rate;
+    pub(crate) fn update_config(&mut self, config: &AnalysisChainConfig) {
+        self.gain = config.gain;
+        self.listening_volume = if config.normalize_amplitude {
+            Some(config.listening_volume)
+        } else {
+            None
+        };
 
-        self.chunker
-            .set_block_size((sample_rate as f64 / update_rate_hz).round() as usize);
-        self.latency_samples = self.chunker.latency_samples();
-        self.chunk_duration = Duration::from_secs_f64(1.0 / update_rate_hz);
-    }
-    pub(crate) fn update_analyzer_config(
-        &mut self,
-        resolution: usize,
-        start_frequency: f64,
-        end_frequency: f64,
-        log_frequency_scale: bool,
-        time_resolution: (f64, f64),
-    ) {
-        let sample_rate = self.left_analyzer.config().sample_rate;
+        let old_analyzer_config = self.left_analyzer.config();
+        let sample_rate = old_analyzer_config.sample_rate;
 
-        let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
-            resolution,
-            start_frequency,
-            end_frequency,
-            log_frequency_scale,
-            sample_rate,
-            time_resolution,
-        });
+        if self.update_rate != config.update_rate_hz {
+            self.chunker
+                .set_block_size((sample_rate as f64 / config.update_rate_hz).round() as usize);
+            self.latency_samples = self.chunker.latency_samples();
+            self.chunk_duration = Duration::from_secs_f64(1.0 / config.update_rate_hz);
+            self.update_rate = config.update_rate_hz;
+        }
 
-        self.left_analyzer = analyzer.clone();
-        self.right_analyzer = analyzer;
+        if old_analyzer_config.resolution != config.resolution
+            || old_analyzer_config.start_frequency != config.start_frequency
+            || old_analyzer_config.end_frequency != config.end_frequency
+            || old_analyzer_config.log_frequency_scale != config.log_frequency_scale
+            || old_analyzer_config.time_resolution != config.time_resolution
+        {
+            let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
+                resolution: config.resolution,
+                start_frequency: config.start_frequency,
+                end_frequency: config.end_frequency,
+                log_frequency_scale: config.log_frequency_scale,
+                sample_rate,
+                time_resolution: config.time_resolution,
+            });
+
+            self.left_analyzer = analyzer.clone();
+            self.right_analyzer = analyzer;
+        }
     }
 }
 

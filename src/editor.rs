@@ -12,7 +12,7 @@ use std::{
 use triple_buffer::Output;
 
 use crate::{
-    AnalysisChain, MyPlugin, PluginParams, Spectrogram,
+    AnalysisChain, AnalysisChainConfig, MyPlugin, PluginParams, Spectrogram,
     analyzer::{calculate_pan_and_volume, map_value_f32},
 };
 
@@ -164,7 +164,7 @@ struct RenderSettings {
 
 impl Default for RenderSettings {
     fn default() -> Self {
-        RenderSettings {
+        Self {
             left_hue: 195.0,
             right_hue: 328.0,
             minimum_lightness: 0.14,
@@ -188,6 +188,8 @@ pub fn create(
     let last_frame = Mutex::new(Instant::now());
 
     let settings = Mutex::new(RenderSettings::default());
+
+    let cached_analysis_settings = Mutex::new(AnalysisChainConfig::default());
 
     create_egui_editor(
         egui_state.clone(),
@@ -356,85 +358,128 @@ pub fn create(
                 .id(egui::Id::new("settings"))
                 .default_open(false)
                 .show(egui_ctx, |ui| {
-                    let mut settings = settings.lock().unwrap();
+                    ui.collapsing("Render Options", |ui| {
+                        let mut settings = settings.lock().unwrap();
 
-                    ui.label("Renderer Options");
-                    ui.add_space(4.0);
+                        let mut spectrogram_duration = settings.spectrogram_duration.as_secs_f64();
 
-                    let mut spectrogram_duration = settings.spectrogram_duration.as_secs_f64();
+                        ui.add(
+                            egui::Slider::new(&mut settings.left_hue, 0.0..=360.0)
+                                .suffix("°")
+                                .step_by(1.0)
+                                .fixed_decimals(0)
+                                .text("Left channel hue"),
+                        );
 
-                    ui.add(
-                        egui::Slider::new(&mut settings.left_hue, 0.0..=360.0)
-                            .suffix("°")
-                            .step_by(1.0)
-                            .fixed_decimals(0)
-                            .text("Left channel hue"),
-                    );
+                        ui.add(
+                            egui::Slider::new(&mut settings.right_hue, 0.0..=360.0)
+                                .suffix("°")
+                                .step_by(1.0)
+                                .fixed_decimals(0)
+                                .text("Right channel hue"),
+                        );
 
-                    ui.add(
-                        egui::Slider::new(&mut settings.right_hue, 0.0..=360.0)
-                            .suffix("°")
-                            .step_by(1.0)
-                            .fixed_decimals(0)
-                            .text("Right channel hue"),
-                    );
+                        ui.add(
+                            egui::Slider::new(&mut settings.minimum_lightness, 0.0..=0.3)
+                                .text("Minimum OkLCH lightness value"),
+                        );
 
-                    ui.add(
-                        egui::Slider::new(&mut settings.minimum_lightness, 0.0..=0.3)
-                            .text("Minimum OkLCH lightness value"),
-                    );
+                        ui.add(
+                            egui::Slider::new(&mut settings.max_db, 0.0..=-75.0)
+                                .suffix("dB")
+                                .step_by(1.0)
+                                .fixed_decimals(0)
+                                .text("Maximum (normalized) amplitude"),
+                        );
 
-                    ui.add(
-                        egui::Slider::new(&mut settings.max_db, 0.0..=-75.0)
-                            .suffix("dB")
-                            .step_by(1.0)
-                            .fixed_decimals(0)
-                            .text("Maximum (normalized) amplitude"),
-                    );
+                        ui.add(
+                            egui::Slider::new(&mut settings.min_db, 0.0..=-75.0)
+                                .suffix("dB")
+                                .step_by(1.0)
+                                .fixed_decimals(0)
+                                .text("Minimum (normalized) amplitude"),
+                        );
 
-                    ui.add(
-                        egui::Slider::new(&mut settings.min_db, 0.0..=-75.0)
-                            .suffix("dB")
-                            .step_by(1.0)
-                            .fixed_decimals(0)
-                            .text("Minimum (normalized) amplitude"),
-                    );
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut spectrogram_duration, 0.05..=1.0)
+                                    .text("Spectrogram duration"),
+                            )
+                            .changed()
+                        {
+                            settings.spectrogram_duration =
+                                Duration::from_secs_f64(spectrogram_duration);
+                        };
 
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut spectrogram_duration, 0.05..=1.0)
-                                .text("Spectrogram duration"),
-                        )
-                        .changed()
-                    {
-                        settings.spectrogram_duration =
-                            Duration::from_secs_f64(spectrogram_duration);
-                    };
+                        ui.add(
+                            egui::Slider::new(&mut settings.bargraph_height, 0.0..=1.0)
+                                .text("Bargraph height"),
+                        );
 
-                    ui.add(
-                        egui::Slider::new(&mut settings.bargraph_height, 0.0..=1.0)
-                            .text("Bargraph height"),
-                    );
+                        ui.checkbox(&mut settings.show_performance, "Show performance counters");
 
-                    ui.checkbox(&mut settings.show_performance, "Show performance counters");
+                        if ui.button("Reset Render Options").clicked() {
+                            *settings = RenderSettings::default();
+                        }
+                    });
 
-                    ui.separator();
+                    ui.collapsing("Analysis Options", |ui| {
+                        let mut settings = cached_analysis_settings.lock().unwrap();
+                        let update = |settings| {
+                            let mut lock = analysis_chain.lock().unwrap();
+                            let analysis_chain = lock.as_mut().unwrap();
+                            analysis_chain.update_config(settings);
+                        };
 
-                    ui.label("Analysis Options");
+                        ui.colored_label(
+                            Color32::YELLOW,
+                            "Editing these options may temporarily interrupt playback.",
+                        );
 
-                    ui.label("TODO"); // TODO
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut settings.gain, 20.0..=-20.0)
+                                    .suffix("dB")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Gain"),
+                            )
+                            .changed()
+                        {
+                            update(&settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        };
 
-                    ui.separator();
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut settings.listening_volume, 100.0..=20.0)
+                                    .suffix("dB SPL")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("0dbFS output volume"),
+                            )
+                            .changed()
+                        {
+                            update(&settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        };
 
-                    ui.label("Analyzer Options");
+                        if ui
+                            .checkbox(
+                                &mut settings.normalize_amplitude,
+                                "Perform amplitude normalization",
+                            )
+                            .changed()
+                        {
+                            update(&settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        }
 
-                    ui.label("TODO"); // TODO
-
-                    ui.separator();
-
-                    if ui.button("Reset Render Options").clicked() {
-                        *settings = RenderSettings::default();
-                    }
+                        ui.label("TODO");
+                    });
 
                     /*ui.group(|ui| {
                         ui.label("Within a frame");
