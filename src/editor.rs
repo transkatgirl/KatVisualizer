@@ -454,7 +454,7 @@ pub fn create(
                         if ui
                             .add(
                                 egui::Slider::new(&mut settings.listening_volume, 100.0..=20.0)
-                                    .suffix("dB SPL")
+                                    .suffix(" dB SPL")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
                                     .text("0dbFS output volume"),
@@ -478,7 +478,82 @@ pub fn create(
                             return;
                         }
 
-                        ui.label("TODO");
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut settings.update_rate_hz, 64.0..=1024.0)
+                                    .suffix("hz")
+                                    .step_by(32.0)
+                                    .fixed_decimals(0)
+                                    .text("Update rate"),
+                            )
+                            .changed()
+                        {
+                            update(&settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        };
+
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut settings.resolution, 32..=1024)
+                                    .suffix(" bins")
+                                    .step_by(32.0)
+                                    .fixed_decimals(0)
+                                    .text("Resolution"),
+                            )
+                            .changed()
+                        {
+                            update(&settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        };
+
+                        if ui
+                            .checkbox(
+                                &mut settings.log_frequency_scale,
+                                "Use logarithmic frequency scale",
+                            )
+                            .changed()
+                        {
+                            update(&settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        }
+
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut settings.time_resolution.0, 50.0..=200.0)
+                                    .suffix("ms")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Minimum time resolution"),
+                            )
+                            .changed()
+                        {
+                            update(&settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        };
+
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut settings.time_resolution.1, 50.0..=400.0)
+                                    .suffix("ms")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Maximum time resolution"),
+                            )
+                            .changed()
+                        {
+                            update(&settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        };
+
+                        if ui.button("Reset Analysis Options").clicked() {
+                            *settings = AnalysisChainConfig::default();
+                            update(&settings);
+                        }
                     });
 
                     /*ui.group(|ui| {
