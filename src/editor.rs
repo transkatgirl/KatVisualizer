@@ -162,6 +162,21 @@ struct RenderSettings {
     show_performance: bool,
 }
 
+impl Default for RenderSettings {
+    fn default() -> Self {
+        RenderSettings {
+            left_hue: 195.0,
+            right_hue: 328.0,
+            minimum_lightness: 0.14,
+            min_db: -75.0,
+            max_db: -5.0,
+            bargraph_height: 0.4,
+            spectrogram_duration: Duration::from_millis(333),
+            show_performance: true,
+        }
+    }
+}
+
 pub fn create(
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
@@ -172,16 +187,7 @@ pub fn create(
 
     let last_frame = Mutex::new(Instant::now());
 
-    let settings = Mutex::new(RenderSettings {
-        left_hue: 195.0,
-        right_hue: 328.0,
-        minimum_lightness: 0.14,
-        min_db: -75.0,
-        max_db: -5.0,
-        bargraph_height: 0.4,
-        spectrogram_duration: Duration::from_millis(333),
-        show_performance: true,
-    });
+    let settings = Mutex::new(RenderSettings::default());
 
     create_egui_editor(
         egui_state.clone(),
@@ -189,6 +195,8 @@ pub fn create(
         |_, _| {},
         move |egui_ctx, setter, _state| {
             egui::CentralPanel::default().show(egui_ctx, |ui| {
+                egui_ctx.request_repaint();
+
                 let start = Instant::now();
 
                 let painter = ui.painter();
@@ -340,9 +348,98 @@ pub fn create(
                 }
 
                 *last_frame = now;
-
-                // TODO: Add UI elements
             });
+            /*egui::TopBottomPanel::bottom("my_panel").show(egui_ctx, move |ui| {
+                ui.label("Hello World!");
+            });*/
+            egui::Window::new("Settings")
+                .id(egui::Id::new("settings"))
+                .default_open(false)
+                .show(egui_ctx, |ui| {
+                    let mut settings = settings.lock().unwrap();
+
+                    ui.label("Renderer Options");
+                    ui.add_space(4.0);
+
+                    let mut spectrogram_duration = settings.spectrogram_duration.as_secs_f64();
+
+                    ui.add(
+                        egui::Slider::new(&mut settings.left_hue, 0.0..=360.0)
+                            .suffix("°")
+                            .step_by(1.0)
+                            .fixed_decimals(0)
+                            .text("Left channel hue"),
+                    );
+
+                    ui.add(
+                        egui::Slider::new(&mut settings.right_hue, 0.0..=360.0)
+                            .suffix("°")
+                            .step_by(1.0)
+                            .fixed_decimals(0)
+                            .text("Right channel hue"),
+                    );
+
+                    ui.add(
+                        egui::Slider::new(&mut settings.minimum_lightness, 0.0..=0.3)
+                            .text("Minimum OkLCH lightness value"),
+                    );
+
+                    ui.add(
+                        egui::Slider::new(&mut settings.max_db, 0.0..=-75.0)
+                            .suffix("dB")
+                            .step_by(1.0)
+                            .fixed_decimals(0)
+                            .text("Maximum (normalized) amplitude"),
+                    );
+
+                    ui.add(
+                        egui::Slider::new(&mut settings.min_db, 0.0..=-75.0)
+                            .suffix("dB")
+                            .step_by(1.0)
+                            .fixed_decimals(0)
+                            .text("Minimum (normalized) amplitude"),
+                    );
+
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut spectrogram_duration, 0.05..=1.0)
+                                .text("Spectrogram duration"),
+                        )
+                        .changed()
+                    {
+                        settings.spectrogram_duration =
+                            Duration::from_secs_f64(spectrogram_duration);
+                    };
+
+                    ui.add(
+                        egui::Slider::new(&mut settings.bargraph_height, 0.0..=1.0)
+                            .text("Bargraph height"),
+                    );
+
+                    ui.checkbox(&mut settings.show_performance, "Show performance counters");
+
+                    ui.separator();
+
+                    ui.label("Analysis Options");
+
+                    ui.label("TODO"); // TODO
+
+                    ui.separator();
+
+                    ui.label("Analyzer Options");
+
+                    ui.label("TODO"); // TODO
+
+                    ui.separator();
+
+                    if ui.button("Reset Render Options").clicked() {
+                        *settings = RenderSettings::default();
+                    }
+
+                    /*ui.group(|ui| {
+                        ui.label("Within a frame");
+                    });*/
+                });
         },
     )
 }
