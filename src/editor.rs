@@ -151,6 +151,7 @@ fn color_function(settings: &RenderSettings) -> impl Fn(f32, f32) -> Color32 {
     }
 }
 
+#[derive(Clone, Copy)]
 struct RenderSettings {
     left_hue: f32,
     right_hue: f32,
@@ -172,7 +173,7 @@ pub fn create(
 
     let last_frame = Mutex::new(Instant::now());
 
-    let settings = RwLock::new(RenderSettings {
+    let settings = Mutex::new(RenderSettings {
         left_hue: 195.0,
         right_hue: 328.0,
         minimum_lightness: 0.14,
@@ -194,18 +195,19 @@ pub fn create(
                     let start = Instant::now();
 
                     let painter = ui.painter();
+                    let max_x = painter.clip_rect().max.x;
+                    let max_y = painter.clip_rect().max.y;
+                    let settings = *settings.lock().unwrap();
 
                     let mut lock = analyzer_output.lock().unwrap();
                     let spectrogram = lock.read();
-                    let settings = settings.read().unwrap();
 
                     let (left, right, processing_duration, timestamp, chunk_duration) =
                         spectrogram.front().unwrap();
 
                     let buffering_duration = start.duration_since(*timestamp);
-
-                    let max_x = painter.clip_rect().max.x;
-                    let max_y = painter.clip_rect().max.y;
+                    let processing_duration = *processing_duration;
+                    let chunk_duration = *chunk_duration;
 
                     let color_function = color_function(&settings);
 
@@ -241,6 +243,8 @@ pub fn create(
                             settings.spectrogram_duration,
                         );
                     }
+
+                    drop(lock);
 
                     if settings.show_performance && buffering_duration < Duration::from_millis(500)
                     {
