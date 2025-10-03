@@ -35,7 +35,5 @@ audacity is useful for testing. once you have a track loaded into audacity, clic
 	- [x] Bargraph
 	- [x] Spectrogram
 	- [x] Performance counters
-	- [ ] Settings
-		- [ ] Processing chain settings
-		- [ ] Visualization settings
+	- [x] Settings
 	- [ ] Frequency & amplitude display

@@ -1,12 +1,11 @@
 use color::{ColorSpaceTag, DynamicColor, Flags, Rgba8, Srgb};
 use nih_plug::prelude::*;
 use nih_plug_egui::{
-    EguiState, create_egui_editor,
-    egui::{self, Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Vec2, Window},
-    widgets,
+    create_egui_editor,
+    egui::{self, Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect},
 };
 use std::{
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use triple_buffer::Output;
@@ -181,7 +180,7 @@ pub fn create(
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     analyzer_output: Arc<Mutex<Output<Spectrogram>>>,
-    async_executor: AsyncExecutor<MyPlugin>,
+    _async_executor: AsyncExecutor<MyPlugin>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
 
@@ -195,7 +194,7 @@ pub fn create(
         egui_state.clone(),
         (),
         |_, _| {},
-        move |egui_ctx, setter, _state| {
+        move |egui_ctx, _setter, _state| {
             egui::CentralPanel::default().show(egui_ctx, |ui| {
                 egui_ctx.request_repaint();
 
@@ -557,10 +556,6 @@ pub fn create(
                             update(&settings);
                         }
                     });
-
-                    /*ui.group(|ui| {
-                        ui.label("Within a frame");
-                    });*/
                 });
         },
     )
