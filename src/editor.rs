@@ -525,7 +525,7 @@ pub fn create(
                             .add(
                                 egui::Slider::new(&mut settings.time_resolution.0, 20.0..=400.0)
                                     .suffix("ms")
-                                    .step_by(1.0)
+                                    .step_by(5.0)
                                     .fixed_decimals(0)
                                     .text("Minimum time resolution"),
                             )
@@ -540,7 +540,7 @@ pub fn create(
                             .add(
                                 egui::Slider::new(&mut settings.time_resolution.1, 20.0..=400.0)
                                     .suffix("ms")
-                                    .step_by(1.0)
+                                    .step_by(5.0)
                                     .fixed_decimals(0)
                                     .text("Maximum time resolution"),
                             )
