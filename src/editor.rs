@@ -183,8 +183,8 @@ pub fn create(
             color
         };
 
-        color.components[0] = map_value_f32(intensity, 0.1, 1.0, 0.0, color.components[0]);
-        color.components[1] = map_value_f32(intensity, 0.05, 1.0, 0.0, color.components[1]);
+        color.components[0] = map_value_f32(intensity, 0.0, 1.0, 0.05, color.components[0]);
+        color.components[1] = map_value_f32(intensity, 0.0, 1.0, 0.05, color.components[1]);
 
         convert_dynamic_color(color)
     };
