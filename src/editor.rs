@@ -21,7 +21,7 @@ use triple_buffer::Output;
 
 use crate::{
     AnalyzerOutput, AnalyzerSet, AnalyzerSetWrapper, MyPlugin, PluginParams, Spectrogram,
-    analyzer::{calculate_pan, calculate_stereo_volume, map_value_f32},
+    analyzer::{calculate_pan_and_volume, map_value_f32},
 };
 
 fn convert_dynamic_color(color: DynamicColor) -> Color32 {
@@ -124,16 +124,10 @@ fn draw_spectrogram<F>(
         let band_width = width / bands.len() as f32;
 
         for (i, (left, right)) in bands {
-            let split = calculate_pan(*left, *right);
-            let intensity = map_value_f32(
-                calculate_stereo_volume(*left, *right) as f32,
-                min_db,
-                max_db,
-                0.0,
-                1.0,
-            );
+            let (pan, volume) = calculate_pan_and_volume(*left, *right);
+            let intensity = map_value_f32(volume as f32, min_db, max_db, 0.0, 1.0);
 
-            let color = color(split as f32, intensity);
+            let color = color(pan as f32, intensity);
 
             painter.rect_filled(
                 Rect {

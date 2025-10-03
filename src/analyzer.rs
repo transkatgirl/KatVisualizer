@@ -127,15 +127,15 @@ pub fn dbfs_to_amplitude(decibels: f64) -> f64 {
     10.0_f64.powf(decibels / 20.0)
 }
 
-pub fn calculate_stereo_volume(left_db: f64, right_db: f64) -> f64 {
-    amplitude_to_dbfs(dbfs_to_amplitude(left_db) + dbfs_to_amplitude(right_db))
-}
+// ----- Below formula is based on https://stackoverflow.com/a/35614871 -----
 
-// ----- Below formula is taken from https://stackoverflow.com/a/35614871 -----
+pub fn calculate_pan_and_volume(left_db: f64, right_db: f64) -> (f64, f64) {
+    let left_amplitude = dbfs_to_amplitude(left_db);
+    let right_amplitude = dbfs_to_amplitude(right_db);
 
-pub fn calculate_pan(left_db: f64, right_db: f64) -> f64 {
-    let ratio = dbfs_to_amplitude(left_db) / dbfs_to_amplitude(right_db);
-    if ratio == 1.0 {
+    let ratio = left_amplitude / right_amplitude;
+
+    let pan = if ratio == 1.0 {
         0.0
     } else {
         (f64::atan(
@@ -143,7 +143,9 @@ pub fn calculate_pan(left_db: f64, right_db: f64) -> f64 {
         ))
         .to_degrees()
             / 45.0
-    }
+    };
+
+    (pan, amplitude_to_dbfs(left_amplitude + right_amplitude))
 }
 
 // ----- Below formulas are taken from ISO 226:2023 -----
