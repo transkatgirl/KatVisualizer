@@ -246,7 +246,7 @@ pub fn create(
                             Align2::RIGHT_BOTTOM,
                             format!(
                                 "{:.1}ms buffering",
-                                processing_duration.as_secs_f64() * 1000.0
+                                buffering_duration.as_secs_f64() * 1000.0
                             ),
                             FontId {
                                 size: 12.0,
