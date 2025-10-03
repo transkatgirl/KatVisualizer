@@ -14,7 +14,7 @@ use std::{
 use triple_buffer::Output;
 
 use crate::{
-    AnalyzerSetWrapper, MyPlugin, PluginParams, Spectrogram,
+    AnalysisChain, MyPlugin, PluginParams, Spectrogram,
     analyzer::{calculate_pan_and_volume, map_value_f32},
 };
 
@@ -121,7 +121,7 @@ fn draw_spectrogram<F>(
 
 pub fn create(
     params: Arc<PluginParams>,
-    analyzers: AnalyzerSetWrapper,
+    analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     analyzer_output: Arc<Mutex<Output<Spectrogram>>>,
     async_executor: AsyncExecutor<MyPlugin>,
 ) -> Option<Box<dyn Editor>> {

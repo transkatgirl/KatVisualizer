@@ -13,16 +13,13 @@ use crate::analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration};
 pub mod analyzer;
 mod editor;
 
-type AnalyzerSet = Arc<Mutex<Option<(BetterAnalyzer, BetterAnalyzer)>>>;
 type AnalyzerOutput = (Vec<f64>, Vec<f64>, Duration, Instant);
 type Spectrogram = VecDeque<AnalyzerOutput>;
 
-// TODO: Use f32 for spectrogram data
-
 pub struct MyPlugin {
     params: Arc<PluginParams>,
-    helper: util::StftHelper<0>,
-    analyzers: AnalyzerSet,
+    analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
+    latency_samples: u32,
     buffer: AnalyzerOutput,
     spectrogram: Spectrogram,
     analyzer_input: Input<Spectrogram>,
@@ -35,28 +32,31 @@ pub struct PluginParams {
     editor_state: Arc<EguiState>,
 }
 
+const MAX_FREQUENCY_BINS: usize = 4096;
+const SPECTROGRAM_SLICES: usize = 256;
+
 impl Default for MyPlugin {
     fn default() -> Self {
         let spectrogram = VecDeque::from(vec![
             (
-                Vec::with_capacity(4096),
-                Vec::with_capacity(4096),
+                Vec::with_capacity(MAX_FREQUENCY_BINS),
+                Vec::with_capacity(MAX_FREQUENCY_BINS),
                 Duration::ZERO,
                 Instant::now(),
             );
-            256
+            SPECTROGRAM_SLICES
         ]);
 
         let (analyzer_input, analyzer_output) = triple_buffer(&spectrogram);
 
         Self {
             params: Arc::new(PluginParams::default()),
-            helper: StftHelper::new(2, 96000, 0),
-            analyzers: Arc::new(Mutex::new(None)),
+            analysis_chain: Arc::new(Mutex::new(None)),
+            latency_samples: 0,
             spectrogram,
             buffer: (
-                Vec::with_capacity(4096),
-                Vec::with_capacity(4096),
+                Vec::with_capacity(MAX_FREQUENCY_BINS),
+                Vec::with_capacity(MAX_FREQUENCY_BINS),
                 Duration::ZERO,
                 Instant::now(),
             ),
@@ -100,7 +100,7 @@ impl Plugin for MyPlugin {
     fn editor(&mut self, async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         editor::create(
             self.params.clone(),
-            AnalyzerSetWrapper::new(self.analyzers.clone()),
+            self.analysis_chain.clone(),
             self.analyzer_output.clone(),
             async_executor,
         )
@@ -112,20 +112,22 @@ impl Plugin for MyPlugin {
         buffer_config: &BufferConfig,
         context: &mut impl InitContext<Self>,
     ) -> bool {
-        let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
-            resolution: 270,
-            start_frequency: 20.0,
-            end_frequency: 20000.0,
-            log_frequency_scale: false,
-            sample_rate: buffer_config.sample_rate as usize,
-            time_resolution: (75.0, 200.0),
-        });
-
-        self.analyzers = Arc::new(Mutex::new(Some((analyzer.clone(), analyzer))));
-
-        self.helper
-            .set_block_size((buffer_config.sample_rate as f64 / 256.0).round() as usize);
-        context.set_latency_samples(self.helper.latency_samples());
+        let analysis_chain = AnalysisChain::new(
+            BetterAnalyzerConfiguration {
+                resolution: 270,
+                start_frequency: 20.0,
+                end_frequency: 20000.0,
+                log_frequency_scale: false,
+                sample_rate: buffer_config.sample_rate as usize,
+                time_resolution: (75.0, 200.0),
+            },
+            0.0,
+            85.0,
+            256.0,
+        );
+        context.set_latency_samples(analysis_chain.latency_samples);
+        self.latency_samples = analysis_chain.latency_samples;
+        self.analysis_chain = Arc::new(Mutex::new(Some(analysis_chain)));
 
         true
     }
@@ -134,48 +136,20 @@ impl Plugin for MyPlugin {
         &mut self,
         buffer: &mut Buffer,
         _aux: &mut AuxiliaryBuffers,
-        _context: &mut impl ProcessContext<Self>,
+        context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        if let Ok(mut lock) = self.analyzers.try_lock() {
-            let analyzers = lock.as_mut().unwrap();
+        if let Ok(mut lock) = self.analysis_chain.try_lock() {
+            let analysis_chain = lock.as_mut().unwrap();
 
-            assert!(buffer.channels() == 2);
+            if analysis_chain.latency_samples != self.latency_samples {
+                context.set_latency_samples(analysis_chain.latency_samples);
+                self.latency_samples = analysis_chain.latency_samples;
+            }
 
-            self.helper
-                .process_analyze_only(buffer, 1, |channel_idx, buffer| {
-                    let analyzer = if channel_idx == 0 {
-                        self.buffer.3 = Instant::now();
-                        &mut analyzers.0
-                    } else {
-                        &mut analyzers.1
-                    };
-
-                    let output = analyzer.analyze(buffer.iter().map(|s| *s as f64), 0.0, 85.0);
-
-                    #[allow(clippy::collapsible_else_if)]
-                    if channel_idx == 0 {
-                        if self.buffer.0.len() == output.len() {
-                            self.buffer.0.copy_from_slice(output);
-                        } else {
-                            self.buffer.0.clear();
-                            self.buffer.0.extend_from_slice(output);
-                        }
-                    } else {
-                        if self.buffer.1.len() == output.len() {
-                            self.buffer.1.copy_from_slice(output);
-                        } else {
-                            self.buffer.1.clear();
-                            self.buffer.1.extend_from_slice(output);
-                        }
-
-                        let finished = Instant::now();
-                        self.buffer.2 = finished.duration_since(self.buffer.3);
-                        self.buffer.3 = finished;
-
-                        update_spectrogram(&self.buffer, &mut self.spectrogram);
-                        publish_updated_spectrogram(&self.spectrogram, &mut self.analyzer_input);
-                    }
-                });
+            analysis_chain.analyze(buffer, &mut self.buffer, |output| {
+                update_spectrogram(output, &mut self.spectrogram);
+                publish_updated_spectrogram(&self.spectrogram, &mut self.analyzer_input);
+            });
         }
 
         ProcessStatus::Normal
@@ -209,27 +183,105 @@ fn publish_updated_spectrogram(spectrogram: &Spectrogram, destination: &mut Inpu
     destination.publish();
 }
 
-#[derive(Clone)]
-pub(crate) struct AnalyzerSetWrapper {
-    analyzers: AnalyzerSet,
+pub(crate) struct AnalysisChain {
+    chunker: StftHelper<0>,
+    left_analyzer: BetterAnalyzer,
+    right_analyzer: BetterAnalyzer,
+    gain: f64,
+    listening_volume: f64,
+    latency_samples: u32,
 }
 
-impl AnalyzerSetWrapper {
-    fn new(analyzers: AnalyzerSet) -> Self {
-        Self { analyzers }
-    }
+impl AnalysisChain {
+    fn new(
+        config: BetterAnalyzerConfiguration,
+        gain: f64,
+        listening_volume: f64,
+        update_rate_hz: f64,
+    ) -> Self {
+        let sample_rate = config.sample_rate;
 
-    pub(crate) fn update_config(
-        &self,
+        let analyzer = BetterAnalyzer::new(config);
+
+        let mut chunker = StftHelper::new(2, sample_rate, 0);
+        chunker.set_block_size((sample_rate as f64 / update_rate_hz).round() as usize);
+
+        Self {
+            latency_samples: chunker.latency_samples(),
+            chunker,
+            left_analyzer: analyzer.clone(),
+            right_analyzer: analyzer,
+            gain,
+            listening_volume,
+        }
+    }
+    fn analyze<F>(
+        &mut self,
+        buffer: &mut Buffer,
+        analysis_output: &mut AnalyzerOutput,
+        mut callback: F,
+    ) where
+        F: FnMut(&mut AnalyzerOutput),
+    {
+        self.chunker
+            .process_analyze_only(buffer, 1, |channel_idx, buffer| {
+                let analyzer = if channel_idx == 0 {
+                    analysis_output.3 = Instant::now();
+                    &mut self.left_analyzer
+                } else {
+                    &mut self.right_analyzer
+                };
+
+                let output = analyzer.analyze(
+                    buffer.iter().map(|s| *s as f64),
+                    self.gain,
+                    self.listening_volume,
+                );
+
+                #[allow(clippy::collapsible_else_if)]
+                if channel_idx == 0 {
+                    if analysis_output.0.len() == output.len() {
+                        analysis_output.0.copy_from_slice(output);
+                    } else {
+                        analysis_output.0.clear();
+                        analysis_output.0.extend_from_slice(output);
+                    }
+                } else {
+                    if analysis_output.1.len() == output.len() {
+                        analysis_output.1.copy_from_slice(output);
+                    } else {
+                        analysis_output.1.clear();
+                        analysis_output.1.extend_from_slice(output);
+                    }
+
+                    let finished = Instant::now();
+                    analysis_output.2 = finished.duration_since(analysis_output.3);
+                    analysis_output.3 = finished;
+
+                    callback(analysis_output);
+                }
+            });
+    }
+    pub(crate) fn update_analysis_config(&mut self, gain: f64, listening_volume: f64) {
+        self.gain = gain;
+        self.listening_volume = listening_volume;
+    }
+    pub(crate) fn update_chunking_config(&mut self, update_rate_hz: f64) {
+        let sample_rate = self.left_analyzer.config().sample_rate;
+
+        self.chunker
+            .set_block_size((sample_rate as f64 / update_rate_hz).round() as usize);
+        self.latency_samples = self.chunker.latency_samples();
+    }
+    pub(crate) fn update_analyzer_config(
+        &mut self,
         resolution: usize,
         start_frequency: f64,
         end_frequency: f64,
         log_frequency_scale: bool,
         time_resolution: (f64, f64),
     ) {
-        let mut lock = self.analyzers.lock().unwrap();
-        let analyzers = lock.as_mut().unwrap();
-        let sample_rate = analyzers.0.config().sample_rate;
+        let sample_rate = self.left_analyzer.config().sample_rate;
 
         let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
             resolution,
@@ -240,8 +292,8 @@ impl AnalyzerSetWrapper {
             time_resolution,
         });
 
-        analyzers.0 = analyzer.clone();
-        analyzers.1 = analyzer;
+        self.left_analyzer = analyzer.clone();
+        self.right_analyzer = analyzer;
     }
 }
 
