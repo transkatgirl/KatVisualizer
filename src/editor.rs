@@ -195,7 +195,7 @@ pub fn create(
                             min: Pos2 { x: 0.0, y: 0.0 },
                             max: Pos2 {
                                 x: max_x,
-                                y: max_y / 2.0,
+                                y: max_y * 0.4,
                             },
                         },
                         color_function,
@@ -208,7 +208,7 @@ pub fn create(
                         Rect {
                             min: Pos2 {
                                 x: 0.0,
-                                y: max_y / 2.0,
+                                y: max_y * 0.4,
                             },
                             max: Pos2 { x: max_x, y: max_y },
                         },
