@@ -82,18 +82,11 @@ impl Plugin for MyPlugin {
 
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
-        AudioIOLayout {
-            main_input_channels: NonZeroU32::new(2),
-            main_output_channels: NonZeroU32::new(2),
-            ..AudioIOLayout::const_default()
-        },
-        AudioIOLayout {
-            main_input_channels: NonZeroU32::new(1),
-            main_output_channels: NonZeroU32::new(1),
-            ..AudioIOLayout::const_default()
-        },
-    ];
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
+        main_input_channels: NonZeroU32::new(2),
+        main_output_channels: NonZeroU32::new(2),
+        ..AudioIOLayout::const_default()
+    }];
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
@@ -146,7 +139,7 @@ impl Plugin for MyPlugin {
         if let Ok(mut lock) = self.analyzers.try_lock() {
             let analyzers = lock.as_mut().unwrap();
 
-            let dual_channel = buffer.channels() == 2;
+            assert!(buffer.channels() == 2);
 
             self.helper
                 .process_analyze_only(buffer, 1, |channel_idx, buffer| {
@@ -166,17 +159,6 @@ impl Plugin for MyPlugin {
                         } else {
                             self.buffer.0.clear();
                             self.buffer.0.extend_from_slice(output);
-                        }
-                        if !dual_channel {
-                            let finished = Instant::now();
-                            self.buffer.2 = finished.duration_since(self.buffer.3);
-                            self.buffer.3 = finished;
-
-                            update_spectrogram(&self.buffer, &mut self.spectrogram);
-                            publish_updated_spectrogram(
-                                &self.spectrogram,
-                                &mut self.analyzer_input,
-                            );
                         }
                     } else {
                         if self.buffer.1.len() == output.len() {
@@ -271,7 +253,6 @@ impl ClapPlugin for MyPlugin {
     const CLAP_FEATURES: &'static [ClapFeature] = &[
         ClapFeature::Analyzer,
         ClapFeature::Stereo,
-        ClapFeature::Mono,
         ClapFeature::Utility,
     ];
 }
