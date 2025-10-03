@@ -111,11 +111,38 @@ impl BetterAnalyzer {
             .iter_mut()
             .zip(self.normalizers.iter())
         {
-            *output = normalizer.spl_to_phon((20.0 * f64::log10(*output)) + listening_volume)
+            *output = normalizer.spl_to_phon(amplitude_to_dbfs(*output) + listening_volume)
                 - listening_volume
         }
 
         &self.transform.spectrum_data
+    }
+}
+
+pub fn amplitude_to_dbfs(amplitude: f64) -> f64 {
+    20.0 * f64::log10(amplitude)
+}
+
+pub fn dbfs_to_amplitude(decibels: f64) -> f64 {
+    10.0_f64.powf(decibels / 20.0)
+}
+
+pub fn calculate_stereo_volume(left_db: f64, right_db: f64) -> f64 {
+    amplitude_to_dbfs(dbfs_to_amplitude(left_db) + dbfs_to_amplitude(right_db))
+}
+
+// ----- Below formula is taken from https://stackoverflow.com/a/35614871 -----
+
+pub fn calculate_pan(left_db: f64, right_db: f64) -> f64 {
+    let ratio = dbfs_to_amplitude(left_db) / dbfs_to_amplitude(right_db);
+    if ratio == 1.0 {
+        0.0
+    } else {
+        (f64::atan(
+            (-f64::sqrt(2.0) * f64::sqrt(ratio * ratio + 1.0) + ratio + 1.0) / (ratio - 1.0),
+        ))
+        .to_degrees()
+            / 45.0
     }
 }
 

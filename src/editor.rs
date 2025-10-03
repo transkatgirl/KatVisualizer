@@ -21,7 +21,7 @@ use triple_buffer::Output;
 
 use crate::{
     AnalyzerOutput, AnalyzerSet, AnalyzerSetWrapper, MyPlugin, PluginParams, Spectrogram,
-    analyzer::map_value_f32,
+    analyzer::{calculate_pan, calculate_stereo_volume, map_value_f32},
 };
 
 fn convert_dynamic_color(color: DynamicColor) -> Color32 {
@@ -124,12 +124,16 @@ fn draw_spectrogram<F>(
         let band_width = width / bands.len() as f32;
 
         for (i, (left, right)) in bands {
-            let left_intensity = map_value_f32(*left as f32, min_db, max_db, 0.0, 1.0);
-            let right_intensity = map_value_f32(*right as f32, min_db, max_db, 0.0, 1.0);
-            let color = color(
-                left_intensity.clamp(0.0, 1.0),
-                right_intensity.clamp(0.0, 1.0),
+            let split = calculate_pan(*left, *right);
+            let intensity = map_value_f32(
+                calculate_stereo_volume(*left, *right) as f32,
+                min_db,
+                max_db,
+                0.0,
+                1.0,
             );
+
+            let color = color(split as f32, intensity);
 
             painter.rect_filled(
                 Rect {
@@ -246,24 +250,15 @@ pub fn create(
                             },
                             max: Pos2 { x: max_x, y: max_y },
                         },
-                        |left_intensity, right_intensity| {
-                            /*let split = (left_intensity - right_intensity)
-                            / left_intensity.max(right_intensity);*/
-                            let split = 0.0;
-
+                        |split, intensity| {
                             let mut color = if split >= 0.0 {
                                 left_middle_color.eval(1.0 - split)
                             } else {
                                 right_middle_color.eval(1.0 - -split)
                             };
 
-                            color.components[0] = map_value_f32(
-                                (left_intensity + right_intensity) / 2.0,
-                                0.0,
-                                1.0,
-                                0.0,
-                                color.components[0],
-                            );
+                            color.components[0] =
+                                map_value_f32(intensity, 0.0, 1.0, 0.0, color.components[0]);
 
                             convert_dynamic_color(color)
                         },
