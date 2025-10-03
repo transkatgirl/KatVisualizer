@@ -43,7 +43,6 @@ fn draw_bargraph<F>(
     let width = bounds.max.x - bounds.min.x;
     let height = bounds.max.y - bounds.min.y;
 
-    let db_height = height / (max_db - min_db);
     let band_width = width / bands.len() as f32;
 
     for (i, (left, right)) in bands {
@@ -55,7 +54,7 @@ fn draw_bargraph<F>(
             Rect {
                 min: Pos2 {
                     x: bounds.min.x + i as f32 * band_width,
-                    y: bounds.min.y + (max_db * db_height) - (volume as f32 * db_height),
+                    y: bounds.max.y - intensity * height,
                 },
                 max: Pos2 {
                     x: bounds.min.x + i as f32 * band_width + band_width,
@@ -184,8 +183,8 @@ pub fn create(
             color
         };
 
-        color.components[0] = map_value_f32(intensity, 0.02, 1.0, 0.0, color.components[0]);
-        color.components[1] = map_value_f32(intensity, 0.02, 1.0, 0.0, color.components[1]);
+        color.components[0] = map_value_f32(intensity, 0.1, 1.0, 0.0, color.components[0]);
+        color.components[1] = map_value_f32(intensity, 0.05, 1.0, 0.0, color.components[1]);
 
         convert_dynamic_color(color)
     };
