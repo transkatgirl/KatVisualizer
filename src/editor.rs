@@ -142,6 +142,7 @@ pub fn create(
         flags: Flags::default(),
         components: [0.7, 0.16, 328.0, 1.0],
     };
+    let minimum_lightness = 0.14;
 
     let color_function = move |split: f32, intensity: f32| -> Color32 {
         if intensity - f32::EPSILON <= 0.0 {
@@ -158,7 +159,8 @@ pub fn create(
             color
         };
 
-        color.components[0] = map_value_f32(intensity, 0.0, 1.0, 0.12, color.components[0]);
+        color.components[0] =
+            map_value_f32(intensity, 0.0, 1.0, minimum_lightness, color.components[0]);
 
         convert_dynamic_color(color)
     };
