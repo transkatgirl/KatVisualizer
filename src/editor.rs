@@ -144,6 +144,10 @@ pub fn create(
     };
 
     let color_function = move |split: f32, intensity: f32| -> Color32 {
+        if intensity - f32::EPSILON <= 0.0 {
+            return Color32::BLACK;
+        }
+
         let mut color = if split >= 0.0 {
             let mut color = right_color;
             color.components[1] = map_value_f32(split, 0.0, 1.0, 0.0, color.components[1]);
@@ -154,7 +158,7 @@ pub fn create(
             color
         };
 
-        color.components[0] = map_value_f32(intensity, 0.0, 1.0, 0.05, color.components[0]);
+        color.components[0] = map_value_f32(intensity, 0.0, 1.0, 0.1, color.components[0]);
 
         convert_dynamic_color(color)
     };
