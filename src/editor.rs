@@ -252,9 +252,9 @@ pub fn create(
                         },
                         |split, intensity| {
                             let mut color = if split >= 0.0 {
-                                left_middle_color.eval(1.0 - split)
+                                right_middle_color.eval(1.0 - split)
                             } else {
-                                right_middle_color.eval(1.0 - -split)
+                                left_middle_color.eval(1.0 - -split)
                             };
 
                             color.components[0] =
