@@ -171,7 +171,7 @@ impl Default for RenderSettings {
             min_db: -75.0,
             max_db: -5.0,
             bargraph_height: 0.4,
-            spectrogram_duration: Duration::from_millis(333),
+            spectrogram_duration: Duration::from_secs_f64(0.33),
             show_performance: true,
         }
     }
