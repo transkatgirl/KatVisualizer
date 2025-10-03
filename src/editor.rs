@@ -3,7 +3,6 @@ use nih_plug::prelude::*;
 use nih_plug_egui::{
     EguiState, create_egui_editor,
     egui::{self, Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Vec2, Window},
-    resizable_window::ResizableWindow,
     widgets,
 };
 use std::{
@@ -189,164 +188,161 @@ pub fn create(
         (),
         |_, _| {},
         move |egui_ctx, setter, _state| {
-            ResizableWindow::new("res-wind")
-                .min_size(Vec2::new(128.0, 128.0))
-                .show(egui_ctx, egui_state.as_ref(), |ui| {
-                    let start = Instant::now();
+            egui::CentralPanel::default().show(egui_ctx, |ui| {
+                let start = Instant::now();
 
-                    let painter = ui.painter();
-                    let max_x = painter.clip_rect().max.x;
-                    let max_y = painter.clip_rect().max.y;
-                    let settings = *settings.lock().unwrap();
+                let painter = ui.painter();
+                let max_x = painter.clip_rect().max.x;
+                let max_y = painter.clip_rect().max.y;
+                let settings = *settings.lock().unwrap();
 
-                    let mut lock = analyzer_output.lock().unwrap();
-                    let spectrogram = lock.read();
+                let mut lock = analyzer_output.lock().unwrap();
+                let spectrogram = lock.read();
 
-                    let (left, right, processing_duration, timestamp, chunk_duration) =
-                        spectrogram.front().unwrap();
+                let (left, right, processing_duration, timestamp, chunk_duration) =
+                    spectrogram.front().unwrap();
 
-                    let buffering_duration = start.duration_since(*timestamp);
-                    let processing_duration = *processing_duration;
-                    let chunk_duration = *chunk_duration;
+                let buffering_duration = start.duration_since(*timestamp);
+                let processing_duration = *processing_duration;
+                let chunk_duration = *chunk_duration;
 
-                    let color_function = color_function(&settings);
+                let color_function = color_function(&settings);
 
-                    if settings.bargraph_height != 0.0 {
-                        draw_bargraph(
-                            painter,
-                            (left, right),
-                            Rect {
-                                min: Pos2 { x: 0.0, y: 0.0 },
-                                max: Pos2 {
-                                    x: max_x,
-                                    y: max_y * settings.bargraph_height,
-                                },
+                if settings.bargraph_height != 0.0 {
+                    draw_bargraph(
+                        painter,
+                        (left, right),
+                        Rect {
+                            min: Pos2 { x: 0.0, y: 0.0 },
+                            max: Pos2 {
+                                x: max_x,
+                                y: max_y * settings.bargraph_height,
                             },
-                            &color_function,
-                            (settings.max_db, settings.min_db),
-                        );
-                    }
+                        },
+                        &color_function,
+                        (settings.max_db, settings.min_db),
+                    );
+                }
 
-                    if settings.bargraph_height != 1.0 {
-                        draw_spectrogram(
-                            painter,
-                            spectrogram,
-                            Rect {
-                                min: Pos2 {
-                                    x: 0.0,
-                                    y: max_y * settings.bargraph_height,
-                                },
-                                max: Pos2 { x: max_x, y: max_y },
+                if settings.bargraph_height != 1.0 {
+                    draw_spectrogram(
+                        painter,
+                        spectrogram,
+                        Rect {
+                            min: Pos2 {
+                                x: 0.0,
+                                y: max_y * settings.bargraph_height,
                             },
-                            &color_function,
-                            (settings.max_db, settings.min_db),
-                            settings.spectrogram_duration,
-                        );
-                    }
+                            max: Pos2 { x: max_x, y: max_y },
+                        },
+                        &color_function,
+                        (settings.max_db, settings.min_db),
+                        settings.spectrogram_duration,
+                    );
+                }
 
-                    drop(lock);
+                drop(lock);
 
-                    if settings.show_performance && buffering_duration < Duration::from_millis(500)
-                    {
-                        let processing_proportion =
-                            processing_duration.as_secs_f64() / chunk_duration.as_secs_f64();
+                if settings.show_performance && buffering_duration < Duration::from_millis(500) {
+                    let processing_proportion =
+                        processing_duration.as_secs_f64() / chunk_duration.as_secs_f64();
 
-                        painter.text(
-                            Pos2 {
-                                x: max_x - 32.0,
-                                y: 64.0,
-                            },
-                            Align2::RIGHT_BOTTOM,
-                            format!(
-                                "{:.0}% ({:.1}ms) processing",
-                                processing_proportion * 100.0,
-                                processing_duration.as_secs_f64() * 1000.0,
-                            ),
-                            FontId {
-                                size: 12.0,
-                                family: egui::FontFamily::Monospace,
-                            },
-                            if processing_proportion >= 1.0 {
-                                Color32::RED
-                            } else if processing_proportion >= 0.8 {
-                                Color32::YELLOW
-                            } else {
-                                Color32::from_rgb(224, 224, 224)
-                            },
-                        );
-                        painter.text(
-                            Pos2 {
-                                x: max_x - 32.0,
-                                y: 80.0,
-                            },
-                            Align2::RIGHT_BOTTOM,
-                            format!(
-                                "{:.1}ms buffering",
-                                buffering_duration.as_secs_f64() * 1000.0
-                            ),
-                            FontId {
-                                size: 12.0,
-                                family: egui::FontFamily::Monospace,
-                            },
-                            if buffering_duration >= chunk_duration.mul_f64(3.0) {
-                                Color32::RED
-                            } else if buffering_duration >= chunk_duration.mul_f64(2.0) {
-                                Color32::YELLOW
-                            } else {
-                                Color32::from_rgb(224, 224, 224)
-                            },
-                        );
-                    }
+                    painter.text(
+                        Pos2 {
+                            x: max_x - 32.0,
+                            y: 64.0,
+                        },
+                        Align2::RIGHT_BOTTOM,
+                        format!(
+                            "{:.0}% ({:.1}ms) processing",
+                            processing_proportion * 100.0,
+                            processing_duration.as_secs_f64() * 1000.0,
+                        ),
+                        FontId {
+                            size: 12.0,
+                            family: egui::FontFamily::Monospace,
+                        },
+                        if processing_proportion >= 1.0 {
+                            Color32::RED
+                        } else if processing_proportion >= 0.8 {
+                            Color32::YELLOW
+                        } else {
+                            Color32::from_rgb(224, 224, 224)
+                        },
+                    );
+                    painter.text(
+                        Pos2 {
+                            x: max_x - 32.0,
+                            y: 80.0,
+                        },
+                        Align2::RIGHT_BOTTOM,
+                        format!(
+                            "{:.1}ms buffering",
+                            buffering_duration.as_secs_f64() * 1000.0
+                        ),
+                        FontId {
+                            size: 12.0,
+                            family: egui::FontFamily::Monospace,
+                        },
+                        if buffering_duration >= chunk_duration.mul_f64(3.0) {
+                            Color32::RED
+                        } else if buffering_duration >= chunk_duration.mul_f64(2.0) {
+                            Color32::YELLOW
+                        } else {
+                            Color32::from_rgb(224, 224, 224)
+                        },
+                    );
+                }
 
-                    let mut last_frame = last_frame.lock().unwrap();
-                    let now = Instant::now();
-                    if settings.show_performance {
-                        let frame_elapsed = now.duration_since(*last_frame);
-                        painter.text(
-                            Pos2 {
-                                x: max_x - 32.0,
-                                y: 32.0,
-                            },
-                            Align2::RIGHT_BOTTOM,
-                            format!("{:2}ms frame", frame_elapsed.as_millis()),
-                            FontId {
-                                size: 12.0,
-                                family: egui::FontFamily::Monospace,
-                            },
-                            if frame_elapsed > Duration::from_millis(33) {
-                                Color32::RED
-                            } else if frame_elapsed > Duration::from_millis(18) {
-                                Color32::YELLOW
-                            } else {
-                                Color32::from_rgb(224, 224, 224)
-                            },
-                        );
-                        let draw_elapsed = now.duration_since(start);
-                        painter.text(
-                            Pos2 {
-                                x: max_x - 32.0,
-                                y: 48.0,
-                            },
-                            Align2::RIGHT_BOTTOM,
-                            format!("{:.1}ms composite", draw_elapsed.as_secs_f64() * 1000.0),
-                            FontId {
-                                size: 12.0,
-                                family: egui::FontFamily::Monospace,
-                            },
-                            if draw_elapsed > Duration::from_millis(4) {
-                                Color32::RED
-                            } else if draw_elapsed > Duration::from_millis(2) {
-                                Color32::YELLOW
-                            } else {
-                                Color32::from_rgb(224, 224, 224)
-                            },
-                        );
-                    }
+                let mut last_frame = last_frame.lock().unwrap();
+                let now = Instant::now();
+                if settings.show_performance {
+                    let frame_elapsed = now.duration_since(*last_frame);
+                    painter.text(
+                        Pos2 {
+                            x: max_x - 32.0,
+                            y: 32.0,
+                        },
+                        Align2::RIGHT_BOTTOM,
+                        format!("{:2}ms frame", frame_elapsed.as_millis()),
+                        FontId {
+                            size: 12.0,
+                            family: egui::FontFamily::Monospace,
+                        },
+                        if frame_elapsed > Duration::from_millis(33) {
+                            Color32::RED
+                        } else if frame_elapsed > Duration::from_millis(18) {
+                            Color32::YELLOW
+                        } else {
+                            Color32::from_rgb(224, 224, 224)
+                        },
+                    );
+                    let draw_elapsed = now.duration_since(start);
+                    painter.text(
+                        Pos2 {
+                            x: max_x - 32.0,
+                            y: 48.0,
+                        },
+                        Align2::RIGHT_BOTTOM,
+                        format!("{:.1}ms composite", draw_elapsed.as_secs_f64() * 1000.0),
+                        FontId {
+                            size: 12.0,
+                            family: egui::FontFamily::Monospace,
+                        },
+                        if draw_elapsed > Duration::from_millis(4) {
+                            Color32::RED
+                        } else if draw_elapsed > Duration::from_millis(2) {
+                            Color32::YELLOW
+                        } else {
+                            Color32::from_rgb(224, 224, 224)
+                        },
+                    );
+                }
 
-                    *last_frame = now;
+                *last_frame = now;
 
-                    // TODO: Add UI elements
-                });
+                // TODO: Add UI elements
+            });
         },
     )
 }
