@@ -199,7 +199,7 @@ pub fn create(
                     let spectrogram = lock.read();
                     let settings = settings.read().unwrap();
 
-                    let (left, right, processing_duration, timestamp, _) =
+                    let (left, right, processing_duration, timestamp, chunk_duration) =
                         spectrogram.front().unwrap();
 
                     let buffering_duration = start.duration_since(*timestamp);
@@ -245,7 +245,7 @@ pub fn create(
                     if settings.show_performance && buffering_duration < Duration::from_millis(500)
                     {
                         let processing_proportion =
-                            processing_duration.as_secs_f64() / (1.0 / 256.0);
+                            processing_duration.as_secs_f64() / chunk_duration.as_secs_f64();
 
                         painter.text(
                             Pos2 {
@@ -284,9 +284,9 @@ pub fn create(
                                 size: 12.0,
                                 family: egui::FontFamily::Monospace,
                             },
-                            if buffering_duration > Duration::from_millis(12) {
+                            if buffering_duration >= chunk_duration.mul_f64(3.0) {
                                 Color32::RED
-                            } else if buffering_duration > Duration::from_millis(8) {
+                            } else if buffering_duration >= chunk_duration.mul_f64(2.0) {
                                 Color32::YELLOW
                             } else {
                                 Color32::from_rgb(224, 224, 224)

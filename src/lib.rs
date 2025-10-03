@@ -32,8 +32,8 @@ pub struct PluginParams {
     editor_state: Arc<EguiState>,
 }
 
-const MAX_FREQUENCY_BINS: usize = 4096;
-const SPECTROGRAM_SLICES: usize = 256;
+const MAX_FREQUENCY_BINS: usize = 2048;
+const SPECTROGRAM_SLICES: usize = 512;
 
 impl Default for MyPlugin {
     fn default() -> Self {
@@ -43,7 +43,7 @@ impl Default for MyPlugin {
                 Vec::with_capacity(MAX_FREQUENCY_BINS),
                 Duration::ZERO,
                 Instant::now(),
-                Duration::from_secs_f64(1.0 / 256.0),
+                Duration::from_secs_f64(1.0 / 512.0),
             );
             SPECTROGRAM_SLICES
         ]);
@@ -60,7 +60,7 @@ impl Default for MyPlugin {
                 Vec::with_capacity(MAX_FREQUENCY_BINS),
                 Duration::ZERO,
                 Instant::now(),
-                Duration::from_secs_f64(1.0 / 256.0),
+                Duration::from_secs_f64(1.0 / 512.0),
             ),
             analyzer_input,
             analyzer_output: Arc::new(Mutex::new(analyzer_output)),
@@ -116,7 +116,7 @@ impl Plugin for MyPlugin {
     ) -> bool {
         let analysis_chain = AnalysisChain::new(
             BetterAnalyzerConfiguration {
-                resolution: 270,
+                resolution: 256,
                 start_frequency: 20.0,
                 end_frequency: 20000.0,
                 log_frequency_scale: false,
@@ -125,7 +125,7 @@ impl Plugin for MyPlugin {
             },
             0.0,
             Some(85.0),
-            256.0,
+            512.0,
         );
         context.set_latency_samples(analysis_chain.latency_samples);
         self.latency_samples = analysis_chain.latency_samples;
@@ -175,6 +175,7 @@ fn update_spectrogram(buffer: &AnalyzerOutput, spectrogram: &mut Spectrogram) {
     }
     old.2 = buffer.2;
     old.3 = buffer.3;
+    old.4 = buffer.4;
 
     spectrogram.push_front(old);
 }
