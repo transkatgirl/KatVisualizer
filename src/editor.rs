@@ -29,13 +29,15 @@ fn convert_dynamic_color(color: DynamicColor) -> Color32 {
     Color32::from_rgba_unmultiplied(converted.r, converted.g, converted.b, converted.a)
 }
 
-fn draw_bargraph(
+fn draw_bargraph<F>(
     painter: &Painter,
     (left, right): (&[f64], &[f64]),
     bounds: Rect,
-    (left_color, middle_color, right_color): (Color32, Color32, Color32),
+    color: F,
     (max_db, min_db): (f32, f32),
-) {
+) where
+    F: Fn(f32, f32) -> Color32,
+{
     let bands = left.iter().zip(right.iter()).enumerate();
 
     let width = bounds.max.x - bounds.min.x;
@@ -45,11 +47,15 @@ fn draw_bargraph(
     let band_width = width / bands.len() as f32;
 
     for (i, (left, right)) in bands {
+        let (pan, volume) = calculate_pan_and_volume(*left, *right);
+        let intensity = map_value_f32(volume as f32, min_db, max_db, 0.0, 1.0);
+        let color = color(pan as f32, intensity);
+
         painter.rect_filled(
             Rect {
                 min: Pos2 {
                     x: bounds.min.x + i as f32 * band_width,
-                    y: bounds.min.y + (max_db * db_height) - (*right as f32 * db_height),
+                    y: bounds.min.y + (max_db * db_height) - (volume as f32 * db_height),
                 },
                 max: Pos2 {
                     x: bounds.min.x + i as f32 * band_width + band_width,
@@ -57,35 +63,7 @@ fn draw_bargraph(
                 },
             },
             CornerRadius::ZERO,
-            left_color,
-        );
-        painter.rect_filled(
-            Rect {
-                min: Pos2 {
-                    x: bounds.min.x + i as f32 * band_width,
-                    y: bounds.min.y + (max_db * db_height) - (*left as f32 * db_height),
-                },
-                max: Pos2 {
-                    x: bounds.min.x + i as f32 * band_width + band_width,
-                    y: bounds.max.y,
-                },
-            },
-            CornerRadius::ZERO,
-            right_color,
-        );
-        painter.rect_filled(
-            Rect {
-                min: Pos2 {
-                    x: bounds.min.x + i as f32 * band_width,
-                    y: bounds.min.y + (3.0 * db_height) - (left.min(*right) as f32 * db_height),
-                },
-                max: Pos2 {
-                    x: bounds.min.x + i as f32 * band_width + band_width,
-                    y: bounds.max.y,
-                },
-            },
-            CornerRadius::ZERO,
-            middle_color,
+            color,
         );
     }
 }
@@ -126,7 +104,6 @@ fn draw_spectrogram<F>(
         for (i, (left, right)) in bands {
             let (pan, volume) = calculate_pan_and_volume(*left, *right);
             let intensity = map_value_f32(volume as f32, min_db, max_db, 0.0, 1.0);
-
             let color = color(pan as f32, intensity);
 
             painter.rect_filled(
@@ -159,22 +136,25 @@ pub fn create(
 
     let last_frame = Mutex::new(Instant::now());
 
+    // .54, .9
+    // .42, .19
+
     let left_color = DynamicColor {
         cs: ColorSpaceTag::Oklch,
         flags: Flags::default(),
-        components: [0.53, 0.09, 195.0, 1.0],
+        components: [0.7, 0.16, 195.0, 1.0],
     };
-    let middle_color = DynamicColor {
+    /*let middle_color = DynamicColor {
         cs: ColorSpaceTag::Oklch,
         flags: Flags::default(),
         components: [0.96, 0.0, 0.0, 1.0],
-    };
+    };*/
     let right_color = DynamicColor {
         cs: ColorSpaceTag::Oklch,
         flags: Flags::default(),
-        components: [0.53, 0.19, 328.0, 1.0],
+        components: [0.7, 0.16, 328.0, 1.0],
     };
-    let left_color_converted = convert_dynamic_color(left_color);
+    /*let left_color_converted = convert_dynamic_color(left_color);
     let middle_color_converted = convert_dynamic_color(middle_color);
     let right_color_converted = convert_dynamic_color(right_color);
     let left_right_color = left_color.interpolate(
@@ -191,7 +171,24 @@ pub fn create(
         middle_color,
         ColorSpaceTag::Oklch,
         color::HueDirection::Shorter,
-    );
+    );*/
+
+    let color_function = move |split: f32, intensity: f32| -> Color32 {
+        let mut color = if split >= 0.0 {
+            let mut color = right_color;
+            color.components[1] = map_value_f32(split, 0.0, 1.0, 0.0, color.components[1]);
+            color
+        } else {
+            let mut color = left_color;
+            color.components[1] = map_value_f32(-split, 0.0, 1.0, 0.0, color.components[1]);
+            color
+        };
+
+        color.components[0] = map_value_f32(intensity, 0.02, 1.0, 0.0, color.components[0]);
+        color.components[1] = map_value_f32(intensity, 0.02, 1.0, 0.0, color.components[1]);
+
+        convert_dynamic_color(color)
+    };
 
     create_egui_editor(
         egui_state.clone(),
@@ -226,11 +223,7 @@ pub fn create(
                                 y: max_y / 2.0,
                             },
                         },
-                        (
-                            left_color_converted,
-                            middle_color_converted,
-                            right_color_converted,
-                        ),
+                        color_function,
                         (0.0, -80.0),
                     );
 
@@ -244,18 +237,7 @@ pub fn create(
                             },
                             max: Pos2 { x: max_x, y: max_y },
                         },
-                        |split, intensity| {
-                            let mut color = if split >= 0.0 {
-                                right_middle_color.eval(1.0 - split)
-                            } else {
-                                left_middle_color.eval(1.0 - -split)
-                            };
-
-                            color.components[0] =
-                                map_value_f32(intensity, 0.0, 1.0, 0.0, color.components[0]);
-
-                            convert_dynamic_color(color)
-                        },
+                        color_function,
                         (0.0, -80.0),
                         Duration::from_millis(333),
                     );
