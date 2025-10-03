@@ -19,7 +19,10 @@ use std::{
 };
 use triple_buffer::Output;
 
-use crate::{AnalyzerOutput, AnalyzerSet, AnalyzerSetWrapper, MyPlugin, PluginParams, Spectrogram};
+use crate::{
+    AnalyzerOutput, AnalyzerSet, AnalyzerSetWrapper, MyPlugin, PluginParams, Spectrogram,
+    analyzer::map_value_f32,
+};
 
 fn convert_dynamic_color(color: DynamicColor) -> Color32 {
     let converted: Rgba8 = color.to_alpha_color::<Srgb>().to_rgba8();
@@ -97,10 +100,11 @@ fn draw_spectrogram<F>(
 ) where
     F: Fn(f32, f32) -> Color32,
 {
+    painter.rect_filled(bounds, CornerRadius::ZERO, Color32::BLACK);
+
     let width = bounds.max.x - bounds.min.x;
     let height = bounds.max.y - bounds.min.y;
 
-    let db_range = max_db - min_db;
     let second_height = height / duration.as_secs_f32();
 
     //let (_, _, _, now) = spectrogram.front().unwrap();
@@ -120,9 +124,12 @@ fn draw_spectrogram<F>(
         let band_width = width / bands.len() as f32;
 
         for (i, (left, right)) in bands {
-            let left_intensity = 1.0 - ((max_db - *left as f32) / db_range);
-            let right_intensity = 1.0 - ((max_db - *right as f32) / db_range);
-            let color = color(left_intensity, right_intensity);
+            let left_intensity = map_value_f32(*left as f32, min_db, max_db, 0.0, 1.0);
+            let right_intensity = map_value_f32(*right as f32, min_db, max_db, 0.0, 1.0);
+            let color = color(
+                left_intensity.clamp(0.0, 1.0),
+                right_intensity.clamp(0.0, 1.0),
+            );
 
             painter.rect_filled(
                 Rect {
@@ -157,7 +164,7 @@ pub fn create(
     let left_color = DynamicColor {
         cs: ColorSpaceTag::Oklch,
         flags: Flags::default(),
-        components: [0.53, 0.19, 328.0, 1.0],
+        components: [0.53, 0.09, 195.0, 1.0],
     };
     let middle_color = DynamicColor {
         cs: ColorSpaceTag::Oklch,
@@ -167,24 +174,24 @@ pub fn create(
     let right_color = DynamicColor {
         cs: ColorSpaceTag::Oklch,
         flags: Flags::default(),
-        components: [0.53, 0.09, 195.0, 1.0],
+        components: [0.53, 0.19, 328.0, 1.0],
     };
     let left_color_converted = convert_dynamic_color(left_color);
     let middle_color_converted = convert_dynamic_color(middle_color);
     let right_color_converted = convert_dynamic_color(right_color);
     let left_right_color = left_color.interpolate(
         right_color,
-        ColorSpaceTag::A98Rgb,
+        ColorSpaceTag::Oklch,
         color::HueDirection::Shorter,
     );
     let left_middle_color = left_color.interpolate(
         middle_color,
-        ColorSpaceTag::A98Rgb,
+        ColorSpaceTag::Oklch,
         color::HueDirection::Shorter,
     );
     let right_middle_color = right_color.interpolate(
         middle_color,
-        ColorSpaceTag::A98Rgb,
+        ColorSpaceTag::Oklch,
         color::HueDirection::Shorter,
     );
 
@@ -240,9 +247,25 @@ pub fn create(
                             max: Pos2 { x: max_x, y: max_y },
                         },
                         |left_intensity, right_intensity| {
-                            let intensity =
-                                (((left_intensity + right_intensity) / 2.0) * 255.0) as u8;
-                            Color32::from_rgb(intensity, intensity, intensity)
+                            /*let split = (left_intensity - right_intensity)
+                            / left_intensity.max(right_intensity);*/
+                            let split = 0.0;
+
+                            let mut color = if split >= 0.0 {
+                                left_middle_color.eval(1.0 - split)
+                            } else {
+                                right_middle_color.eval(1.0 - -split)
+                            };
+
+                            color.components[0] = map_value_f32(
+                                (left_intensity + right_intensity) / 2.0,
+                                0.0,
+                                1.0,
+                                0.0,
+                                color.components[0],
+                            );
+
+                            convert_dynamic_color(color)
                         },
                         (0.0, -80.0),
                         Duration::from_millis(333),

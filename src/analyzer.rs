@@ -221,7 +221,11 @@ fn approximate_coefficients(frequency: f64) -> (f64, f64, f64) {
 
 // ----- Below algorithms are taken from https://codepen.io/TF3RDL/pen/MWLzPoO -----
 
-fn map_value(x: f64, min: f64, max: f64, target_min: f64, target_max: f64) -> f64 {
+pub fn map_value_f64(x: f64, min: f64, max: f64, target_min: f64, target_max: f64) -> f64 {
+    (x - min) / (max - min) * (target_max - target_min) + target_min
+}
+
+pub fn map_value_f32(x: f32, min: f32, max: f32, target_min: f32, target_max: f32) -> f32 {
     (x - min) / (max - min) * (target_max - target_min) + target_min
 }
 
@@ -256,21 +260,21 @@ impl FrequencyScale {
                 let target_max = (n - 1) as f64;
 
                 FrequencyBand {
-                    low: self.inv_scale(map_value(
+                    low: self.inv_scale(map_value_f64(
                         i - bandwidth,
                         0.0,
                         target_max,
                         self.scale(low),
                         self.scale(high),
                     )),
-                    center: self.inv_scale(map_value(
+                    center: self.inv_scale(map_value_f64(
                         i,
                         0.0,
                         target_max,
                         self.scale(low),
                         self.scale(high),
                     )),
-                    high: self.inv_scale(map_value(
+                    high: self.inv_scale(map_value_f64(
                         i + bandwidth,
                         0.0,
                         target_max,
