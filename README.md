@@ -1,4 +1,4 @@
-# Kat Visualizer
+# KatVisualizer
 
 my attempt at making a music visualizer which doesn't suck
 
