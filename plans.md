@@ -71,3 +71,6 @@
 - https://codepen.io/TF3RDL/pen/poQJwRW
 - https://codepen.io/transkatgirl/pen/XJXdRvr
 - https://editor.p5js.org/jayadiandri/sketches/GyKsfn8JO
+- https://docs.rs/dasp-rs/0.1.1/src/dasp_rs/signal_processing/time_frequency.rs.html#199-238
+- https://github.com/libAudioFlux/audioFlux/blob/master/src/reassign_algorithm.c#L200
+- https://www.mathworks.com/matlabcentral/fileexchange/21736-high-resolution-spectrographic-routines
