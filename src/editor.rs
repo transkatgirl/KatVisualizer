@@ -403,6 +403,7 @@ pub fn create(
                         if ui
                             .add(
                                 egui::Slider::new(&mut spectrogram_duration, 0.05..=1.0)
+                                    .suffix("s")
                                     .text("Spectrogram duration"),
                             )
                             .changed()
@@ -480,7 +481,8 @@ pub fn create(
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.update_rate_hz, 64.0..=2048.0)
+                                egui::Slider::new(&mut settings.update_rate_hz, 64.0..=8192.0)
+                                    .logarithmic(true)
                                     .suffix("hz")
                                     .step_by(64.0)
                                     .fixed_decimals(0)
