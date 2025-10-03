@@ -7,8 +7,7 @@ use nih_plug_egui::{
     widgets,
 };
 use std::{
-    collections::VecDeque,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
 use triple_buffer::Output;
@@ -27,7 +26,7 @@ fn draw_bargraph<F>(
     painter: &Painter,
     (left, right): (&[f64], &[f64]),
     bounds: Rect,
-    color: F,
+    color: &F,
     (max_db, min_db): (f32, f32),
 ) where
     F: Fn(f32, f32) -> Color32,
@@ -63,28 +62,23 @@ fn draw_bargraph<F>(
 
 fn draw_spectrogram<F>(
     painter: &Painter,
-    spectrogram: &VecDeque<(Vec<f64>, Vec<f64>, Duration, Instant)>,
+    spectrogram: &Spectrogram,
     bounds: Rect,
-    color: F,
+    color: &F,
     (max_db, min_db): (f32, f32),
     duration: Duration,
 ) where
     F: Fn(f32, f32) -> Color32,
 {
-    painter.rect_filled(bounds, CornerRadius::ZERO, Color32::BLACK);
-
     let width = bounds.max.x - bounds.min.x;
     let height = bounds.max.y - bounds.min.y;
 
     let second_height = height / duration.as_secs_f32();
 
-    //let (_, _, _, now) = spectrogram.front().unwrap();
-
     let mut last_elapsed = Duration::ZERO;
 
-    for (left, right, _, _timestamp) in spectrogram {
-        //let elapsed = now.duration_since(*timestamp);
-        let elapsed = last_elapsed + Duration::from_secs_f64(1.0 / 256.0);
+    for (left, right, _, _timestamp, length) in spectrogram {
+        let elapsed = last_elapsed + *length;
 
         if elapsed > duration {
             break;
@@ -119,32 +113,23 @@ fn draw_spectrogram<F>(
     }
 }
 
-pub fn create(
-    params: Arc<PluginParams>,
-    analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
-    analyzer_output: Arc<Mutex<Output<Spectrogram>>>,
-    async_executor: AsyncExecutor<MyPlugin>,
-) -> Option<Box<dyn Editor>> {
-    let egui_state = params.editor_state.clone();
+const MAX_LIGHTNESS: f32 = 0.72;
+const MAX_CHROMA: f32 = 0.12;
 
-    let last_frame = Mutex::new(Instant::now());
-
-    // .54, .9
-    // .42, .19
-
+fn color_function(settings: &RenderSettings) -> impl Fn(f32, f32) -> Color32 {
     let left_color = DynamicColor {
         cs: ColorSpaceTag::Oklch,
         flags: Flags::default(),
-        components: [0.7, 0.16, 195.0, 1.0],
+        components: [MAX_LIGHTNESS, MAX_CHROMA, settings.left_hue, 1.0],
     };
     let right_color = DynamicColor {
         cs: ColorSpaceTag::Oklch,
         flags: Flags::default(),
-        components: [0.7, 0.16, 328.0, 1.0],
+        components: [MAX_LIGHTNESS, MAX_CHROMA, settings.right_hue, 1.0],
     };
-    let minimum_lightness = 0.14;
+    let minimum_lightness = settings.minimum_lightness;
 
-    let color_function = move |split: f32, intensity: f32| -> Color32 {
+    move |split: f32, intensity: f32| -> Color32 {
         if intensity - f32::EPSILON <= 0.0 {
             return Color32::BLACK;
         }
@@ -163,7 +148,40 @@ pub fn create(
             map_value_f32(intensity, 0.0, 1.0, minimum_lightness, color.components[0]);
 
         convert_dynamic_color(color)
-    };
+    }
+}
+
+struct RenderSettings {
+    left_hue: f32,
+    right_hue: f32,
+    minimum_lightness: f32,
+    min_db: f32,
+    max_db: f32,
+    bargraph_height: f32,
+    spectrogram_duration: Duration,
+    show_performance: bool,
+}
+
+pub fn create(
+    params: Arc<PluginParams>,
+    analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
+    analyzer_output: Arc<Mutex<Output<Spectrogram>>>,
+    async_executor: AsyncExecutor<MyPlugin>,
+) -> Option<Box<dyn Editor>> {
+    let egui_state = params.editor_state.clone();
+
+    let last_frame = Mutex::new(Instant::now());
+
+    let settings = RwLock::new(RenderSettings {
+        left_hue: 195.0,
+        right_hue: 328.0,
+        minimum_lightness: 0.14,
+        min_db: -75.0,
+        max_db: -5.0,
+        bargraph_height: 0.4,
+        spectrogram_duration: Duration::from_millis(333),
+        show_performance: true,
+    });
 
     create_egui_editor(
         egui_state.clone(),
@@ -179,8 +197,9 @@ pub fn create(
 
                     let mut lock = analyzer_output.lock().unwrap();
                     let spectrogram = lock.read();
+                    let settings = settings.read().unwrap();
 
-                    let (left, right, processing_duration, timestamp) =
+                    let (left, right, processing_duration, timestamp, _) =
                         spectrogram.front().unwrap();
 
                     let buffering_duration = start.duration_since(*timestamp);
@@ -188,36 +207,43 @@ pub fn create(
                     let max_x = painter.clip_rect().max.x;
                     let max_y = painter.clip_rect().max.y;
 
-                    draw_bargraph(
-                        painter,
-                        (left, right),
-                        Rect {
-                            min: Pos2 { x: 0.0, y: 0.0 },
-                            max: Pos2 {
-                                x: max_x,
-                                y: max_y * 0.4,
-                            },
-                        },
-                        color_function,
-                        (0.0, -75.0),
-                    );
+                    let color_function = color_function(&settings);
 
-                    draw_spectrogram(
-                        painter,
-                        spectrogram,
-                        Rect {
-                            min: Pos2 {
-                                x: 0.0,
-                                y: max_y * 0.4,
+                    if settings.bargraph_height != 0.0 {
+                        draw_bargraph(
+                            painter,
+                            (left, right),
+                            Rect {
+                                min: Pos2 { x: 0.0, y: 0.0 },
+                                max: Pos2 {
+                                    x: max_x,
+                                    y: max_y * settings.bargraph_height,
+                                },
                             },
-                            max: Pos2 { x: max_x, y: max_y },
-                        },
-                        color_function,
-                        (0.0, -75.0),
-                        Duration::from_millis(333),
-                    );
+                            &color_function,
+                            (settings.max_db, settings.min_db),
+                        );
+                    }
 
-                    if buffering_duration < Duration::from_millis(500) {
+                    if settings.bargraph_height != 1.0 {
+                        draw_spectrogram(
+                            painter,
+                            spectrogram,
+                            Rect {
+                                min: Pos2 {
+                                    x: 0.0,
+                                    y: max_y * settings.bargraph_height,
+                                },
+                                max: Pos2 { x: max_x, y: max_y },
+                            },
+                            &color_function,
+                            (settings.max_db, settings.min_db),
+                            settings.spectrogram_duration,
+                        );
+                    }
+
+                    if settings.show_performance && buffering_duration < Duration::from_millis(500)
+                    {
                         let processing_proportion =
                             processing_duration.as_secs_f64() / (1.0 / 256.0);
 
@@ -270,50 +296,52 @@ pub fn create(
 
                     let mut last_frame = last_frame.lock().unwrap();
                     let now = Instant::now();
-                    let frame_elapsed = now.duration_since(*last_frame);
-                    painter.text(
-                        Pos2 {
-                            x: max_x - 32.0,
-                            y: 32.0,
-                        },
-                        Align2::RIGHT_BOTTOM,
-                        format!("{:2}ms frame", frame_elapsed.as_millis()),
-                        FontId {
-                            size: 12.0,
-                            family: egui::FontFamily::Monospace,
-                        },
-                        if frame_elapsed > Duration::from_millis(33) {
-                            Color32::RED
-                        } else if frame_elapsed > Duration::from_millis(18) {
-                            Color32::YELLOW
-                        } else {
-                            Color32::from_rgb(224, 224, 224)
-                        },
-                    );
-                    let draw_elapsed = now.duration_since(start);
-                    painter.text(
-                        Pos2 {
-                            x: max_x - 32.0,
-                            y: 48.0,
-                        },
-                        Align2::RIGHT_BOTTOM,
-                        format!("{:.1}ms composite", draw_elapsed.as_secs_f64() * 1000.0),
-                        FontId {
-                            size: 12.0,
-                            family: egui::FontFamily::Monospace,
-                        },
-                        if draw_elapsed > Duration::from_millis(4) {
-                            Color32::RED
-                        } else if draw_elapsed > Duration::from_millis(2) {
-                            Color32::YELLOW
-                        } else {
-                            Color32::from_rgb(224, 224, 224)
-                        },
-                    );
+                    if settings.show_performance {
+                        let frame_elapsed = now.duration_since(*last_frame);
+                        painter.text(
+                            Pos2 {
+                                x: max_x - 32.0,
+                                y: 32.0,
+                            },
+                            Align2::RIGHT_BOTTOM,
+                            format!("{:2}ms frame", frame_elapsed.as_millis()),
+                            FontId {
+                                size: 12.0,
+                                family: egui::FontFamily::Monospace,
+                            },
+                            if frame_elapsed > Duration::from_millis(33) {
+                                Color32::RED
+                            } else if frame_elapsed > Duration::from_millis(18) {
+                                Color32::YELLOW
+                            } else {
+                                Color32::from_rgb(224, 224, 224)
+                            },
+                        );
+                        let draw_elapsed = now.duration_since(start);
+                        painter.text(
+                            Pos2 {
+                                x: max_x - 32.0,
+                                y: 48.0,
+                            },
+                            Align2::RIGHT_BOTTOM,
+                            format!("{:.1}ms composite", draw_elapsed.as_secs_f64() * 1000.0),
+                            FontId {
+                                size: 12.0,
+                                family: egui::FontFamily::Monospace,
+                            },
+                            if draw_elapsed > Duration::from_millis(4) {
+                                Color32::RED
+                            } else if draw_elapsed > Duration::from_millis(2) {
+                                Color32::YELLOW
+                            } else {
+                                Color32::from_rgb(224, 224, 224)
+                            },
+                        );
+                    }
 
                     *last_frame = now;
 
-                    // TODO
+                    // TODO: Add UI elements
                 });
         },
     )

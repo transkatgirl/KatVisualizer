@@ -30,7 +30,7 @@ audacity is useful for testing. once you have a track loaded into audacity, clic
 	- [ ] Spectral reassignment
 	- [x] Stereo channel separation
 	- [ ] Automatic gain control?
-	- [ ] Data interpolation?
+	- [ ] Data interpolation
 - [ ] UI
 	- [x] Bargraph
 	- [x] Spectrogram

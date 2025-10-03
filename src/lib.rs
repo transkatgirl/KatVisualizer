@@ -13,7 +13,7 @@ use crate::analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration};
 pub mod analyzer;
 mod editor;
 
-type AnalyzerOutput = (Vec<f64>, Vec<f64>, Duration, Instant);
+type AnalyzerOutput = (Vec<f64>, Vec<f64>, Duration, Instant, Duration);
 type Spectrogram = VecDeque<AnalyzerOutput>;
 
 pub struct MyPlugin {
@@ -43,6 +43,7 @@ impl Default for MyPlugin {
                 Vec::with_capacity(MAX_FREQUENCY_BINS),
                 Duration::ZERO,
                 Instant::now(),
+                Duration::from_secs_f64(1.0 / 256.0),
             );
             SPECTROGRAM_SLICES
         ]);
@@ -59,6 +60,7 @@ impl Default for MyPlugin {
                 Vec::with_capacity(MAX_FREQUENCY_BINS),
                 Duration::ZERO,
                 Instant::now(),
+                Duration::from_secs_f64(1.0 / 256.0),
             ),
             analyzer_input,
             analyzer_output: Arc::new(Mutex::new(analyzer_output)),
@@ -190,6 +192,7 @@ pub(crate) struct AnalysisChain {
     gain: f64,
     listening_volume: Option<f64>,
     latency_samples: u32,
+    chunk_duration: Duration,
 }
 
 impl AnalysisChain {
@@ -213,6 +216,7 @@ impl AnalysisChain {
             right_analyzer: analyzer,
             gain,
             listening_volume,
+            chunk_duration: Duration::from_secs_f64(1.0 / update_rate_hz),
         }
     }
     fn analyze<F>(
@@ -257,6 +261,7 @@ impl AnalysisChain {
                     let finished = Instant::now();
                     analysis_output.2 = finished.duration_since(analysis_output.3);
                     analysis_output.3 = finished;
+                    analysis_output.4 = self.chunk_duration;
 
                     callback(analysis_output);
                 }
@@ -272,6 +277,7 @@ impl AnalysisChain {
         self.chunker
             .set_block_size((sample_rate as f64 / update_rate_hz).round() as usize);
         self.latency_samples = self.chunker.latency_samples();
+        self.chunk_duration = Duration::from_secs_f64(1.0 / update_rate_hz);
     }
     pub(crate) fn update_analyzer_config(
         &mut self,
