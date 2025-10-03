@@ -480,9 +480,9 @@ pub fn create(
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.update_rate_hz, 64.0..=1024.0)
+                                egui::Slider::new(&mut settings.update_rate_hz, 64.0..=2048.0)
                                     .suffix("hz")
-                                    .step_by(32.0)
+                                    .step_by(64.0)
                                     .fixed_decimals(0)
                                     .text("Update rate"),
                             )
@@ -511,7 +511,7 @@ pub fn create(
                         if ui
                             .checkbox(
                                 &mut settings.log_frequency_scale,
-                                "Use logarithmic frequency scale",
+                                "Use logarithmic (non-perceptual) frequency scale",
                             )
                             .changed()
                         {
