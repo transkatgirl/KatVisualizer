@@ -122,7 +122,7 @@ impl Plugin for MyPlugin {
                 time_resolution: (75.0, 200.0),
             },
             0.0,
-            85.0,
+            Some(85.0),
             256.0,
         );
         context.set_latency_samples(analysis_chain.latency_samples);
@@ -188,7 +188,7 @@ pub(crate) struct AnalysisChain {
     left_analyzer: BetterAnalyzer,
     right_analyzer: BetterAnalyzer,
     gain: f64,
-    listening_volume: f64,
+    listening_volume: Option<f64>,
     latency_samples: u32,
 }
 
@@ -196,7 +196,7 @@ impl AnalysisChain {
     fn new(
         config: BetterAnalyzerConfiguration,
         gain: f64,
-        listening_volume: f64,
+        listening_volume: Option<f64>,
         update_rate_hz: f64,
     ) -> Self {
         let sample_rate = config.sample_rate;
@@ -262,7 +262,7 @@ impl AnalysisChain {
                 }
             });
     }
-    pub(crate) fn update_analysis_config(&mut self, gain: f64, listening_volume: f64) {
+    pub(crate) fn update_analysis_config(&mut self, gain: f64, listening_volume: Option<f64>) {
         self.gain = gain;
         self.listening_volume = listening_volume;
     }

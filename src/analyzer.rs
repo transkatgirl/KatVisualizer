@@ -100,20 +100,27 @@ impl BetterAnalyzer {
         &mut self,
         samples: impl Iterator<Item = f64>,
         gain: f64,
-        mut listening_volume: f64,
+        normalization_volume: Option<f64>,
     ) -> &[f64] {
-        listening_volume = listening_volume.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON);
-
         self.transform.analyze(samples);
 
-        for (output, normalizer) in self
-            .transform
-            .spectrum_data
-            .iter_mut()
-            .zip(self.normalizers.iter())
-        {
-            *output = normalizer.spl_to_phon(amplitude_to_dbfs(*output) + gain + listening_volume)
-                - listening_volume
+        if let Some(listening_volume) = normalization_volume {
+            for (output, normalizer) in self
+                .transform
+                .spectrum_data
+                .iter_mut()
+                .zip(self.normalizers.iter())
+            {
+                *output = normalizer
+                    .spl_to_phon(amplitude_to_dbfs(*output) + gain + listening_volume)
+                    //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                    .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                    - listening_volume
+            }
+        } else {
+            for output in self.transform.spectrum_data.iter_mut() {
+                *output = amplitude_to_dbfs(*output) + gain
+            }
         }
 
         &self.transform.spectrum_data
@@ -198,8 +205,10 @@ impl PrecomputedNormalizer {
         )
 }*/
 
-const MIN_COMPLETE_NORM_PHON: f64 = 20.0;
-const MAX_COMPLETE_NORM_PHON: f64 = 80.0;
+/*const MIN_COMPLETE_NORM_PHON: f64 = 20.0;
+const MAX_COMPLETE_NORM_PHON: f64 = 80.0;*/
+const MIN_INFORMATIVE_NORM_PHON: f64 = 0.0;
+const MAX_INFORMATIVE_NORM_PHON: f64 = 100.0;
 const NORM_MULTIPLE: f64 = 100.0 / 3.0;
 
 const NORM_FREQUENCIES: &[f64] = &[

@@ -29,7 +29,7 @@ audacity is useful for testing. once you have a track loaded into audacity, clic
 	- [x] ISO 226:2023 equal loudness contour
 	- [ ] Spectral reassignment
 	- [x] Stereo channel separation
-	- [ ] Automatic gain control
+	- [ ] Automatic gain control?
 	- [ ] Data interpolation?
 - [ ] UI
 	- [x] Bargraph
