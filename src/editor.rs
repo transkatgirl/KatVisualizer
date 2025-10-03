@@ -356,7 +356,6 @@ pub fn create(
             egui::Window::new("Settings")
                 .id(egui::Id::new("settings"))
                 .default_open(false)
-                .scroll([false, true])
                 .show(egui_ctx, |ui| {
                     ui.collapsing("Render Options", |ui| {
                         let mut settings = settings.lock().unwrap();
