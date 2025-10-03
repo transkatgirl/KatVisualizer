@@ -37,3 +37,5 @@ audacity is useful for testing. once you have a track loaded into audacity, clic
 	- [x] Performance counters
 	- [x] Settings
 	- [ ] Frequency & amplitude display
+
+Other important improvements: Support single channel inputs, test out multithreaded audio processing (1 thread per channel)
