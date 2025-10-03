@@ -1,7 +1,10 @@
+use color::{
+    AlphaColor, ColorSpace, ColorSpaceTag, DynamicColor, Flags, Interpolator, Rgba8, Srgb,
+};
 use nih_plug::{prelude::*, util::StftHelper};
 use nih_plug_egui::{
     EguiState, create_egui_editor,
-    egui::{self, Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Vec2, Window},
+    egui::{self, Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Rgba, Vec2, Window},
     resizable_window::ResizableWindow,
     widgets,
 };
@@ -18,12 +21,17 @@ use triple_buffer::Output;
 
 use crate::{AnalyzerOutput, AnalyzerSet, AnalyzerSetWrapper, MyPlugin, PluginParams, Spectrogram};
 
+fn convert_dynamic_color(color: DynamicColor) -> Color32 {
+    let converted: Rgba8 = color.to_alpha_color::<Srgb>().to_rgba8();
+    Color32::from_rgba_unmultiplied(converted.r, converted.g, converted.b, converted.a)
+}
+
 fn draw_bargraph(
     painter: &Painter,
     (left, right): (&[f64], &[f64]),
     bounds: Rect,
-    max_db: f32,
-    min_db: f32,
+    (left_color, middle_color, right_color): (Color32, Color32, Color32),
+    (max_db, min_db): (f32, f32),
 ) {
     let bands = left.iter().zip(right.iter()).enumerate();
 
@@ -46,7 +54,7 @@ fn draw_bargraph(
                 },
             },
             CornerRadius::ZERO,
-            Color32::from_rgb(128, 0, 128),
+            left_color,
         );
         painter.rect_filled(
             Rect {
@@ -60,7 +68,7 @@ fn draw_bargraph(
                 },
             },
             CornerRadius::ZERO,
-            Color32::from_rgb(0, 128, 128),
+            right_color,
         );
         painter.rect_filled(
             Rect {
@@ -74,30 +82,32 @@ fn draw_bargraph(
                 },
             },
             CornerRadius::ZERO,
-            Color32::from_rgb(224, 224, 224),
+            middle_color,
         );
     }
 }
 
-fn draw_spectrogram(
+fn draw_spectrogram<F>(
     painter: &Painter,
     spectrogram: &VecDeque<(Vec<f64>, Vec<f64>, Duration, Instant)>,
     bounds: Rect,
-    max_db: f32,
-    min_db: f32,
+    color: F,
+    (max_db, min_db): (f32, f32),
     duration: Duration,
-) {
+) where
+    F: Fn(f32, f32) -> Color32,
+{
     let width = bounds.max.x - bounds.min.x;
     let height = bounds.max.y - bounds.min.y;
 
-    let db_color_step = 255.0 / (max_db - min_db);
+    let db_range = max_db - min_db;
     let second_height = height / duration.as_secs_f32();
 
-    let (_, _, _, now) = spectrogram.front().unwrap();
+    //let (_, _, _, now) = spectrogram.front().unwrap();
 
     let mut last_elapsed = Duration::ZERO;
 
-    for (left, right, _, timestamp) in spectrogram {
+    for (left, right, _, _timestamp) in spectrogram {
         //let elapsed = now.duration_since(*timestamp);
         let elapsed = last_elapsed + Duration::from_secs_f64(1.0 / 256.0);
 
@@ -110,9 +120,9 @@ fn draw_spectrogram(
         let band_width = width / bands.len() as f32;
 
         for (i, (left, right)) in bands {
-            let intensity =
-                ((max_db - ((left + right) / 2.0) as f32) * db_color_step.round()) as u8;
-            let color = Color32::from_rgb(intensity, intensity, intensity); // TODO: Improve this
+            let left_intensity = 1.0 - ((max_db - *left as f32) / db_range);
+            let right_intensity = 1.0 - ((max_db - *right as f32) / db_range);
+            let color = color(left_intensity, right_intensity);
 
             painter.rect_filled(
                 Rect {
@@ -143,6 +153,40 @@ pub fn create(
     let egui_state = params.editor_state.clone();
 
     let last_frame = Mutex::new(Instant::now());
+
+    let left_color = DynamicColor {
+        cs: ColorSpaceTag::Oklch,
+        flags: Flags::default(),
+        components: [0.53, 0.19, 328.0, 1.0],
+    };
+    let middle_color = DynamicColor {
+        cs: ColorSpaceTag::Oklch,
+        flags: Flags::default(),
+        components: [0.96, 0.0, 0.0, 1.0],
+    };
+    let right_color = DynamicColor {
+        cs: ColorSpaceTag::Oklch,
+        flags: Flags::default(),
+        components: [0.53, 0.09, 195.0, 1.0],
+    };
+    let left_color_converted = convert_dynamic_color(left_color);
+    let middle_color_converted = convert_dynamic_color(middle_color);
+    let right_color_converted = convert_dynamic_color(right_color);
+    let left_right_color = left_color.interpolate(
+        right_color,
+        ColorSpaceTag::A98Rgb,
+        color::HueDirection::Shorter,
+    );
+    let left_middle_color = left_color.interpolate(
+        middle_color,
+        ColorSpaceTag::A98Rgb,
+        color::HueDirection::Shorter,
+    );
+    let right_middle_color = right_color.interpolate(
+        middle_color,
+        ColorSpaceTag::A98Rgb,
+        color::HueDirection::Shorter,
+    );
 
     create_egui_editor(
         egui_state.clone(),
@@ -177,8 +221,12 @@ pub fn create(
                                 y: max_y / 2.0,
                             },
                         },
-                        0.0,
-                        -80.0,
+                        (
+                            left_color_converted,
+                            middle_color_converted,
+                            right_color_converted,
+                        ),
+                        (0.0, -80.0),
                     );
 
                     draw_spectrogram(
@@ -191,8 +239,12 @@ pub fn create(
                             },
                             max: Pos2 { x: max_x, y: max_y },
                         },
-                        0.0,
-                        -80.0,
+                        |left_intensity, right_intensity| {
+                            let intensity =
+                                (((left_intensity + right_intensity) / 2.0) * 255.0) as u8;
+                            Color32::from_rgb(intensity, intensity, intensity)
+                        },
+                        (0.0, -80.0),
                         Duration::from_millis(333),
                     );
 
