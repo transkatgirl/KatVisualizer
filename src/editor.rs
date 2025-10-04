@@ -586,6 +586,15 @@ pub fn create(
                             return;
                         };
 
+                        if ui
+                            .checkbox(&mut settings.spectral_reassignment, "Use NC method")
+                            .changed()
+                        {
+                            update(&settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        }
+
                         if ui.button("Reset Analysis Options").clicked() {
                             *settings = AnalysisChainConfig::default();
                             update(&settings);

@@ -210,6 +210,7 @@ pub(crate) struct AnalysisChainConfig {
     end_frequency: f64,
     log_frequency_scale: bool,
     time_resolution: (f64, f64),
+    spectral_reassignment: bool,
 }
 
 impl Default for AnalysisChainConfig {
@@ -224,6 +225,7 @@ impl Default for AnalysisChainConfig {
             end_frequency: 20000.0,
             log_frequency_scale: false,
             time_resolution: (70.0, 200.0),
+            spectral_reassignment: false,
         }
     }
 }
@@ -251,6 +253,7 @@ impl AnalysisChain {
             log_frequency_scale: config.log_frequency_scale,
             sample_rate,
             time_resolution: config.time_resolution,
+            spectral_reassignment: config.spectral_reassignment,
         });
 
         let mut chunker = StftHelper::new(2, sample_rate, 0);
@@ -354,6 +357,7 @@ impl AnalysisChain {
             || old_analyzer_config.end_frequency != config.end_frequency
             || old_analyzer_config.log_frequency_scale != config.log_frequency_scale
             || old_analyzer_config.time_resolution != config.time_resolution
+            || old_analyzer_config.spectral_reassignment != config.spectral_reassignment
         {
             let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
                 resolution: config.resolution,
@@ -362,6 +366,7 @@ impl AnalysisChain {
                 log_frequency_scale: config.log_frequency_scale,
                 sample_rate,
                 time_resolution: config.time_resolution,
+                spectral_reassignment: config.spectral_reassignment,
             });
             drop(old_left_analyzer);
 

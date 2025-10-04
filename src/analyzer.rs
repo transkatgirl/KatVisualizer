@@ -11,6 +11,7 @@ pub struct BetterAnalyzerConfiguration {
 
     pub sample_rate: usize,
     pub time_resolution: (f64, f64),
+    pub spectral_reassignment: bool,
 }
 
 impl Default for BetterAnalyzerConfiguration {
@@ -22,6 +23,7 @@ impl Default for BetterAnalyzerConfiguration {
             log_frequency_scale: false,
             sample_rate: 48000,
             time_resolution: (75.0, 200.0),
+            spectral_reassignment: true,
         }
     }
 }
@@ -69,6 +71,7 @@ impl BetterAnalyzer {
             1.0,
             config.time_resolution.1,
             config.sample_rate,
+            config.spectral_reassignment,
         );
 
         let frequency_bands: Vec<_> = frequency_bands
@@ -438,6 +441,7 @@ struct VQsDFT {
     buffer: Vec<f64>,
     buffer_index: usize,
     spectrum_data: Vec<f64>,
+    use_nc: bool,
 }
 
 #[derive(Clone)]
@@ -467,20 +471,32 @@ impl VQsDFT {
         bandwidth: f64,
         max_time_res: f64,
         sample_rate: usize,
+        use_nc: bool,
     ) -> Self {
         let sample_rate_f64 = sample_rate as f64;
         let buffer_size = (sample_rate_f64 * max_time_res / 1000.0).round() as usize;
         let buffer_size_f64 = buffer_size as f64;
 
-        let min_idx = -(window.len() as isize) + 1;
-        let max_idx = window.len() as isize;
+        let (min_idx, max_idx) = if use_nc {
+            (0, 2)
+        } else {
+            (-(window.len() as isize) + 1, window.len() as isize)
+        };
         let items_per_band = (max_idx - min_idx) as usize;
+
+        let gains = if use_nc {
+            vec![0.0; 2]
+        } else {
+            (min_idx..max_idx)
+                .map(|i| window[i.unsigned_abs()] * (-((i as f64).abs() % 2.0) * 2.0 + 1.0))
+                .collect()
+        };
+
+        let k_offset = if use_nc { -0.5 } else { 0.0 };
 
         VQsDFT {
             spectrum_data: vec![0.0; freq_bands.len()],
-            gains: (min_idx..max_idx)
-                .map(|i| window[i.unsigned_abs()] * (-((i as f64).abs() % 2.0) * 2.0 + 1.0))
-                .collect(),
+            gains,
             coeffs: freq_bands
                 .iter()
                 .map(|x| {
@@ -498,7 +514,7 @@ impl VQsDFT {
                     for i in min_idx..max_idx {
                         let i = i as f64;
 
-                        let k = (x.center * period) / sample_rate_f64 + i;
+                        let k = (x.center * period) / sample_rate_f64 + i + k_offset;
                         let fid = -2.0 * PI * k;
                         let twid = (2.0 * PI * k) / period;
                         let reson = 2.0 * f64::cos(twid);
@@ -523,6 +539,7 @@ impl VQsDFT {
                 .collect(),
             buffer: vec![0.0; buffer_size + 1],
             buffer_index: buffer_size,
+            use_nc,
         }
     }
     fn reset(&mut self) {
@@ -587,8 +604,16 @@ impl VQsDFT {
                     sum.0 += coeff.coeffs3[j].0 * self.gains[j] / coeff.period;
                     sum.1 += coeff.coeffs3[j].1 * self.gains[j] / coeff.period;
                 }
-                self.spectrum_data[i] =
-                    f64::max(self.spectrum_data[i], sum.0.powi(2) + sum.1.powi(2));
+                self.spectrum_data[i] = f64::max(
+                    self.spectrum_data[i],
+                    if self.use_nc {
+                        -(coeff.coeffs3[0].0 / coeff.period * coeff.coeffs3[1].0 / coeff.period)
+                            - (coeff.coeffs3[0].1 / coeff.period * coeff.coeffs3[1].1
+                                / coeff.period)
+                    } else {
+                        sum.0.powi(2) + sum.1.powi(2)
+                    },
+                );
             }
         }
         self.spectrum_data.iter_mut().for_each(|x| *x = x.sqrt());
