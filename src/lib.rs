@@ -26,7 +26,7 @@ pub struct MyPlugin {
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     latency_samples: u32,
     analysis: (BetterAnalysis, AnalysisMetrics),
-    spectrogram: (BetterSpectrogram, AnalysisMetrics),
+    spectrogram: BetterSpectrogram,
     buffer_input: Input<(BetterSpectrogram, AnalysisMetrics)>,
     buffer_output: Arc<Mutex<Output<(BetterSpectrogram, AnalysisMetrics)>>>,
 }
@@ -55,7 +55,7 @@ impl Default for MyPlugin {
             params: Arc::new(PluginParams::default()),
             analysis_chain: Arc::new(Mutex::new(None)),
             latency_samples: 0,
-            spectrogram,
+            spectrogram: BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
             analysis: (
                 BetterAnalysis::new(MAX_FREQUENCY_BINS),
                 AnalysisMetrics {
@@ -185,12 +185,11 @@ impl Plugin for MyPlugin {
                 buffer,
                 &mut self.analysis,
                 |(analysis, metrics), chunk_duration| {
-                    self.spectrogram.0.update(analysis, chunk_duration);
-                    self.spectrogram.1 = *metrics;
+                    self.spectrogram.update(analysis, chunk_duration);
 
                     let write_buffer = self.buffer_input.input_buffer_mut();
-                    write_buffer.0.clone_from(&self.spectrogram.0);
-                    write_buffer.1 = self.spectrogram.1;
+                    write_buffer.0.clone_from(&self.spectrogram);
+                    write_buffer.1 = *metrics;
                     self.buffer_input.publish();
                 },
             );
