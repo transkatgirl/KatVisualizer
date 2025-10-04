@@ -153,16 +153,22 @@ impl Plugin for MyPlugin {
         buffer_config: &BufferConfig,
         context: &mut impl InitContext<Self>,
     ) -> bool {
-        let analysis_chain = AnalysisChain::new(
-            &AnalysisChainConfig::default(),
+        let mut analysis_chain = self.analysis_chain.lock().unwrap();
+
+        let analysis_config = match &*analysis_chain {
+            Some(old_chain) => old_chain.config(),
+            None => AnalysisChainConfig::default(),
+        };
+
+        let new_chain = AnalysisChain::new(
+            &analysis_config,
             buffer_config.sample_rate as usize,
             audio_io_layout,
         );
-        context.set_latency_samples(analysis_chain.latency_samples);
-        self.latency_samples = analysis_chain.latency_samples;
+        context.set_latency_samples(new_chain.latency_samples);
+        self.latency_samples = new_chain.latency_samples;
 
-        let mut analysis_chain_mutex = self.analysis_chain.lock().unwrap();
-        *analysis_chain_mutex = Some(analysis_chain);
+        *analysis_chain = Some(new_chain);
 
         true
     }
@@ -199,6 +205,7 @@ impl Plugin for MyPlugin {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct AnalysisChainConfig {
     gain: f64,
     listening_volume: f64,
@@ -331,6 +338,25 @@ impl AnalysisChain {
                     callback(analysis_output, self.chunk_duration);
                 }
             });
+    }
+    pub(crate) fn config(&self) -> AnalysisChainConfig {
+        let analyzer = self.left_analyzer.lock().unwrap();
+        let analyzer_config = analyzer.1.config();
+
+        AnalysisChainConfig {
+            gain: self.gain,
+            listening_volume: self
+                .listening_volume
+                .unwrap_or(AnalysisChainConfig::default().listening_volume),
+            normalize_amplitude: self.listening_volume.is_some(),
+            update_rate_hz: self.update_rate,
+            resolution: analyzer_config.resolution,
+            start_frequency: analyzer_config.start_frequency,
+            end_frequency: analyzer_config.end_frequency,
+            log_frequency_scale: analyzer_config.log_frequency_scale,
+            time_resolution: analyzer_config.time_resolution,
+            spectral_reassignment: analyzer_config.spectral_reassignment,
+        }
     }
     pub(crate) fn update_config(&mut self, config: &AnalysisChainConfig) {
         self.gain = config.gain;

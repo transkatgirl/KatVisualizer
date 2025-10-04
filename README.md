@@ -46,4 +46,4 @@ standalone binary: run it with the `--input-device` and `--output-device` option
 	- [x] Settings
 	- [ ] Frequency & amplitude display
 
-Other important improvements: Support saving and loading configuration, properly handle plugin reinitialization while editor is open
+Other important improvements: Support saving and loading configuration
