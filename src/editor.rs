@@ -271,7 +271,7 @@ pub fn create(
                             size: 12.0,
                             family: egui::FontFamily::Monospace,
                         },
-                        if processing_proportion >= 1.0 {
+                        if processing_proportion >= 0.95 {
                             Color32::RED
                         } else if processing_proportion >= 0.8 {
                             Color32::YELLOW

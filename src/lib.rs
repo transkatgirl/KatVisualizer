@@ -1,5 +1,5 @@
 use nih_plug::{prelude::*, util::StftHelper};
-use nih_plug_egui::EguiState;
+use nih_plug_egui::{EguiState, egui::output};
 use std::{
     collections::VecDeque,
     mem,
@@ -7,6 +7,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use threadpool::ThreadPool;
 use triple_buffer::{Input, Output, triple_buffer};
 
 use crate::analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration};
@@ -239,7 +240,7 @@ impl Default for AnalysisChainConfig {
             listening_volume: 85.0,
             normalize_amplitude: true,
             update_rate_hz: 512.0,
-            resolution: 256,
+            resolution: 512,
             start_frequency: 20.0,
             end_frequency: 20000.0,
             log_frequency_scale: false,
@@ -250,14 +251,16 @@ impl Default for AnalysisChainConfig {
 
 pub(crate) struct AnalysisChain {
     chunker: StftHelper<0>,
-    left_analyzer: BetterAnalyzer,
-    right_analyzer: BetterAnalyzer,
+    left_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
+    right_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
     gain: f64,
     update_rate: f64,
     listening_volume: Option<f64>,
     latency_samples: u32,
+    chunk_size: usize,
     chunk_duration: Duration,
     single_input: bool,
+    pool: ThreadPool,
 }
 
 impl AnalysisChain {
@@ -272,13 +275,14 @@ impl AnalysisChain {
         });
 
         let mut chunker = StftHelper::new(2, sample_rate, 0);
-        chunker.set_block_size((sample_rate as f64 / config.update_rate_hz).round() as usize);
+        let chunk_size = (sample_rate as f64 / config.update_rate_hz).round() as usize;
+        chunker.set_block_size(chunk_size);
 
         Self {
             latency_samples: chunker.latency_samples(),
             chunker,
-            left_analyzer: analyzer.clone(),
-            right_analyzer: analyzer,
+            left_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], analyzer.clone()))),
+            right_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], analyzer))),
             gain: config.gain,
             update_rate: config.update_rate_hz,
             listening_volume: if config.normalize_amplitude {
@@ -286,8 +290,10 @@ impl AnalysisChain {
             } else {
                 None
             },
+            chunk_size,
             chunk_duration: Duration::from_secs_f64(1.0 / config.update_rate_hz),
             single_input: layout.main_input_channels == NonZero::new(1),
+            pool: ThreadPool::new(2),
         }
     }
     fn analyze<F>(
@@ -300,51 +306,60 @@ impl AnalysisChain {
     {
         self.chunker
             .process_analyze_only(buffer, 1, |channel_idx, buffer| {
-                let analyzer = if channel_idx == 0 {
-                    analysis_output.3 = Instant::now();
-                    &mut self.left_analyzer
-                } else {
-                    &mut self.right_analyzer
-                };
                 if channel_idx == 1 && self.single_input {
                     return;
                 }
+                let analyzer = if channel_idx == 0 {
+                    analysis_output.3 = Instant::now();
+                    self.left_analyzer.clone()
+                } else {
+                    self.right_analyzer.clone()
+                };
 
-                let output = analyzer.analyze(
-                    buffer.iter().map(|s| *s as f64),
-                    self.gain,
-                    self.listening_volume,
-                );
+                analyzer.lock().unwrap().0.copy_from_slice(buffer);
+                let gain = self.gain;
+                let listening_volume = self.listening_volume;
 
-                #[allow(clippy::collapsible_else_if)]
-                if channel_idx == 0 {
-                    if analysis_output.0.len() == output.len() {
-                        analysis_output.0.copy_from_slice(output);
-                    } else {
-                        analysis_output.0.clear();
-                        analysis_output.0.extend_from_slice(output);
-                    }
+                self.pool.execute(move || {
+                    let mut lock = analyzer.lock().unwrap();
+                    let (ref mut buffer, ref mut analyzer) = *lock;
+
+                    analyzer.analyze(buffer.iter().map(|s| *s as f64), gain, listening_volume);
+                });
+
+                if channel_idx == 1 || (channel_idx == 0 && self.single_input) {
+                    self.pool.join();
+                    let left_lock = self.left_analyzer.lock().unwrap();
+                    let right_lock = self.right_analyzer.lock().unwrap();
+                    let left_output = left_lock.1.last_analysis();
+                    let right_output = right_lock.1.last_analysis();
+
                     if self.single_input {
-                        if analysis_output.1.len() == output.len() {
-                            analysis_output.1.copy_from_slice(output);
+                        if analysis_output.0.len() == left_output.len() {
+                            analysis_output.0.copy_from_slice(left_output);
+                        } else {
+                            analysis_output.0.clear();
+                            analysis_output.0.extend_from_slice(left_output);
+                        }
+                        if analysis_output.1.len() == left_output.len() {
+                            analysis_output.1.copy_from_slice(left_output);
                         } else {
                             analysis_output.1.clear();
-                            analysis_output.1.extend_from_slice(output);
+                            analysis_output.1.extend_from_slice(left_output);
                         }
-
-                        let finished = Instant::now();
-                        analysis_output.2 = finished.duration_since(analysis_output.3);
-                        analysis_output.3 = finished;
-                        analysis_output.4 = self.chunk_duration;
-
-                        callback(analysis_output);
-                    }
-                } else {
-                    if analysis_output.1.len() == output.len() {
-                        analysis_output.1.copy_from_slice(output);
                     } else {
-                        analysis_output.1.clear();
-                        analysis_output.1.extend_from_slice(output);
+                        if analysis_output.0.len() == left_output.len() {
+                            analysis_output.0.copy_from_slice(left_output);
+                        } else {
+                            analysis_output.0.clear();
+                            analysis_output.0.extend_from_slice(left_output);
+                        }
+                        if analysis_output.1.len() == right_output.len() {
+                            analysis_output.1.copy_from_slice(right_output);
+                        } else {
+                            analysis_output.1.clear();
+                            analysis_output.1.extend_from_slice(right_output);
+                        }
                     }
 
                     let finished = Instant::now();
@@ -364,15 +379,15 @@ impl AnalysisChain {
             None
         };
 
-        let old_analyzer_config = self.left_analyzer.config();
+        let old_left_analyzer = self.left_analyzer.lock().unwrap();
+        let old_analyzer_config = old_left_analyzer.1.config();
         let sample_rate = old_analyzer_config.sample_rate;
 
         if self.update_rate != config.update_rate_hz {
-            self.chunker
-                .set_block_size((sample_rate as f64 / config.update_rate_hz).round() as usize);
+            self.chunk_size = (sample_rate as f64 / config.update_rate_hz).round() as usize;
+            self.chunker.set_block_size(self.chunk_size);
             self.latency_samples = self.chunker.latency_samples();
             self.chunk_duration = Duration::from_secs_f64(1.0 / config.update_rate_hz);
-            self.update_rate = config.update_rate_hz;
         }
 
         if old_analyzer_config.resolution != config.resolution
@@ -389,10 +404,19 @@ impl AnalysisChain {
                 sample_rate,
                 time_resolution: config.time_resolution,
             });
+            drop(old_left_analyzer);
 
-            self.left_analyzer = analyzer.clone();
-            self.right_analyzer = analyzer;
+            self.left_analyzer =
+                Arc::new(Mutex::new((vec![0.0; self.chunk_size], analyzer.clone())));
+            self.right_analyzer = Arc::new(Mutex::new((vec![0.0; self.chunk_size], analyzer)));
+        } else if self.update_rate != config.update_rate_hz {
+            drop(old_left_analyzer);
+
+            self.left_analyzer.lock().unwrap().0 = vec![0.0; self.chunk_size];
+            self.right_analyzer.lock().unwrap().0 = vec![0.0; self.chunk_size];
         }
+
+        self.update_rate = config.update_rate_hz;
     }
 }
 

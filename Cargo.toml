@@ -33,6 +33,7 @@ ringbuf = "0.4.8"
 no_denormals = "0.3.0"
 triple_buffer = "8.1.1"
 color = "0.3.2"
+threadpool = "1.8.1"
 
 #baseview = { git = "https://github.com/RustAudio/baseview.git", rev = "9a0b42c09d712777b2edb4c5e0cb6baf21e988f0", features = [
 #	"opengl",
@@ -78,6 +79,6 @@ color = "0.3.2"
 
 [profile.release]
 opt-level = 3
-lto       = true
+#lto       = true
 #codegen-units = 1
 panic = "abort"

@@ -125,6 +125,9 @@ impl BetterAnalyzer {
 
         &self.transform.spectrum_data
     }
+    pub fn last_analysis(&self) -> &[f64] {
+        &self.transform.spectrum_data
+    }
 }
 
 pub fn amplitude_to_dbfs(amplitude: f64) -> f64 {
