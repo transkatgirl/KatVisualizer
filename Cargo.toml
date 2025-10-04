@@ -29,7 +29,6 @@ nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28
 serde = { version = "1.0", features = [
 	"derive",
 ] }
-ringbuf = "0.4.8"
 no_denormals = "0.3.0"
 triple_buffer = "8.1.1"
 color = "0.3.2"
@@ -79,6 +78,6 @@ threadpool = "1.8.1"
 
 [profile.release]
 opt-level = 3
-#lto       = true
+lto       = true
 #codegen-units = 1
 panic = "abort"
