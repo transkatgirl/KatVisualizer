@@ -8,11 +8,10 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use triple_buffer::Output;
 
 use crate::{
-    AnalysisChain, AnalysisChainConfig, MyPlugin, PluginParams, Spectrogram,
-    analyzer::{calculate_pan_and_volume, map_value_f32},
+    AnalysisChain, AnalysisChainConfig, MyPlugin, PluginParams,
+    analyzer::{BetterAnalysis, BetterSpectrogram, map_value_f32},
 };
 
 fn convert_dynamic_color(color: DynamicColor) -> Color32 {
@@ -22,24 +21,21 @@ fn convert_dynamic_color(color: DynamicColor) -> Color32 {
 
 fn draw_bargraph<F>(
     painter: &Painter,
-    (left, right): (&[f64], &[f64]),
+    analysis: &BetterAnalysis,
     bounds: Rect,
     color: &F,
     (max_db, min_db): (f32, f32),
 ) where
     F: Fn(f32, f32) -> Color32,
 {
-    let bands = left.iter().zip(right.iter()).enumerate();
-
     let width = bounds.max.x - bounds.min.x;
     let height = bounds.max.y - bounds.min.y;
 
-    let band_width = width / bands.len() as f32;
+    let band_width = width / analysis.data.len() as f32;
 
-    for (i, (left, right)) in bands {
-        let (pan, volume) = calculate_pan_and_volume(*left, *right);
-        let intensity = map_value_f32(volume as f32, min_db, max_db, 0.0, 1.0);
-        let color = color(pan as f32, intensity);
+    for (i, (pan, volume)) in analysis.data.iter().enumerate() {
+        let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
+        let color = color(*pan, intensity);
 
         painter.rect_filled(
             Rect {
@@ -60,7 +56,7 @@ fn draw_bargraph<F>(
 
 fn draw_spectrogram<F>(
     painter: &Painter,
-    spectrogram: &Spectrogram,
+    spectrogram: &BetterSpectrogram,
     bounds: Rect,
     color: &F,
     (max_db, min_db): (f32, f32),
@@ -75,21 +71,18 @@ fn draw_spectrogram<F>(
 
     let mut last_elapsed = Duration::ZERO;
 
-    for (left, right, _, _timestamp, length) in spectrogram {
+    for (analysis, length) in &spectrogram.data {
         let elapsed = last_elapsed + *length;
 
         if elapsed > duration {
             break;
         }
 
-        let bands = left.iter().zip(right.iter()).enumerate();
+        let band_width = width / analysis.data.len() as f32;
 
-        let band_width = width / bands.len() as f32;
-
-        for (i, (left, right)) in bands {
-            let (pan, volume) = calculate_pan_and_volume(*left, *right);
-            let intensity = map_value_f32(volume as f32, min_db, max_db, 0.0, 1.0);
-            let color = color(pan as f32, intensity);
+        for (i, (pan, volume)) in analysis.data.iter().enumerate() {
+            let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
+            let color = color(*pan, intensity);
 
             painter.rect_filled(
                 Rect {
@@ -179,7 +172,7 @@ impl Default for RenderSettings {
 pub fn create(
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
-    analyzer_output: Arc<Mutex<Output<Spectrogram>>>,
+    spectrogram: Arc<Mutex<(BetterSpectrogram, Duration, Instant)>>,
     _async_executor: AsyncExecutor<MyPlugin>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
@@ -205,22 +198,20 @@ pub fn create(
                 let max_y = painter.clip_rect().max.y;
                 let settings = *settings.lock().unwrap();
 
-                let mut lock = analyzer_output.lock().unwrap();
-                let spectrogram = lock.read();
-
-                let (left, right, processing_duration, timestamp, chunk_duration) =
-                    spectrogram.front().unwrap();
+                let lock = spectrogram.lock().unwrap();
+                let (ref spectrogram, ref processing_duration, ref timestamp) = *lock;
+                let front = spectrogram.data.front().unwrap();
 
                 let buffering_duration = start.duration_since(*timestamp);
                 let processing_duration = *processing_duration;
-                let chunk_duration = *chunk_duration;
+                let chunk_duration = front.1;
 
                 let color_function = color_function(&settings);
 
                 if settings.bargraph_height != 0.0 {
                     draw_bargraph(
                         painter,
-                        (left, right),
+                        &front.0,
                         Rect {
                             min: Pos2 { x: 0.0, y: 0.0 },
                             max: Pos2 {

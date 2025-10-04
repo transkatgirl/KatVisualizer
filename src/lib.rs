@@ -1,31 +1,27 @@
 use nih_plug::{prelude::*, util::StftHelper};
 use nih_plug_egui::EguiState;
 use std::{
-    collections::VecDeque,
-    mem,
     num::NonZero,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use threadpool::ThreadPool;
-use triple_buffer::{Input, Output, triple_buffer};
 
-use crate::analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration};
+use crate::analyzer::{
+    BetterAnalysis, BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram,
+};
 
 pub mod analyzer;
 mod editor;
 
-type AnalyzerOutput = (Vec<f64>, Vec<f64>, Duration, Instant, Duration);
-type Spectrogram = VecDeque<AnalyzerOutput>;
+type AnalyzerOutput = (BetterAnalysis, Duration, Instant, Duration);
 
 pub struct MyPlugin {
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     latency_samples: u32,
     buffer: AnalyzerOutput,
-    spectrogram: Spectrogram,
-    analyzer_input: Input<Spectrogram>,
-    analyzer_output: Arc<Mutex<Output<Spectrogram>>>,
+    spectrogram: Arc<Mutex<(BetterSpectrogram, Duration, Instant)>>,
 }
 
 #[derive(Params)]
@@ -39,33 +35,21 @@ const SPECTROGRAM_SLICES: usize = 512;
 
 impl Default for MyPlugin {
     fn default() -> Self {
-        let spectrogram = VecDeque::from(vec![
-            (
-                Vec::with_capacity(MAX_FREQUENCY_BINS),
-                Vec::with_capacity(MAX_FREQUENCY_BINS),
-                Duration::ZERO,
-                Instant::now(),
-                Duration::from_secs_f64(1.0 / 512.0),
-            );
-            SPECTROGRAM_SLICES
-        ]);
-
-        let (analyzer_input, analyzer_output) = triple_buffer(&spectrogram);
-
         Self {
             params: Arc::new(PluginParams::default()),
             analysis_chain: Arc::new(Mutex::new(None)),
             latency_samples: 0,
-            spectrogram,
+            spectrogram: Arc::new(Mutex::new((
+                BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
+                Duration::ZERO,
+                Instant::now(),
+            ))),
             buffer: (
-                Vec::with_capacity(MAX_FREQUENCY_BINS),
-                Vec::with_capacity(MAX_FREQUENCY_BINS),
+                BetterAnalysis::new(MAX_FREQUENCY_BINS),
                 Duration::ZERO,
                 Instant::now(),
                 Duration::from_secs_f64(1.0 / 512.0),
             ),
-            analyzer_input,
-            analyzer_output: Arc::new(Mutex::new(analyzer_output)),
         }
     }
 }
@@ -143,7 +127,7 @@ impl Plugin for MyPlugin {
         editor::create(
             self.params.clone(),
             self.analysis_chain.clone(),
-            self.analyzer_output.clone(),
+            self.spectrogram.clone(),
             async_executor,
         )
     }
@@ -183,41 +167,15 @@ impl Plugin for MyPlugin {
             }
 
             analysis_chain.analyze(buffer, &mut self.buffer, |output| {
-                update_spectrogram(output, &mut self.spectrogram);
-                publish_updated_spectrogram(&self.spectrogram, &mut self.analyzer_input);
+                let mut spectrogram = self.spectrogram.lock().unwrap();
+                spectrogram.0.update(&output.0, output.3);
+                spectrogram.1 = output.1;
+                spectrogram.2 = output.2;
             });
         }
 
         ProcessStatus::Normal
     }
-}
-
-fn update_spectrogram(buffer: &AnalyzerOutput, spectrogram: &mut Spectrogram) {
-    let mut old = spectrogram.pop_back().unwrap();
-
-    if old.0.len() == buffer.0.len() {
-        old.0.copy_from_slice(&buffer.0);
-    } else {
-        old.0.clear();
-        old.0.extend_from_slice(&buffer.0);
-    }
-    if old.1.len() == buffer.1.len() {
-        old.1.copy_from_slice(&buffer.1);
-    } else {
-        old.1.clear();
-        old.1.extend_from_slice(&buffer.1);
-    }
-    old.2 = buffer.2;
-    old.3 = buffer.3;
-    old.4 = buffer.4;
-
-    spectrogram.push_front(old);
-}
-
-fn publish_updated_spectrogram(spectrogram: &Spectrogram, destination: &mut Input<Spectrogram>) {
-    let write_buffer = destination.input_buffer_mut();
-    let _ = mem::replace(write_buffer, spectrogram.clone());
-    destination.publish();
 }
 
 pub(crate) struct AnalysisChainConfig {
@@ -304,7 +262,7 @@ impl AnalysisChain {
     ) where
         F: FnMut(&mut AnalyzerOutput),
     {
-        analysis_output.3 = Instant::now();
+        analysis_output.2 = Instant::now();
 
         self.chunker
             .process_analyze_only(buffer, 1, |channel_idx, buffer| {
@@ -336,40 +294,18 @@ impl AnalysisChain {
                     let right_output = right_lock.1.last_analysis();
 
                     if self.single_input {
-                        if analysis_output.0.len() == left_output.len() {
-                            analysis_output.0.copy_from_slice(left_output);
-                        } else {
-                            analysis_output.0.clear();
-                            analysis_output.0.extend_from_slice(left_output);
-                        }
-                        if analysis_output.1.len() == left_output.len() {
-                            analysis_output.1.copy_from_slice(left_output);
-                        } else {
-                            analysis_output.1.clear();
-                            analysis_output.1.extend_from_slice(left_output);
-                        }
+                        analysis_output.0.update_mono(left_output);
                     } else {
-                        if analysis_output.0.len() == left_output.len() {
-                            analysis_output.0.copy_from_slice(left_output);
-                        } else {
-                            analysis_output.0.clear();
-                            analysis_output.0.extend_from_slice(left_output);
-                        }
-                        if analysis_output.1.len() == right_output.len() {
-                            analysis_output.1.copy_from_slice(right_output);
-                        } else {
-                            analysis_output.1.clear();
-                            analysis_output.1.extend_from_slice(right_output);
-                        }
+                        analysis_output.0.update_stereo(left_output, right_output);
                     }
 
                     let finished = Instant::now();
-                    analysis_output.2 = finished.duration_since(analysis_output.3);
-                    analysis_output.3 = finished;
-                    analysis_output.4 = self.chunk_duration;
+                    analysis_output.1 = finished.duration_since(analysis_output.2);
+                    analysis_output.2 = finished;
+                    analysis_output.3 = self.chunk_duration;
 
                     callback(analysis_output);
-                    analysis_output.3 = Instant::now();
+                    analysis_output.2 = Instant::now();
                 }
             });
     }

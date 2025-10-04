@@ -1,4 +1,4 @@
-use std::f64::consts::PI;
+use std::{collections::VecDeque, f64::consts::PI, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
@@ -130,16 +130,83 @@ impl BetterAnalyzer {
     }
 }
 
-pub fn amplitude_to_dbfs(amplitude: f64) -> f64 {
-    20.0 * f64::log10(amplitude)
+#[derive(Clone)]
+pub struct BetterAnalysis {
+    pub data: Vec<(f32, f32)>,
 }
 
-pub fn dbfs_to_amplitude(decibels: f64) -> f64 {
-    10.0_f64.powf(decibels / 20.0)
+impl BetterAnalysis {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            data: Vec::with_capacity(capacity),
+        }
+    }
+    pub fn update_stereo(&mut self, left: &[f64], right: &[f64]) {
+        let new_length = left.len().min(right.len());
+
+        if self.data.len() == new_length {
+            for (index, (left, right)) in left.iter().zip(right.iter()).enumerate() {
+                let (pan, volume) = calculate_pan_and_volume(*left, *right);
+
+                self.data[index] = (pan as f32, volume as f32);
+            }
+        } else {
+            assert!(self.data.capacity() >= new_length);
+
+            self.data.clear();
+
+            for (left, right) in left.iter().zip(right.iter()) {
+                let (pan, volume) = calculate_pan_and_volume(*left, *right);
+
+                self.data.push((pan as f32, volume as f32));
+            }
+        }
+    }
+    pub fn update_mono(&mut self, data: &[f64]) {
+        let new_length = data.len();
+
+        if self.data.len() == new_length {
+            for (index, volume) in data.iter().enumerate() {
+                self.data[index] = (0.0, *volume as f32);
+            }
+        } else {
+            assert!(self.data.capacity() >= new_length);
+
+            self.data.clear();
+
+            for volume in data {
+                self.data.push((0.0, *volume as f32));
+            }
+        }
+    }
 }
 
-pub fn calculate_stereo_volume(left_db: f64, right_db: f64) -> f64 {
-    amplitude_to_dbfs(dbfs_to_amplitude(left_db) + dbfs_to_amplitude(right_db))
+pub struct BetterSpectrogram {
+    pub data: VecDeque<(BetterAnalysis, Duration)>,
+}
+
+impl BetterSpectrogram {
+    pub fn new(length: usize, slice_capacity: usize) -> Self {
+        Self {
+            data: VecDeque::from(vec![
+                (BetterAnalysis::new(slice_capacity), Duration::ZERO);
+                length
+            ]),
+        }
+    }
+    pub fn update(&mut self, analysis: &BetterAnalysis, since_last: Duration) {
+        let mut buffer = self.data.pop_back().unwrap();
+
+        if buffer.0.data.len() == analysis.data.len() {
+            buffer.0.data.copy_from_slice(&analysis.data);
+        } else {
+            buffer.0.data.clear();
+            buffer.0.data.extend_from_slice(&analysis.data);
+        }
+        buffer.1 = since_last;
+
+        self.data.push_front(buffer);
+    }
 }
 
 // ----- Below formula is based on https://stackoverflow.com/a/35614871 -----
@@ -266,6 +333,14 @@ fn approximate_coefficients(frequency: f64) -> (f64, f64, f64) {
 }
 
 // ----- Below algorithms are taken from https://codepen.io/TF3RDL/pen/MWLzPoO -----
+
+pub fn amplitude_to_dbfs(amplitude: f64) -> f64 {
+    20.0 * f64::log10(amplitude)
+}
+
+pub fn dbfs_to_amplitude(decibels: f64) -> f64 {
+    10.0_f64.powf(decibels / 20.0)
+}
 
 pub fn map_value_f64(x: f64, min: f64, max: f64, target_min: f64, target_max: f64) -> f64 {
     (x - min) / (max - min) * (target_max - target_min) + target_min
