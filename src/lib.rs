@@ -3,6 +3,7 @@ use nih_plug_egui::EguiState;
 use std::{
     collections::VecDeque,
     mem,
+    num::NonZero,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -84,11 +85,23 @@ impl Plugin for MyPlugin {
 
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
-        main_input_channels: NonZeroU32::new(2),
-        main_output_channels: NonZeroU32::new(2),
-        ..AudioIOLayout::const_default()
-    }];
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(2),
+            main_output_channels: NonZeroU32::new(2),
+            ..AudioIOLayout::const_default()
+        },
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(1),
+            main_output_channels: NonZeroU32::new(1),
+            ..AudioIOLayout::const_default()
+        },
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(1),
+            main_output_channels: NonZeroU32::new(2),
+            ..AudioIOLayout::const_default()
+        },
+    ];
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
@@ -110,13 +123,14 @@ impl Plugin for MyPlugin {
 
     fn initialize(
         &mut self,
-        _audio_io_layout: &AudioIOLayout,
+        audio_io_layout: &AudioIOLayout,
         buffer_config: &BufferConfig,
         context: &mut impl InitContext<Self>,
     ) -> bool {
         let analysis_chain = AnalysisChain::new(
             &AnalysisChainConfig::default(),
             buffer_config.sample_rate as usize,
+            audio_io_layout,
         );
         context.set_latency_samples(analysis_chain.latency_samples);
         self.latency_samples = analysis_chain.latency_samples;
@@ -217,10 +231,11 @@ pub(crate) struct AnalysisChain {
     listening_volume: Option<f64>,
     latency_samples: u32,
     chunk_duration: Duration,
+    single_input: bool,
 }
 
 impl AnalysisChain {
-    fn new(config: &AnalysisChainConfig, sample_rate: usize) -> Self {
+    fn new(config: &AnalysisChainConfig, sample_rate: usize, layout: &AudioIOLayout) -> Self {
         let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
             resolution: config.resolution,
             start_frequency: config.start_frequency,
@@ -246,6 +261,7 @@ impl AnalysisChain {
                 None
             },
             chunk_duration: Duration::from_secs_f64(1.0 / config.update_rate_hz),
+            single_input: layout.main_input_channels == NonZero::new(1),
         }
     }
     fn analyze<F>(
@@ -264,6 +280,9 @@ impl AnalysisChain {
                 } else {
                     &mut self.right_analyzer
                 };
+                if channel_idx == 1 && self.single_input {
+                    return;
+                }
 
                 let output = analyzer.analyze(
                     buffer.iter().map(|s| *s as f64),
@@ -278,6 +297,21 @@ impl AnalysisChain {
                     } else {
                         analysis_output.0.clear();
                         analysis_output.0.extend_from_slice(output);
+                    }
+                    if self.single_input {
+                        if analysis_output.1.len() == output.len() {
+                            analysis_output.1.copy_from_slice(output);
+                        } else {
+                            analysis_output.1.clear();
+                            analysis_output.1.extend_from_slice(output);
+                        }
+
+                        let finished = Instant::now();
+                        analysis_output.2 = finished.duration_since(analysis_output.3);
+                        analysis_output.3 = finished;
+                        analysis_output.4 = self.chunk_duration;
+
+                        callback(analysis_output);
                     }
                 } else {
                     if analysis_output.1.len() == output.len() {
@@ -343,6 +377,7 @@ impl ClapPlugin for MyPlugin {
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
     const CLAP_FEATURES: &'static [ClapFeature] = &[
         ClapFeature::Analyzer,
+        ClapFeature::Mono,
         ClapFeature::Stereo,
         ClapFeature::Utility,
     ];
