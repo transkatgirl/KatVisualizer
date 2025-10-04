@@ -2,7 +2,7 @@ use nih_plug::{prelude::*, util::StftHelper};
 use nih_plug_egui::EguiState;
 use std::{
     num::NonZero,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use threadpool::ThreadPool;
@@ -25,9 +25,7 @@ pub struct MyPlugin {
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     latency_samples: u32,
     analysis: (BetterAnalysis, AnalysisMetrics),
-    main_spectrogram: Arc<Mutex<(BetterSpectrogram, AnalysisMetrics)>>,
-    rendered_spectrogram: Arc<RwLock<(BetterSpectrogram, AnalysisMetrics)>>,
-    pool: ThreadPool,
+    spectrogram: Arc<Mutex<(BetterSpectrogram, AnalysisMetrics)>>,
 }
 
 #[derive(Params)]
@@ -41,20 +39,17 @@ const SPECTROGRAM_SLICES: usize = 512;
 
 impl Default for MyPlugin {
     fn default() -> Self {
-        let spectrogram = (
-            BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
-            AnalysisMetrics {
-                processing: Duration::ZERO,
-                finished: Instant::now(),
-            },
-        );
-
         Self {
             params: Arc::new(PluginParams::default()),
             analysis_chain: Arc::new(Mutex::new(None)),
             latency_samples: 0,
-            main_spectrogram: Arc::new(Mutex::new(spectrogram.clone())),
-            rendered_spectrogram: Arc::new(RwLock::new(spectrogram.clone())),
+            spectrogram: Arc::new(Mutex::new((
+                BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
+                AnalysisMetrics {
+                    processing: Duration::ZERO,
+                    finished: Instant::now(),
+                },
+            ))),
             analysis: (
                 BetterAnalysis::new(MAX_FREQUENCY_BINS),
                 AnalysisMetrics {
@@ -62,7 +57,6 @@ impl Default for MyPlugin {
                     finished: Instant::now(),
                 },
             ),
-            pool: ThreadPool::new(1),
         }
     }
 }
@@ -140,7 +134,7 @@ impl Plugin for MyPlugin {
         editor::create(
             self.params.clone(),
             self.analysis_chain.clone(),
-            self.rendered_spectrogram.clone(),
+            self.spectrogram.clone(),
             async_executor,
         )
     }
@@ -183,24 +177,9 @@ impl Plugin for MyPlugin {
                 buffer,
                 &mut self.analysis,
                 |(analysis, metrics), chunk_duration| {
-                    let mut spectrogram = self.main_spectrogram.lock().unwrap();
+                    let mut spectrogram = self.spectrogram.lock().unwrap();
                     spectrogram.0.update(analysis, chunk_duration);
                     spectrogram.1 = *metrics;
-
-                    drop(spectrogram);
-
-                    if self.pool.active_count() == 0 {
-                        let (main_spectrogram, rendered_spectrogram) = (
-                            self.main_spectrogram.clone(),
-                            self.rendered_spectrogram.clone(),
-                        );
-                        self.pool.execute(move || {
-                            let mut rendered_spectrogram = rendered_spectrogram.write().unwrap();
-                            let main_spectrogram = main_spectrogram.lock().unwrap();
-                            rendered_spectrogram.1 = main_spectrogram.1;
-                            rendered_spectrogram.0.clone_from(&main_spectrogram.0);
-                        });
-                    }
                 },
             );
         }
