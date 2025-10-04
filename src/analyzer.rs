@@ -181,6 +181,7 @@ impl BetterAnalysis {
     }
 }
 
+#[derive(Clone)]
 pub struct BetterSpectrogram {
     pub data: VecDeque<(BetterAnalysis, Duration)>,
 }

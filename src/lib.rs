@@ -2,7 +2,7 @@ use nih_plug::{prelude::*, util::StftHelper};
 use nih_plug_egui::EguiState;
 use std::{
     num::NonZero,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
 use threadpool::ThreadPool;
@@ -14,14 +14,20 @@ use crate::analyzer::{
 pub mod analyzer;
 mod editor;
 
-type AnalyzerOutput = (BetterAnalysis, Duration, Instant, Duration);
+#[derive(Clone, Copy)]
+pub(crate) struct AnalysisMetrics {
+    processing: Duration,
+    finished: Instant,
+}
 
 pub struct MyPlugin {
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     latency_samples: u32,
-    buffer: AnalyzerOutput,
-    spectrogram: Arc<Mutex<(BetterSpectrogram, Duration, Instant)>>,
+    analysis: (BetterAnalysis, AnalysisMetrics),
+    main_spectrogram: Arc<Mutex<(BetterSpectrogram, AnalysisMetrics)>>,
+    rendered_spectrogram: Arc<RwLock<(BetterSpectrogram, AnalysisMetrics)>>,
+    pool: ThreadPool,
 }
 
 #[derive(Params)]
@@ -35,21 +41,28 @@ const SPECTROGRAM_SLICES: usize = 512;
 
 impl Default for MyPlugin {
     fn default() -> Self {
+        let spectrogram = (
+            BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
+            AnalysisMetrics {
+                processing: Duration::ZERO,
+                finished: Instant::now(),
+            },
+        );
+
         Self {
             params: Arc::new(PluginParams::default()),
             analysis_chain: Arc::new(Mutex::new(None)),
             latency_samples: 0,
-            spectrogram: Arc::new(Mutex::new((
-                BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
-                Duration::ZERO,
-                Instant::now(),
-            ))),
-            buffer: (
+            main_spectrogram: Arc::new(Mutex::new(spectrogram.clone())),
+            rendered_spectrogram: Arc::new(RwLock::new(spectrogram.clone())),
+            analysis: (
                 BetterAnalysis::new(MAX_FREQUENCY_BINS),
-                Duration::ZERO,
-                Instant::now(),
-                Duration::from_secs_f64(1.0 / 512.0),
+                AnalysisMetrics {
+                    processing: Duration::ZERO,
+                    finished: Instant::now(),
+                },
             ),
+            pool: ThreadPool::new(1),
         }
     }
 }
@@ -127,7 +140,7 @@ impl Plugin for MyPlugin {
         editor::create(
             self.params.clone(),
             self.analysis_chain.clone(),
-            self.spectrogram.clone(),
+            self.rendered_spectrogram.clone(),
             async_executor,
         )
     }
@@ -166,12 +179,30 @@ impl Plugin for MyPlugin {
                 self.latency_samples = analysis_chain.latency_samples;
             }
 
-            analysis_chain.analyze(buffer, &mut self.buffer, |output| {
-                let mut spectrogram = self.spectrogram.lock().unwrap();
-                spectrogram.0.update(&output.0, output.3);
-                spectrogram.1 = output.1;
-                spectrogram.2 = output.2;
-            });
+            analysis_chain.analyze(
+                buffer,
+                &mut self.analysis,
+                |(analysis, metrics), chunk_duration| {
+                    let mut spectrogram = self.main_spectrogram.lock().unwrap();
+                    spectrogram.0.update(analysis, chunk_duration);
+                    spectrogram.1 = *metrics;
+
+                    drop(spectrogram);
+
+                    if self.pool.active_count() == 0 {
+                        let (main_spectrogram, rendered_spectrogram) = (
+                            self.main_spectrogram.clone(),
+                            self.rendered_spectrogram.clone(),
+                        );
+                        self.pool.execute(move || {
+                            let mut rendered_spectrogram = rendered_spectrogram.write().unwrap();
+                            let main_spectrogram = main_spectrogram.lock().unwrap();
+                            rendered_spectrogram.1 = main_spectrogram.1;
+                            rendered_spectrogram.0.clone_from(&main_spectrogram.0);
+                        });
+                    }
+                },
+            );
         }
 
         ProcessStatus::Normal
@@ -249,7 +280,7 @@ impl AnalysisChain {
                 None
             },
             chunk_size,
-            chunk_duration: Duration::from_secs_f64(1.0 / config.update_rate_hz),
+            chunk_duration: Duration::from_secs_f64(chunk_size as f64 / sample_rate as f64),
             single_input: layout.main_input_channels == NonZero::new(1),
             pool: ThreadPool::new(2),
         }
@@ -257,12 +288,12 @@ impl AnalysisChain {
     fn analyze<F>(
         &mut self,
         buffer: &mut Buffer,
-        analysis_output: &mut AnalyzerOutput,
+        analysis_output: &mut (BetterAnalysis, AnalysisMetrics),
         mut callback: F,
     ) where
-        F: FnMut(&mut AnalyzerOutput),
+        F: FnMut(&mut (BetterAnalysis, AnalysisMetrics), Duration),
     {
-        analysis_output.2 = Instant::now();
+        analysis_output.1.finished = Instant::now();
 
         self.chunker
             .process_analyze_only(buffer, 1, |channel_idx, buffer| {
@@ -300,12 +331,12 @@ impl AnalysisChain {
                     }
 
                     let finished = Instant::now();
-                    analysis_output.1 = finished.duration_since(analysis_output.2);
-                    analysis_output.2 = finished;
-                    analysis_output.3 = self.chunk_duration;
+                    analysis_output.1.processing =
+                        finished.duration_since(analysis_output.1.finished);
+                    analysis_output.1.finished = finished;
 
-                    callback(analysis_output);
-                    analysis_output.2 = Instant::now();
+                    callback(analysis_output, self.chunk_duration);
+                    analysis_output.1.finished = Instant::now();
                 }
             });
     }
@@ -325,7 +356,8 @@ impl AnalysisChain {
             self.chunk_size = (sample_rate as f64 / config.update_rate_hz).round() as usize;
             self.chunker.set_block_size(self.chunk_size);
             self.latency_samples = self.chunker.latency_samples();
-            self.chunk_duration = Duration::from_secs_f64(1.0 / config.update_rate_hz);
+            self.chunk_duration =
+                Duration::from_secs_f64(self.chunk_size as f64 / sample_rate as f64);
         }
 
         if old_analyzer_config.resolution != config.resolution

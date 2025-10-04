@@ -5,12 +5,12 @@ use nih_plug_egui::{
     egui::{self, Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect},
 };
 use std::{
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
 
 use crate::{
-    AnalysisChain, AnalysisChainConfig, MyPlugin, PluginParams,
+    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MyPlugin, PluginParams,
     analyzer::{BetterAnalysis, BetterSpectrogram, map_value_f32},
 };
 
@@ -172,7 +172,7 @@ impl Default for RenderSettings {
 pub fn create(
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
-    spectrogram: Arc<Mutex<(BetterSpectrogram, Duration, Instant)>>,
+    spectrogram: Arc<RwLock<(BetterSpectrogram, AnalysisMetrics)>>,
     _async_executor: AsyncExecutor<MyPlugin>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
@@ -198,12 +198,12 @@ pub fn create(
                 let max_y = painter.clip_rect().max.y;
                 let settings = *settings.lock().unwrap();
 
-                let lock = spectrogram.lock().unwrap();
-                let (ref spectrogram, ref processing_duration, ref timestamp) = *lock;
+                let lock = spectrogram.read().unwrap();
+                let (ref spectrogram, ref metrics) = *lock;
                 let front = spectrogram.data.front().unwrap();
 
-                let buffering_duration = start.duration_since(*timestamp);
-                let processing_duration = *processing_duration;
+                let buffering_duration = start.duration_since(metrics.finished);
+                let processing_duration = metrics.processing;
                 let chunk_duration = front.1;
 
                 let color_function = color_function(&settings);
