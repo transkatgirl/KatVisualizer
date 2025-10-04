@@ -200,12 +200,14 @@ impl BetterSpectrogram {
         if buffer.0.data.len() == analysis.data.len() {
             buffer.0.data.copy_from_slice(&analysis.data);
         } else {
-            buffer.0.data.clear();
-            buffer.0.data.extend_from_slice(&analysis.data);
+            buffer.0.data.clone_from(&analysis.data);
         }
         buffer.1 = since_last;
 
         self.data.push_front(buffer);
+    }
+    pub fn clone_from(&mut self, source: &Self) {
+        self.data.clone_from(&source.data);
     }
 }
 
