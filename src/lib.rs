@@ -1,5 +1,5 @@
 use nih_plug::{prelude::*, util::StftHelper};
-use nih_plug_egui::{EguiState, egui::output};
+use nih_plug_egui::EguiState;
 use std::{
     collections::VecDeque,
     mem,
