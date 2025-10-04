@@ -6,6 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 use threadpool::ThreadPool;
+use triple_buffer::{Input, Output, triple_buffer};
 
 use crate::analyzer::{
     BetterAnalysis, BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram,
@@ -25,7 +26,9 @@ pub struct MyPlugin {
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     latency_samples: u32,
     analysis: (BetterAnalysis, AnalysisMetrics),
-    spectrogram: Arc<Mutex<(BetterSpectrogram, AnalysisMetrics)>>,
+    spectrogram: (BetterSpectrogram, AnalysisMetrics),
+    buffer_input: Input<(BetterSpectrogram, AnalysisMetrics)>,
+    buffer_output: Arc<Mutex<Output<(BetterSpectrogram, AnalysisMetrics)>>>,
 }
 
 #[derive(Params)]
@@ -39,17 +42,20 @@ const SPECTROGRAM_SLICES: usize = 512;
 
 impl Default for MyPlugin {
     fn default() -> Self {
+        let spectrogram = (
+            BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
+            AnalysisMetrics {
+                processing: Duration::ZERO,
+                finished: Instant::now(),
+            },
+        );
+        let (buffer_input, buffer_output) = triple_buffer(&spectrogram);
+
         Self {
             params: Arc::new(PluginParams::default()),
             analysis_chain: Arc::new(Mutex::new(None)),
             latency_samples: 0,
-            spectrogram: Arc::new(Mutex::new((
-                BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
-                AnalysisMetrics {
-                    processing: Duration::ZERO,
-                    finished: Instant::now(),
-                },
-            ))),
+            spectrogram,
             analysis: (
                 BetterAnalysis::new(MAX_FREQUENCY_BINS),
                 AnalysisMetrics {
@@ -57,6 +63,8 @@ impl Default for MyPlugin {
                     finished: Instant::now(),
                 },
             ),
+            buffer_input,
+            buffer_output: Arc::new(Mutex::new(buffer_output)),
         }
     }
 }
@@ -134,7 +142,7 @@ impl Plugin for MyPlugin {
         editor::create(
             self.params.clone(),
             self.analysis_chain.clone(),
-            self.spectrogram.clone(),
+            self.buffer_output.clone(),
             async_executor,
         )
     }
@@ -177,9 +185,13 @@ impl Plugin for MyPlugin {
                 buffer,
                 &mut self.analysis,
                 |(analysis, metrics), chunk_duration| {
-                    let mut spectrogram = self.spectrogram.lock().unwrap();
-                    spectrogram.0.update(analysis, chunk_duration);
-                    spectrogram.1 = *metrics;
+                    self.spectrogram.0.update(analysis, chunk_duration);
+                    self.spectrogram.1 = *metrics;
+
+                    let write_buffer = self.buffer_input.input_buffer_mut();
+                    write_buffer.0.clone_from(&self.spectrogram.0);
+                    write_buffer.1 = self.spectrogram.1;
+                    self.buffer_input.publish();
                 },
             );
         }

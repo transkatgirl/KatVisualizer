@@ -8,10 +8,10 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use triple_buffer::Output;
 
 use crate::{
-    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS, MyPlugin,
-    PluginParams, SPECTROGRAM_SLICES,
+    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MyPlugin, PluginParams,
     analyzer::{BetterAnalysis, BetterSpectrogram, map_value_f32},
 };
 
@@ -173,7 +173,7 @@ impl Default for RenderSettings {
 pub fn create(
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
-    main_spectrogram: Arc<Mutex<(BetterSpectrogram, AnalysisMetrics)>>,
+    analyzer_output: Arc<Mutex<Output<(BetterSpectrogram, AnalysisMetrics)>>>,
     _async_executor: AsyncExecutor<MyPlugin>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
@@ -183,11 +183,6 @@ pub fn create(
     let settings = Mutex::new(RenderSettings::default());
 
     let cached_analysis_settings = Mutex::new(AnalysisChainConfig::default());
-
-    let render_spectrogram = Mutex::new(BetterSpectrogram::new(
-        SPECTROGRAM_SLICES,
-        MAX_FREQUENCY_BINS,
-    ));
 
     create_egui_editor(
         egui_state.clone(),
@@ -204,12 +199,8 @@ pub fn create(
                 let max_y = painter.clip_rect().max.y;
                 let settings = *settings.lock().unwrap();
 
-                let (spectrogram, metrics) = {
-                    let shared = main_spectrogram.lock().unwrap();
-                    let mut render = render_spectrogram.lock().unwrap();
-                    render.clone_from(&shared.0);
-                    (render, shared.1)
-                };
+                let mut lock = analyzer_output.lock().unwrap();
+                let (spectrogram, metrics) = lock.read();
 
                 let front = spectrogram.data.front().unwrap();
 
@@ -238,7 +229,7 @@ pub fn create(
                 if settings.bargraph_height != 1.0 {
                     draw_spectrogram(
                         painter,
-                        &spectrogram,
+                        spectrogram,
                         Rect {
                             min: Pos2 {
                                 x: 0.0,
@@ -252,7 +243,7 @@ pub fn create(
                     );
                 }
 
-                drop(spectrogram);
+                drop(lock);
 
                 if settings.show_performance && buffering_duration < Duration::from_millis(500) {
                     let processing_proportion =
