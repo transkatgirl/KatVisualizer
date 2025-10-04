@@ -304,13 +304,14 @@ impl AnalysisChain {
     ) where
         F: FnMut(&mut AnalyzerOutput),
     {
+        analysis_output.3 = Instant::now();
+
         self.chunker
             .process_analyze_only(buffer, 1, |channel_idx, buffer| {
                 if channel_idx == 1 && self.single_input {
                     return;
                 }
                 let analyzer = if channel_idx == 0 {
-                    analysis_output.3 = Instant::now();
                     self.left_analyzer.clone()
                 } else {
                     self.right_analyzer.clone()
@@ -368,6 +369,7 @@ impl AnalysisChain {
                     analysis_output.4 = self.chunk_duration;
 
                     callback(analysis_output);
+                    analysis_output.3 = Instant::now();
                 }
             });
     }
