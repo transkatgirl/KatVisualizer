@@ -271,7 +271,7 @@ pub fn create(
                             size: 12.0,
                             family: egui::FontFamily::Monospace,
                         },
-                        if processing_proportion >= 0.95 {
+                        if processing_proportion >= 0.9 {
                             Color32::RED
                         } else if processing_proportion >= 0.8 {
                             Color32::YELLOW
@@ -318,9 +318,9 @@ pub fn create(
                             size: 12.0,
                             family: egui::FontFamily::Monospace,
                         },
-                        if frame_elapsed > Duration::from_millis(33) {
+                        if frame_elapsed >= Duration::from_secs_f64(1.0 / 30.0) {
                             Color32::RED
-                        } else if frame_elapsed > Duration::from_millis(18) {
+                        } else if frame_elapsed >= Duration::from_secs_f64(1.0 / 55.0) {
                             Color32::YELLOW
                         } else {
                             Color32::from_rgb(224, 224, 224)
@@ -338,9 +338,9 @@ pub fn create(
                             size: 12.0,
                             family: egui::FontFamily::Monospace,
                         },
-                        if draw_elapsed > Duration::from_millis(4) {
+                        if draw_elapsed >= Duration::from_secs_f64(1.0 / (60.0 * 4.0)) {
                             Color32::RED
-                        } else if draw_elapsed > Duration::from_millis(2) {
+                        } else if draw_elapsed >= Duration::from_secs_f64(1.0 / (60.0 * 8.0)) {
                             Color32::YELLOW
                         } else {
                             Color32::from_rgb(224, 224, 224)
