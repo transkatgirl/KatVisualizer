@@ -166,7 +166,7 @@ impl Default for RenderSettings {
         Self {
             left_hue: 195.0,
             right_hue: 328.0,
-            minimum_lightness: 0.14,
+            minimum_lightness: 0.13,
             min_db: -75.0,
             max_db: -5.0,
             bargraph_height: 0.4,
