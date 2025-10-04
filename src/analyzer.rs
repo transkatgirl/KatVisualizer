@@ -23,7 +23,7 @@ impl Default for BetterAnalyzerConfiguration {
             log_frequency_scale: false,
             sample_rate: 48000,
             time_resolution: (75.0, 200.0),
-            spectral_reassignment: true,
+            spectral_reassignment: false,
         }
     }
 }
