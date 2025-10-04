@@ -587,7 +587,10 @@ pub fn create(
                         };
 
                         if ui
-                            .checkbox(&mut settings.spectral_reassignment, "Use NC method")
+                            .checkbox(
+                                &mut settings.spectral_reassignment,
+                                "Use NC method (spectral reassignment)",
+                            )
                             .changed()
                         {
                             update(&settings);
