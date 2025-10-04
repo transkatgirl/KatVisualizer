@@ -11,7 +11,8 @@ use std::{
 use triple_buffer::Output;
 
 use crate::{
-    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MyPlugin, PluginParams,
+    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS, MyPlugin,
+    PluginParams,
     analyzer::{BetterAnalysis, BetterSpectrogram, map_value_f32},
 };
 
@@ -489,11 +490,14 @@ pub fn create(
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.resolution, 32..=1024)
-                                    .suffix(" bins")
-                                    .step_by(32.0)
-                                    .fixed_decimals(0)
-                                    .text("Resolution"),
+                                egui::Slider::new(
+                                    &mut settings.resolution,
+                                    32..=MAX_FREQUENCY_BINS,
+                                )
+                                .suffix(" bins")
+                                .step_by(32.0)
+                                .fixed_decimals(0)
+                                .text("Resolution"),
                             )
                             .changed()
                         {
