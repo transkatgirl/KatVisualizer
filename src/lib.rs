@@ -315,7 +315,6 @@ impl AnalysisChain {
                     analysis_output.1.finished = finished;
 
                     callback(analysis_output, self.chunk_duration);
-                    analysis_output.1.finished = Instant::now();
                 }
             });
     }
