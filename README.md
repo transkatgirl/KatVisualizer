@@ -35,7 +35,7 @@ standalone binary: run it with the `--input-device` and `--output-device` option
 - [ ] Processing Chain
 	- [x] ERB-scale VQT
 	- [x] ISO 226:2023 equal loudness contour
-	- [ ] Spectral reassignment
+	- [x] Spectral reassignment
 	- [x] Stereo channel separation
 	- [ ] Automatic gain control?
 	- [ ] Data interpolation
@@ -46,4 +46,4 @@ standalone binary: run it with the `--input-device` and `--output-device` option
 	- [x] Settings
 	- [ ] Frequency & amplitude display
 
-Other important improvements: Support saving and loading configuration
+Other important improvements: Support saving and loading configuration, properly handle plugin reinitialization while editor is open
