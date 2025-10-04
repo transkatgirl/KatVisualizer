@@ -10,17 +10,25 @@ a work in progress.
 
 requires the Rust programming language
 
-binaries can be built with the following command:
+VST3 and CLAP plugins can be built with the following command:
 
 ```bash
 cargo xtask bundle katvisualizer --release
 ```
 
-### Usage
+alternatively, standalone binaries can be built using the following command:
 
-once built, can be used like any other VST3 plugin.
+```bash
+cargo build --release --features $channel_config
+```
 
-audacity is useful for testing. once you have a track loaded into audacity, click on the "Effects" button on the track and add the visualizer to your project's master effects
+where `$channel_config` is one of the following: `force-mono, force-mono-to-stereo, force-stereo`. due to a limitation of nih-plug, channel configurations cannot be changed in standalone mode at runtime.
+
+## Usage
+
+plugins: can be used like any other DAW metering plugin.
+
+standalone binary: run it with the `--input-device` and `--output-device` options to select an input and output device (input is disabled by default). run it with `--help` for additional information.
 
 ## Planned Features
 
@@ -38,4 +46,4 @@ audacity is useful for testing. once you have a track loaded into audacity, clic
 	- [x] Settings
 	- [ ] Frequency & amplitude display
 
-Other important improvements: Support single channel inputs, test out multithreaded audio processing (1 thread per channel)
+Other important improvements: Test out multithreaded audio processing (1 thread per channel), support saving and loading configuration

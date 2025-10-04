@@ -85,6 +85,11 @@ impl Plugin for MyPlugin {
 
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
+    #[cfg(not(any(
+        feature = "force-mono",
+        feature = "force-mono-to-stereo",
+        feature = "force-stereo"
+    )))]
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
         AudioIOLayout {
             main_input_channels: NonZeroU32::new(2),
@@ -102,6 +107,27 @@ impl Plugin for MyPlugin {
             ..AudioIOLayout::const_default()
         },
     ];
+
+    #[cfg(feature = "force-mono")]
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
+        main_input_channels: NonZeroU32::new(1),
+        main_output_channels: NonZeroU32::new(1),
+        ..AudioIOLayout::const_default()
+    }];
+
+    #[cfg(feature = "force-stereo")]
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
+        main_input_channels: NonZeroU32::new(2),
+        main_output_channels: NonZeroU32::new(2),
+        ..AudioIOLayout::const_default()
+    }];
+
+    #[cfg(feature = "force-mono-to-stereo")]
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
+        main_input_channels: NonZeroU32::new(1),
+        main_output_channels: NonZeroU32::new(2),
+        ..AudioIOLayout::const_default()
+    }];
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
