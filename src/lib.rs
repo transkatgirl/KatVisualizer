@@ -239,7 +239,7 @@ impl Default for AnalysisChainConfig {
             gain: 0.0,
             listening_volume: 85.0,
             normalize_amplitude: true,
-            update_rate_hz: 512.0,
+            update_rate_hz: 320.0,
             resolution: 512,
             start_frequency: 20.0,
             end_frequency: 20000.0,
