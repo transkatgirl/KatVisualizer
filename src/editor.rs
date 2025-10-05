@@ -529,7 +529,7 @@ pub fn create(
 
                         ui.colored_label(
                             Color32::YELLOW,
-                            "Editing these options may temporarily interrupt playback.",
+                            "Editing these options temporarily interrupts audio analysis.",
                         );
 
                         if ui
