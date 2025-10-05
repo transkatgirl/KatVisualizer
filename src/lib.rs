@@ -218,7 +218,7 @@ pub(crate) struct AnalysisChainConfig {
 impl Default for AnalysisChainConfig {
     fn default() -> Self {
         Self {
-            gain: 0.0,
+            gain: 3.0,
             listening_volume: 85.0,
             normalize_amplitude: true,
             update_rate_hz: 512.0,
