@@ -227,7 +227,7 @@ impl Default for AnalysisChainConfig {
             start_frequency: 20.0,
             end_frequency: 20000.0,
             log_frequency_scale: false,
-            time_resolution: (70.0, 140.0),
+            time_resolution: (70.0, 120.0),
             spectral_reassignment: true,
         }
     }
