@@ -307,11 +307,13 @@ pub fn create(
                 if settings.show_performance && buffering_duration < Duration::from_millis(500) {
                     let processing_proportion =
                         processing_duration.as_secs_f64() / chunk_duration.as_secs_f64();
-                    let buffering_proportion = buffering_duration.as_secs_f64()
-                        / chunk_duration
-                            .as_secs_f64()
-                            .max(1.0 / shared_state.cached_analysis_settings.buffer_update_rate_hz)
-                            .min(frame_elapsed.as_secs_f64() / 2.0);
+                    /*let buffering_proportion = buffering_duration.as_secs_f64()
+                    / chunk_duration
+                        .as_secs_f64()
+                        .max(1.0 / shared_state.cached_analysis_settings.buffer_update_rate_hz)
+                        .min(frame_elapsed.as_secs_f64() / 4.0);*/
+                    let buffering_proportion =
+                        buffering_duration.as_secs_f64() / (frame_elapsed.as_secs_f64() / 4.0);
 
                     painter.text(
                         Pos2 {
