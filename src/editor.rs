@@ -3,7 +3,7 @@ use ndarray::Array2;
 use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
-    egui::{self, Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect},
+    egui::{self, Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, emath::GuiRounding},
 };
 use std::{
     sync::{Arc, Mutex},
@@ -29,6 +29,7 @@ fn draw_bargraph<F>(
     let width = bounds.max.x - bounds.min.x;
     let height = bounds.max.y - bounds.min.y;
 
+    let pixels_per_point = painter.pixels_per_point();
     let band_width = width / analysis.data.len() as f32;
 
     for (i, (pan, volume)) in analysis.data.iter().enumerate() {
@@ -38,12 +39,13 @@ fn draw_bargraph<F>(
         painter.rect_filled(
             Rect {
                 min: Pos2 {
-                    x: bounds.min.x + i as f32 * band_width,
-                    y: bounds.max.y - intensity * height,
+                    x: (bounds.min.x + i as f32 * band_width).round_to_pixels(pixels_per_point),
+                    y: (bounds.max.y - intensity * height).round_to_pixels(pixels_per_point),
                 },
                 max: Pos2 {
-                    x: bounds.min.x + i as f32 * band_width + band_width,
-                    y: bounds.max.y,
+                    x: (bounds.min.x + i as f32 * band_width + band_width)
+                        .round_to_pixels(pixels_per_point),
+                    y: (bounds.max.y).round_to_pixels(pixels_per_point),
                 },
             },
             CornerRadius::ZERO,
@@ -66,6 +68,7 @@ fn draw_spectrogram<F>(
     let height = bounds.max.y - bounds.min.y;
 
     let second_height = height / duration.as_secs_f32();
+    let pixels_per_point = painter.pixels_per_point();
 
     let mut last_elapsed = Duration::ZERO;
 
@@ -85,12 +88,16 @@ fn draw_spectrogram<F>(
             painter.rect_filled(
                 Rect {
                     min: Pos2 {
-                        x: bounds.min.x + i as f32 * band_width,
-                        y: bounds.min.y + last_elapsed.as_secs_f32() * second_height,
+                        x: (bounds.min.x + i as f32 * band_width).round_to_pixels(pixels_per_point),
+                        y: (bounds.min.y + last_elapsed.as_secs_f32() * second_height)
+                            .round_to_pixels(pixels_per_point),
                     },
                     max: Pos2 {
-                        x: bounds.min.x + i as f32 * band_width + band_width,
-                        y: bounds.min.y + (elapsed.as_secs_f32() * second_height).max(bounds.max.y),
+                        x: (bounds.min.x + i as f32 * band_width + band_width)
+                            .round_to_pixels(pixels_per_point),
+                        y: (bounds.min.y
+                            + (elapsed.as_secs_f32() * second_height).max(bounds.max.y))
+                        .round_to_pixels(pixels_per_point),
                     },
                 },
                 CornerRadius::ZERO,
