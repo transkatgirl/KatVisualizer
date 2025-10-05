@@ -30,17 +30,17 @@ standalone binary: run it with the `--input-device` and `--output-device` option
 
 ## Planned Features
 
-- [x] Processing Chain
+- [ ] Processing Chain
 	- [x] ERB-scale VQT
 	- [x] ISO 226:2023 equal loudness contour
 	- [x] Spectral reassignment
 	- [x] Stereo channel separation
+	- [ ] Automatic gain control
 - [ ] UI
 	- [x] Bargraph
 	- [x] Spectrogram
 	- [x] Performance counters
 	- [x] Settings
 	- [ ] Frequency & amplitude display
-	- [ ] Automatic graphing range calculation
 
 Other important improvements: Support saving and loading configuration, improve render performance
