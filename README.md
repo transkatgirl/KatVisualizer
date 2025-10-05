@@ -4,8 +4,6 @@ my attempt at making a music visualizer which doesn't suck
 
 a work in progress.
 
-~~i know ~nothing about DSP, why am i even trying to do this~~
-
 ## Building
 
 requires the Rust programming language
