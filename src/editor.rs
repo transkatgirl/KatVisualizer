@@ -566,10 +566,10 @@ pub fn create(
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.update_rate_hz, 64.0..=8192.0)
+                                egui::Slider::new(&mut settings.update_rate_hz, 128.0..=8192.0)
                                     .logarithmic(true)
                                     .suffix("hz")
-                                    .step_by(64.0)
+                                    .step_by(128.0)
                                     .fixed_decimals(0)
                                     .text("Update rate"),
                             )
