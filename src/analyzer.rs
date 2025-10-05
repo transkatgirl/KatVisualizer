@@ -199,15 +199,21 @@ impl BetterSpectrogram {
         }
     }
     pub fn update(&mut self, analysis: &BetterAnalysis, since_last: Duration) {
+        self.update_fn(|buffer| {
+            if buffer.0.data.len() == analysis.data.len() {
+                buffer.0.data.copy_from_slice(&analysis.data);
+            } else {
+                buffer.0.data.clone_from(&analysis.data);
+            }
+            buffer.1 = since_last;
+        });
+    }
+    pub fn update_fn<F>(&mut self, callback: F)
+    where
+        F: Fn(&mut (BetterAnalysis, Duration)),
+    {
         let mut buffer = self.data.pop_back().unwrap();
-
-        if buffer.0.data.len() == analysis.data.len() {
-            buffer.0.data.copy_from_slice(&analysis.data);
-        } else {
-            buffer.0.data.clone_from(&analysis.data);
-        }
-        buffer.1 = since_last;
-
+        callback(&mut buffer);
         self.data.push_front(buffer);
     }
     pub fn clone_from(&mut self, source: &Self) {

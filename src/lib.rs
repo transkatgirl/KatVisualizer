@@ -8,9 +8,7 @@ use std::{
 use threadpool::ThreadPool;
 use triple_buffer::{Input, Output, triple_buffer};
 
-use crate::analyzer::{
-    BetterAnalysis, BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram,
-};
+use crate::analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram};
 
 pub mod analyzer;
 mod editor;
@@ -25,7 +23,7 @@ pub struct MyPlugin {
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     latency_samples: u32,
-    analysis: (BetterAnalysis, AnalysisMetrics),
+    metrics: AnalysisMetrics,
     spectrogram: BetterSpectrogram,
     buffer_input: Input<(BetterSpectrogram, AnalysisMetrics)>,
     buffer_output: Arc<Mutex<Output<(BetterSpectrogram, AnalysisMetrics)>>>,
@@ -56,13 +54,10 @@ impl Default for MyPlugin {
             analysis_chain: Arc::new(Mutex::new(None)),
             latency_samples: 0,
             spectrogram: BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
-            analysis: (
-                BetterAnalysis::new(MAX_FREQUENCY_BINS),
-                AnalysisMetrics {
-                    processing: Duration::ZERO,
-                    finished: Instant::now(),
-                },
-            ),
+            metrics: AnalysisMetrics {
+                processing: Duration::ZERO,
+                finished: Instant::now(),
+            },
             buffer_input,
             buffer_output: Arc::new(Mutex::new(buffer_output)),
         }
@@ -189,12 +184,11 @@ impl Plugin for MyPlugin {
 
             analysis_chain.analyze(
                 buffer,
-                &mut self.analysis,
-                |(analysis, metrics), chunk_duration| {
-                    self.spectrogram.update(analysis, chunk_duration);
-
+                &mut self.spectrogram,
+                &mut self.metrics,
+                |spectrogram, metrics| {
                     let write_buffer = self.buffer_input.input_buffer_mut();
-                    write_buffer.0.clone_from(&self.spectrogram);
+                    write_buffer.0.clone_from(spectrogram);
                     write_buffer.1 = *metrics;
                     self.buffer_input.publish();
                 },
@@ -288,12 +282,13 @@ impl AnalysisChain {
     fn analyze<F>(
         &mut self,
         buffer: &mut Buffer,
-        analysis_output: &mut (BetterAnalysis, AnalysisMetrics),
+        spectrogram: &mut BetterSpectrogram,
+        metrics: &mut AnalysisMetrics,
         mut callback: F,
     ) where
-        F: FnMut(&mut (BetterAnalysis, AnalysisMetrics), Duration),
+        F: FnMut(&BetterSpectrogram, &AnalysisMetrics),
     {
-        analysis_output.1.finished = Instant::now();
+        metrics.finished = Instant::now();
 
         self.chunker
             .process_analyze_only(buffer, 1, |channel_idx, buffer| {
@@ -324,18 +319,19 @@ impl AnalysisChain {
                     let left_output = left_lock.1.last_analysis();
                     let right_output = right_lock.1.last_analysis();
 
-                    if self.single_input {
-                        analysis_output.0.update_mono(left_output);
-                    } else {
-                        analysis_output.0.update_stereo(left_output, right_output);
-                    }
+                    spectrogram.update_fn(|analysis_output| {
+                        if self.single_input {
+                            analysis_output.0.update_mono(left_output);
+                        } else {
+                            analysis_output.0.update_stereo(left_output, right_output);
+                        }
+                    });
 
                     let finished = Instant::now();
-                    analysis_output.1.processing =
-                        finished.duration_since(analysis_output.1.finished);
-                    analysis_output.1.finished = finished;
+                    metrics.processing = finished.duration_since(metrics.finished);
+                    metrics.finished = finished;
 
-                    callback(analysis_output, self.chunk_duration);
+                    callback(spectrogram, metrics);
                 }
             });
     }
