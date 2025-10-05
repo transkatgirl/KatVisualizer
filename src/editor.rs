@@ -311,7 +311,7 @@ pub fn create(
                         / chunk_duration
                             .as_secs_f64()
                             .max(1.0 / shared_state.cached_analysis_settings.buffer_update_rate_hz)
-                            .max(frame_elapsed.as_secs_f64() / 2.0);
+                            .min(frame_elapsed.as_secs_f64() / 2.0);
 
                     painter.text(
                         Pos2 {
