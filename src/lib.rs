@@ -325,6 +325,7 @@ impl AnalysisChain {
                         } else {
                             analysis_output.0.update_stereo(left_output, right_output);
                         }
+                        analysis_output.1 = self.chunk_duration;
                     });
 
                     let finished = Instant::now();
