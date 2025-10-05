@@ -644,34 +644,44 @@ pub fn create(
                             if ui
                                 .add(
                                     egui::DragValue::new(&mut settings.start_frequency)
-                                        .range(0.0..=22049.0)
                                         .suffix("hz")
                                         .fixed_decimals(0),
                                 )
                                 .changed()
                             {
-                                settings.end_frequency =
-                                    settings.end_frequency.max(settings.start_frequency + 1.0);
-                                update(settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
+                                if settings.start_frequency < 0.0 {
+                                    settings.start_frequency = 0.0;
+                                }
+                                if settings.end_frequency < 0.0 {
+                                    settings.end_frequency = 0.0;
+                                }
+                                if settings.end_frequency > settings.start_frequency {
+                                    update(settings);
+                                    egui_ctx.request_discard("Changed setting");
+                                    return;
+                                }
                             };
 
                             if ui
                                 .add(
                                     egui::DragValue::new(&mut settings.end_frequency)
-                                        .range(1.0..=22050.0)
                                         .speed(20.0)
                                         .suffix("hz")
                                         .fixed_decimals(0),
                                 )
                                 .changed()
                             {
-                                settings.start_frequency =
-                                    settings.start_frequency.min(settings.end_frequency - 1.0);
-                                update(settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
+                                if settings.start_frequency < 0.0 {
+                                    settings.start_frequency = 0.0;
+                                }
+                                if settings.end_frequency < 0.0 {
+                                    settings.end_frequency = 0.0;
+                                }
+                                if settings.end_frequency > settings.start_frequency {
+                                    update(settings);
+                                    egui_ctx.request_discard("Changed setting");
+                                    return;
+                                }
                             };
                         }
                         frame.end(ui);
