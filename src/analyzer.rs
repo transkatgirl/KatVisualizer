@@ -197,7 +197,7 @@ impl BetterSpectrogram {
                     BetterAnalysis {
                         data: vec![(0.0, -f32::INFINITY); slice_capacity],
                     },
-                    Duration::ZERO
+                    Duration::from_secs(1)
                 );
                 length
             ]),
