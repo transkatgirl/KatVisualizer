@@ -685,7 +685,7 @@ pub fn create(
                         if ui
                             .checkbox(
                                 &mut settings.spectral_reassignment,
-                                "Use NC method (spectral reassignment)",
+                                "Use NC method (spectral reassignment based windowing)",
                             )
                             .changed()
                         {
