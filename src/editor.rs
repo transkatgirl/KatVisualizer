@@ -466,6 +466,7 @@ pub fn create(
 
                         ui.add(
                             egui::Slider::new(&mut shared_state.settings.max_db, 0.0..=-75.0)
+                                .clamping(egui::SliderClamping::Never)
                                 .suffix("dB")
                                 .step_by(1.0)
                                 .fixed_decimals(0)
@@ -474,6 +475,7 @@ pub fn create(
 
                         ui.add(
                             egui::Slider::new(&mut shared_state.settings.min_db, 0.0..=-75.0)
+                                .clamping(egui::SliderClamping::Never)
                                 .suffix("dB")
                                 .step_by(1.0)
                                 .fixed_decimals(0)
@@ -484,7 +486,9 @@ pub fn create(
                             shared_state.settings.spectrogram_duration.as_secs_f64();
                         if ui
                             .add(
-                                egui::Slider::new(&mut spectrogram_duration, 0.05..=1.0)
+                                egui::Slider::new(&mut spectrogram_duration, 0.05..=2.0)
+                                    .step_by(0.05)
+                                    .clamping(egui::SliderClamping::Never)
                                     .suffix("s")
                                     .text("Spectrogram duration"),
                             )
@@ -535,6 +539,7 @@ pub fn create(
                         if ui
                             .add(
                                 egui::Slider::new(&mut settings.gain, 20.0..=-20.0)
+                                    .clamping(egui::SliderClamping::Never)
                                     .suffix("dB")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
