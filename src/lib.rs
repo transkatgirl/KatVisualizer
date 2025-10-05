@@ -341,15 +341,15 @@ impl AnalysisChain {
                     self.last_buffer_update += 1;
 
                     if self.last_buffer_update >= self.buffer_update_rate {
-                        self.last_buffer_update = 0;
-
                         let finished = Instant::now();
                         metrics.processing = finished
                             .duration_since(metrics.finished)
-                            .div_f64(self.buffer_update_rate as f64);
+                            .div_f64(self.last_buffer_update as f64);
                         metrics.finished = finished;
 
                         callback(spectrogram, metrics);
+
+                        self.last_buffer_update = 0;
                     }
                 }
             });
