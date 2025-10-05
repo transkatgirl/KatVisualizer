@@ -248,6 +248,7 @@ pub(crate) struct AnalysisChain {
     pool: ThreadPool,
     buffer_update_rate: usize,
     last_buffer_update: usize,
+    duration_samples: usize,
 }
 
 impl AnalysisChain {
@@ -287,6 +288,7 @@ impl AnalysisChain {
                 .floor()
                 .max(1.0) as usize,
             last_buffer_update: usize::MAX - 1,
+            duration_samples: 0,
         }
     }
     fn analyze<F>(
@@ -299,6 +301,7 @@ impl AnalysisChain {
         F: FnMut(&BetterSpectrogram, &AnalysisMetrics),
     {
         metrics.finished = Instant::now();
+        self.duration_samples = 0;
 
         self.chunker
             .process_analyze_only(buffer, 1, |channel_idx, buffer| {
@@ -339,17 +342,19 @@ impl AnalysisChain {
                     });
 
                     self.last_buffer_update += 1;
+                    self.duration_samples += 1;
 
                     if self.last_buffer_update >= self.buffer_update_rate {
                         let finished = Instant::now();
                         metrics.processing = finished
                             .duration_since(metrics.finished)
-                            .div_f64(self.last_buffer_update as f64);
+                            .div_f64(self.duration_samples as f64);
                         metrics.finished = finished;
 
                         callback(spectrogram, metrics);
 
                         self.last_buffer_update = 0;
+                        self.duration_samples = 0;
                     }
                 }
             });
@@ -433,6 +438,7 @@ impl AnalysisChain {
 
         self.update_rate = config.update_rate_hz;
         self.last_buffer_update = usize::MAX - 1;
+        self.duration_samples = 0;
     }
 }
 
