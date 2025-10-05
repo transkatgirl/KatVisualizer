@@ -1,6 +1,6 @@
 # KatVisualizer
 
-my attempt at making a music visualizer which doesn't suck
+my attempt at making a music visualizer which better matches what you hear.
 
 a work in progress.
 
