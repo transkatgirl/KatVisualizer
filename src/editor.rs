@@ -349,7 +349,7 @@ pub fn create(
                         },
                         if buffering_proportion >= 1.0 {
                             Color32::RED
-                        } else if buffering_proportion >= 0.7 {
+                        } else if buffering_proportion >= 0.6 {
                             Color32::YELLOW
                         } else {
                             Color32::from_rgb(224, 224, 224)
