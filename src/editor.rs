@@ -487,7 +487,6 @@ pub fn create(
                         if ui
                             .add(
                                 egui::Slider::new(&mut spectrogram_duration, 0.05..=2.0)
-                                    .step_by(0.05)
                                     .clamping(egui::SliderClamping::Never)
                                     .suffix("s")
                                     .text("Spectrogram duration"),
