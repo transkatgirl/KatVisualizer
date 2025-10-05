@@ -1,4 +1,5 @@
 use color::{ColorSpaceTag, DynamicColor, Flags, Rgba8, Srgb};
+use ndarray::Array2;
 use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
@@ -16,16 +17,11 @@ use crate::{
     analyzer::{BetterAnalysis, BetterSpectrogram, map_value_f32},
 };
 
-fn convert_dynamic_color(color: DynamicColor) -> Color32 {
-    let converted: Rgba8 = color.to_alpha_color::<Srgb>().to_rgba8();
-    Color32::from_rgba_unmultiplied(converted.r, converted.g, converted.b, converted.a)
-}
-
 fn draw_bargraph<F>(
     painter: &Painter,
     analysis: &BetterAnalysis,
     bounds: Rect,
-    color: &F,
+    color: F,
     (max_db, min_db): (f32, f32),
 ) where
     F: Fn(f32, f32) -> Color32,
@@ -60,7 +56,7 @@ fn draw_spectrogram<F>(
     painter: &Painter,
     spectrogram: &BetterSpectrogram,
     bounds: Rect,
-    color: &F,
+    color: F,
     (max_db, min_db): (f32, f32),
     duration: Duration,
 ) where
@@ -106,44 +102,6 @@ fn draw_spectrogram<F>(
     }
 }
 
-const MAX_LIGHTNESS: f32 = 0.72;
-const MAX_CHROMA: f32 = 0.12;
-
-fn color_function(settings: &RenderSettings) -> impl Fn(f32, f32) -> Color32 {
-    let left_color = DynamicColor {
-        cs: ColorSpaceTag::Oklch,
-        flags: Flags::default(),
-        components: [MAX_LIGHTNESS, MAX_CHROMA, settings.left_hue, 1.0],
-    };
-    let right_color = DynamicColor {
-        cs: ColorSpaceTag::Oklch,
-        flags: Flags::default(),
-        components: [MAX_LIGHTNESS, MAX_CHROMA, settings.right_hue, 1.0],
-    };
-    let minimum_lightness = settings.minimum_lightness;
-
-    move |split: f32, intensity: f32| -> Color32 {
-        if intensity - f32::EPSILON <= 0.0 {
-            return Color32::BLACK;
-        }
-
-        let mut color = if split >= 0.0 {
-            let mut color = right_color;
-            color.components[1] = map_value_f32(split, 0.0, 1.0, 0.0, color.components[1]);
-            color
-        } else {
-            let mut color = left_color;
-            color.components[1] = map_value_f32(-split, 0.0, 1.0, 0.0, color.components[1]);
-            color
-        };
-
-        color.components[0] =
-            map_value_f32(intensity, 0.0, 1.0, minimum_lightness, color.components[0]);
-
-        convert_dynamic_color(color)
-    }
-}
-
 #[derive(Clone, Copy)]
 struct RenderSettings {
     left_hue: f32,
@@ -171,6 +129,85 @@ impl Default for RenderSettings {
     }
 }
 
+struct ColorTable {
+    table: ndarray::Array<Color32, ndarray::Dim<[usize; 2]>>,
+    size: usize,
+    max: f32,
+}
+
+const MAX_LIGHTNESS: f32 = 0.72;
+const MAX_CHROMA: f32 = 0.12;
+const COLOR_TABLE_SIZE: usize = 2048;
+
+impl ColorTable {
+    fn new(size: usize) -> Self {
+        Self {
+            table: Array2::default((size, size)),
+            size,
+            max: (size - 1) as f32,
+        }
+    }
+    fn build(&mut self, left_hue: f32, right_hue: f32, min_lightness: f32) {
+        let left_color = DynamicColor {
+            cs: ColorSpaceTag::Oklch,
+            flags: Flags::default(),
+            components: [MAX_LIGHTNESS, MAX_CHROMA, left_hue, 1.0],
+        };
+        let right_color = DynamicColor {
+            cs: ColorSpaceTag::Oklch,
+            flags: Flags::default(),
+            components: [MAX_LIGHTNESS, MAX_CHROMA, right_hue, 1.0],
+        };
+
+        for split_index in 0..self.size {
+            let split = map_value_f32(split_index as f32, 0.0, self.max, -1.0, 1.0);
+            for intensity_index in 0..self.size {
+                if intensity_index == 0 {
+                    self.table[[split_index, 0]] = Color32::BLACK;
+                    continue;
+                }
+
+                let intensity = map_value_f32(intensity_index as f32, 0.0, self.max, 0.0, 1.0);
+
+                let mut color = if split >= 0.0 {
+                    let mut color = right_color;
+                    color.components[1] = map_value_f32(split, 0.0, 1.0, 0.0, color.components[1]);
+                    color
+                } else {
+                    let mut color = left_color;
+                    color.components[1] = map_value_f32(-split, 0.0, 1.0, 0.0, color.components[1]);
+                    color
+                };
+
+                color.components[0] =
+                    map_value_f32(intensity, 0.0, 1.0, min_lightness, color.components[0]);
+
+                let converted: Rgba8 = color.to_alpha_color::<Srgb>().to_rgba8();
+
+                self.table[[split_index, intensity_index]] =
+                    Color32::from_rgb(converted.r, converted.g, converted.b);
+            }
+        }
+    }
+    fn lookup(&self, split: f32, intensity: f32) -> Color32 {
+        self.table[[
+            map_value_f32(split, -1.0, 1.0, 0.0, self.max)
+                .round()
+                .clamp(0.0, self.max) as usize,
+            map_value_f32(intensity, 0.0, 1.0, 0.0, self.max)
+                .round()
+                .clamp(0.0, self.max) as usize,
+        ]]
+    }
+}
+
+struct SharedState {
+    settings: RenderSettings,
+    last_frame: Instant,
+    color_table: ColorTable,
+    cached_analysis_settings: AnalysisChainConfig,
+}
+
 pub fn create(
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
@@ -179,26 +216,39 @@ pub fn create(
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
 
-    let last_frame = Mutex::new(Instant::now());
+    let shared_state = {
+        let settings = RenderSettings::default();
+        let mut color_table = ColorTable::new(COLOR_TABLE_SIZE);
+        color_table.build(
+            settings.left_hue,
+            settings.right_hue,
+            settings.minimum_lightness,
+        );
 
-    let settings = Mutex::new(RenderSettings::default());
-
-    let cached_analysis_settings = Mutex::new(AnalysisChainConfig::default());
+        Mutex::new(SharedState {
+            settings,
+            last_frame: Instant::now(),
+            color_table,
+            cached_analysis_settings: AnalysisChainConfig::default(),
+        })
+    };
 
     create_egui_editor(
         egui_state.clone(),
         (),
         |_, _| {},
         move |egui_ctx, _setter, _state| {
-            egui::CentralPanel::default().show(egui_ctx, |ui| {
-                egui_ctx.request_repaint();
+            let mut shared_state = shared_state.lock().unwrap();
+            egui_ctx.request_repaint();
 
+            egui::CentralPanel::default().show(egui_ctx, |ui| {
+                let settings = shared_state.settings;
+                let color_table = &shared_state.color_table;
                 let start = Instant::now();
 
                 let painter = ui.painter();
                 let max_x = painter.clip_rect().max.x;
                 let max_y = painter.clip_rect().max.y;
-                let settings = *settings.lock().unwrap();
 
                 let mut lock = analyzer_output.lock().unwrap();
                 let (spectrogram, metrics) = lock.read();
@@ -208,8 +258,6 @@ pub fn create(
                 let buffering_duration = start.duration_since(metrics.finished);
                 let processing_duration = metrics.processing;
                 let chunk_duration = front.1;
-
-                let color_function = color_function(&settings);
 
                 if settings.bargraph_height != 0.0 {
                     draw_bargraph(
@@ -222,7 +270,7 @@ pub fn create(
                                 y: max_y * settings.bargraph_height,
                             },
                         },
-                        &color_function,
+                        |split, intensity| color_table.lookup(split, intensity),
                         (settings.max_db, settings.min_db),
                     );
                 }
@@ -238,7 +286,7 @@ pub fn create(
                             },
                             max: Pos2 { x: max_x, y: max_y },
                         },
-                        &color_function,
+                        |split, intensity| color_table.lookup(split, intensity),
                         (settings.max_db, settings.min_db),
                         settings.spectrogram_duration,
                     );
@@ -297,10 +345,9 @@ pub fn create(
                     );
                 }
 
-                let mut last_frame = last_frame.lock().unwrap();
                 let now = Instant::now();
                 if settings.show_performance {
-                    let frame_elapsed = now.duration_since(*last_frame);
+                    let frame_elapsed = now.duration_since(shared_state.last_frame);
                     painter.text(
                         Pos2 {
                             x: max_x - 32.0,
@@ -341,8 +388,6 @@ pub fn create(
                         },
                     );
                 }
-
-                *last_frame = now;
             });
             /*egui::TopBottomPanel::bottom("my_panel").show(egui_ctx, move |ui| {
                 ui.label("Hello World!");
@@ -352,33 +397,65 @@ pub fn create(
                 .default_open(false)
                 .show(egui_ctx, |ui| {
                     ui.collapsing("Render Options", |ui| {
-                        let mut settings = settings.lock().unwrap();
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut shared_state.settings.left_hue, 0.0..=360.0)
+                                    .suffix("°")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Left channel hue"),
+                            )
+                            .changed()
+                        {
+                            let settings = shared_state.settings;
+                            shared_state.color_table.build(
+                                settings.left_hue,
+                                settings.right_hue,
+                                settings.minimum_lightness,
+                            );
+                        };
 
-                        let mut spectrogram_duration = settings.spectrogram_duration.as_secs_f64();
-
-                        ui.add(
-                            egui::Slider::new(&mut settings.left_hue, 0.0..=360.0)
-                                .suffix("°")
-                                .step_by(1.0)
-                                .fixed_decimals(0)
-                                .text("Left channel hue"),
-                        );
-
-                        ui.add(
-                            egui::Slider::new(&mut settings.right_hue, 0.0..=360.0)
+                        if ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut shared_state.settings.right_hue,
+                                    0.0..=360.0,
+                                )
                                 .suffix("°")
                                 .step_by(1.0)
                                 .fixed_decimals(0)
                                 .text("Right channel hue"),
-                        );
+                            )
+                            .changed()
+                        {
+                            let settings = shared_state.settings;
+                            shared_state.color_table.build(
+                                settings.left_hue,
+                                settings.right_hue,
+                                settings.minimum_lightness,
+                            );
+                        };
 
-                        ui.add(
-                            egui::Slider::new(&mut settings.minimum_lightness, 0.0..=0.3)
+                        if ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut shared_state.settings.minimum_lightness,
+                                    0.0..=0.3,
+                                )
                                 .text("Minimum OkLCH lightness value"),
-                        );
+                            )
+                            .changed()
+                        {
+                            let settings = shared_state.settings;
+                            shared_state.color_table.build(
+                                settings.left_hue,
+                                settings.right_hue,
+                                settings.minimum_lightness,
+                            );
+                        };
 
                         ui.add(
-                            egui::Slider::new(&mut settings.max_db, 0.0..=-75.0)
+                            egui::Slider::new(&mut shared_state.settings.max_db, 0.0..=-75.0)
                                 .suffix("dB")
                                 .step_by(1.0)
                                 .fixed_decimals(0)
@@ -386,13 +463,15 @@ pub fn create(
                         );
 
                         ui.add(
-                            egui::Slider::new(&mut settings.min_db, 0.0..=-75.0)
+                            egui::Slider::new(&mut shared_state.settings.min_db, 0.0..=-75.0)
                                 .suffix("dB")
                                 .step_by(1.0)
                                 .fixed_decimals(0)
                                 .text("Minimum (normalized) amplitude"),
                         );
 
+                        let mut spectrogram_duration =
+                            shared_state.settings.spectrogram_duration.as_secs_f64();
                         if ui
                             .add(
                                 egui::Slider::new(&mut spectrogram_duration, 0.05..=1.0)
@@ -401,24 +480,37 @@ pub fn create(
                             )
                             .changed()
                         {
-                            settings.spectrogram_duration =
+                            shared_state.settings.spectrogram_duration =
                                 Duration::from_secs_f64(spectrogram_duration);
                         };
 
                         ui.add(
-                            egui::Slider::new(&mut settings.bargraph_height, 0.0..=1.0)
-                                .text("Bargraph height"),
+                            egui::Slider::new(
+                                &mut shared_state.settings.bargraph_height,
+                                0.0..=1.0,
+                            )
+                            .text("Bargraph height"),
                         );
 
-                        ui.checkbox(&mut settings.show_performance, "Show performance counters");
+                        ui.checkbox(
+                            &mut shared_state.settings.show_performance,
+                            "Show performance counters",
+                        );
 
                         if ui.button("Reset Render Options").clicked() {
-                            *settings = RenderSettings::default();
+                            let settings = RenderSettings::default();
+                            shared_state.color_table.build(
+                                settings.left_hue,
+                                settings.right_hue,
+                                settings.minimum_lightness,
+                            );
+                            shared_state.settings = settings;
                         }
                     });
 
                     ui.collapsing("Analysis Options", |ui| {
-                        let mut settings = cached_analysis_settings.lock().unwrap();
+                        let settings = &mut shared_state.cached_analysis_settings;
+
                         let update = |settings| {
                             let mut lock = analysis_chain.lock().unwrap();
                             let analysis_chain = lock.as_mut().unwrap();
@@ -440,7 +532,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(&settings);
+                            update(settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -455,7 +547,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(&settings);
+                            update(settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -467,7 +559,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(&settings);
+                            update(settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
@@ -483,7 +575,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(&settings);
+                            update(settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -501,7 +593,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(&settings);
+                            update(settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -524,7 +616,7 @@ pub fn create(
                             {
                                 settings.end_frequency =
                                     settings.end_frequency.max(settings.start_frequency + 1.0);
-                                update(&settings);
+                                update(settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
                             };
@@ -541,7 +633,7 @@ pub fn create(
                             {
                                 settings.start_frequency =
                                     settings.start_frequency.min(settings.end_frequency - 1.0);
-                                update(&settings);
+                                update(settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
                             };
@@ -555,7 +647,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(&settings);
+                            update(settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
@@ -570,7 +662,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(&settings);
+                            update(settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -585,7 +677,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(&settings);
+                            update(settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -597,17 +689,19 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(&settings);
+                            update(settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
 
                         if ui.button("Reset Analysis Options").clicked() {
                             *settings = AnalysisChainConfig::default();
-                            update(&settings);
+                            update(settings);
                         }
                     });
                 });
+
+            shared_state.last_frame = Instant::now();
         },
     )
 }

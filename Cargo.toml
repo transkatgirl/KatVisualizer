@@ -29,10 +29,10 @@ nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28
 serde = { version = "1.0", features = [
 	"derive",
 ] }
-no_denormals = "0.3.0"
 triple_buffer = "8.1.1"
 color = "0.3.2"
 threadpool = "1.8.1"
+ndarray = "0.16.1"
 
 #baseview = { git = "https://github.com/RustAudio/baseview.git", rev = "9a0b42c09d712777b2edb4c5e0cb6baf21e988f0", features = [
 #	"opengl",
