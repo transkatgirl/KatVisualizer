@@ -193,7 +193,12 @@ impl BetterSpectrogram {
     pub fn new(length: usize, slice_capacity: usize) -> Self {
         Self {
             data: VecDeque::from(vec![
-                (BetterAnalysis::new(slice_capacity), Duration::ZERO);
+                (
+                    BetterAnalysis {
+                        data: vec![(0.0, -f32::INFINITY); slice_capacity],
+                    },
+                    Duration::ZERO
+                );
                 length
             ]),
         }
