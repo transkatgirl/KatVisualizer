@@ -307,13 +307,8 @@ pub fn create(
                 if settings.show_performance && buffering_duration < Duration::from_millis(500) {
                     let processing_proportion =
                         processing_duration.as_secs_f64() / chunk_duration.as_secs_f64();
-                    /*let buffering_proportion = buffering_duration.as_secs_f64()
-                    / chunk_duration
-                        .as_secs_f64()
-                        .max(1.0 / shared_state.cached_analysis_settings.buffer_update_rate_hz)
-                        .min(frame_elapsed.as_secs_f64() / 4.0);*/
                     let buffering_proportion =
-                        buffering_duration.as_secs_f64() / (frame_elapsed.as_secs_f64() / 3.0);
+                        buffering_duration.as_secs_f64() / frame_elapsed.as_secs_f64();
 
                     painter.text(
                         Pos2 {
@@ -352,9 +347,9 @@ pub fn create(
                             size: 12.0,
                             family: egui::FontFamily::Monospace,
                         },
-                        if buffering_proportion >= 3.0 {
+                        if buffering_proportion >= 1.0 {
                             Color32::RED
-                        } else if buffering_proportion >= 2.0 {
+                        } else if buffering_proportion >= 0.7 {
                             Color32::YELLOW
                         } else {
                             Color32::from_rgb(224, 224, 224)
