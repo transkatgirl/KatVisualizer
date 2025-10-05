@@ -12,8 +12,8 @@ use std::{
 use triple_buffer::Output;
 
 use crate::{
-    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS, MyPlugin,
-    PluginParams,
+    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_BUFFER_REFRESH_RATE,
+    MAX_FREQUENCY_BINS, MyPlugin, PluginParams,
     analyzer::{BetterAnalysis, BetterSpectrogram, map_value_f32},
 };
 
@@ -304,6 +304,10 @@ pub fn create(
                 if settings.show_performance && buffering_duration < Duration::from_millis(500) {
                     let processing_proportion =
                         processing_duration.as_secs_f64() / chunk_duration.as_secs_f64();
+                    let buffering_proportion = buffering_duration.as_secs_f64()
+                        / chunk_duration
+                            .as_secs_f64()
+                            .max(1.0 / MAX_BUFFER_REFRESH_RATE as f64);
 
                     painter.text(
                         Pos2 {
@@ -342,9 +346,9 @@ pub fn create(
                             size: 12.0,
                             family: egui::FontFamily::Monospace,
                         },
-                        if buffering_duration >= chunk_duration.mul_f64(3.0) {
+                        if buffering_proportion > 3.0 {
                             Color32::RED
-                        } else if buffering_duration >= chunk_duration.mul_f64(2.0) {
+                        } else if buffering_proportion > 2.0 {
                             Color32::YELLOW
                         } else {
                             Color32::from_rgb(224, 224, 224)

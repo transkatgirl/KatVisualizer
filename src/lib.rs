@@ -37,6 +37,7 @@ pub struct PluginParams {
 
 const MAX_FREQUENCY_BINS: usize = 2048;
 const SPECTROGRAM_SLICES: usize = 512;
+const MAX_BUFFER_REFRESH_RATE: usize = 512;
 
 impl Default for MyPlugin {
     fn default() -> Self {
@@ -243,6 +244,8 @@ pub(crate) struct AnalysisChain {
     chunk_duration: Duration,
     single_input: bool,
     pool: ThreadPool,
+    buffer_update_rate: usize,
+    last_buffer_update: usize,
 }
 
 impl AnalysisChain {
@@ -277,6 +280,10 @@ impl AnalysisChain {
             chunk_duration: Duration::from_secs_f64(chunk_size as f64 / sample_rate as f64),
             single_input: layout.main_input_channels == NonZero::new(1),
             pool: ThreadPool::new(2),
+            buffer_update_rate: (config.update_rate_hz / MAX_BUFFER_REFRESH_RATE as f64)
+                .floor()
+                .max(1.0) as usize,
+            last_buffer_update: usize::MAX - 1,
         }
     }
     fn analyze<F>(
@@ -328,11 +335,19 @@ impl AnalysisChain {
                         analysis_output.1 = self.chunk_duration;
                     });
 
-                    let finished = Instant::now();
-                    metrics.processing = finished.duration_since(metrics.finished);
-                    metrics.finished = finished;
+                    self.last_buffer_update += 1;
 
-                    callback(spectrogram, metrics);
+                    if self.last_buffer_update >= self.buffer_update_rate {
+                        self.last_buffer_update = 0;
+
+                        let finished = Instant::now();
+                        metrics.processing = finished
+                            .duration_since(metrics.finished)
+                            .div_f64(self.buffer_update_rate as f64);
+                        metrics.finished = finished;
+
+                        callback(spectrogram, metrics);
+                    }
                 }
             });
     }
@@ -373,6 +388,9 @@ impl AnalysisChain {
             self.latency_samples = self.chunker.latency_samples();
             self.chunk_duration =
                 Duration::from_secs_f64(self.chunk_size as f64 / sample_rate as f64);
+            self.buffer_update_rate = (config.update_rate_hz / MAX_BUFFER_REFRESH_RATE as f64)
+                .floor()
+                .max(1.0) as usize;
         }
 
         if old_analyzer_config.resolution != config.resolution
@@ -404,6 +422,7 @@ impl AnalysisChain {
         }
 
         self.update_rate = config.update_rate_hz;
+        self.last_buffer_update = usize::MAX - 1;
     }
 }
 
