@@ -313,7 +313,7 @@ pub fn create(
                         .max(1.0 / shared_state.cached_analysis_settings.buffer_update_rate_hz)
                         .min(frame_elapsed.as_secs_f64() / 4.0);*/
                     let buffering_proportion =
-                        buffering_duration.as_secs_f64() / (frame_elapsed.as_secs_f64() / 4.0);
+                        buffering_duration.as_secs_f64() / (frame_elapsed.as_secs_f64() / 3.0);
 
                     painter.text(
                         Pos2 {
