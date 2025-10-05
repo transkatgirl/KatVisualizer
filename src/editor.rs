@@ -12,8 +12,8 @@ use std::{
 use triple_buffer::Output;
 
 use crate::{
-    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_BUFFER_REFRESH_RATE,
-    MAX_FREQUENCY_BINS, MyPlugin, PluginParams,
+    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS, MyPlugin,
+    PluginParams, SPECTROGRAM_SLICES,
     analyzer::{BetterAnalysis, BetterSpectrogram, map_value_f32},
 };
 
@@ -301,13 +301,17 @@ pub fn create(
 
                 drop(lock);
 
+                let now = Instant::now();
+                let frame_elapsed = now.duration_since(shared_state.last_frame);
+
                 if settings.show_performance && buffering_duration < Duration::from_millis(500) {
                     let processing_proportion =
                         processing_duration.as_secs_f64() / chunk_duration.as_secs_f64();
                     let buffering_proportion = buffering_duration.as_secs_f64()
                         / chunk_duration
                             .as_secs_f64()
-                            .max(1.0 / MAX_BUFFER_REFRESH_RATE as f64);
+                            .max(1.0 / shared_state.cached_analysis_settings.buffer_update_rate_hz)
+                            .max(frame_elapsed.as_secs_f64() / 2.0);
 
                     painter.text(
                         Pos2 {
@@ -356,9 +360,7 @@ pub fn create(
                     );
                 }
 
-                let now = Instant::now();
                 if settings.show_performance {
-                    let frame_elapsed = now.duration_since(shared_state.last_frame);
                     painter.text(
                         Pos2 {
                             x: max_x - 32.0,
@@ -577,12 +579,15 @@ pub fn create(
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.update_rate_hz, 128.0..=8192.0)
-                                    .logarithmic(true)
-                                    .suffix("hz")
-                                    .step_by(128.0)
-                                    .fixed_decimals(0)
-                                    .text("Update rate"),
+                                egui::Slider::new(
+                                    &mut settings.update_rate_hz,
+                                    128.0..=SPECTROGRAM_SLICES as f64 * 8.0,
+                                )
+                                .logarithmic(true)
+                                .suffix("hz")
+                                .step_by(128.0)
+                                .fixed_decimals(0)
+                                .text("Update rate"),
                             )
                             .changed()
                         {
@@ -601,6 +606,25 @@ pub fn create(
                                 .step_by(32.0)
                                 .fixed_decimals(0)
                                 .text("Resolution"),
+                            )
+                            .changed()
+                        {
+                            update(settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        };
+
+                        if ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut settings.buffer_update_rate_hz,
+                                    128.0..=1024.0,
+                                )
+                                .logarithmic(true)
+                                .suffix("hz")
+                                .step_by(128.0)
+                                .fixed_decimals(0)
+                                .text("(Approximate) buffer refresh rate"),
                             )
                             .changed()
                         {

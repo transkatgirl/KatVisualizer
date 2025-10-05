@@ -36,8 +36,7 @@ pub struct PluginParams {
 }
 
 const MAX_FREQUENCY_BINS: usize = 2048;
-const SPECTROGRAM_SLICES: usize = 512;
-const MAX_BUFFER_REFRESH_RATE: usize = 512;
+const SPECTROGRAM_SLICES: usize = 1024;
 
 impl Default for MyPlugin {
     fn default() -> Self {
@@ -206,6 +205,7 @@ pub(crate) struct AnalysisChainConfig {
     listening_volume: f64,
     normalize_amplitude: bool,
     update_rate_hz: f64,
+    buffer_update_rate_hz: f64,
 
     resolution: usize,
     start_frequency: f64,
@@ -222,6 +222,7 @@ impl Default for AnalysisChainConfig {
             listening_volume: 85.0,
             normalize_amplitude: true,
             update_rate_hz: 512.0,
+            buffer_update_rate_hz: 256.0,
             resolution: 512,
             start_frequency: 20.0,
             end_frequency: 20000.0,
@@ -238,6 +239,7 @@ pub(crate) struct AnalysisChain {
     right_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
     gain: f64,
     update_rate: f64,
+    buffer_update_rate_hz: f64,
     listening_volume: Option<f64>,
     latency_samples: u32,
     chunk_size: usize,
@@ -271,6 +273,7 @@ impl AnalysisChain {
             right_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], analyzer))),
             gain: config.gain,
             update_rate: config.update_rate_hz,
+            buffer_update_rate_hz: config.buffer_update_rate_hz,
             listening_volume: if config.normalize_amplitude {
                 Some(config.listening_volume)
             } else {
@@ -280,7 +283,7 @@ impl AnalysisChain {
             chunk_duration: Duration::from_secs_f64(chunk_size as f64 / sample_rate as f64),
             single_input: layout.main_input_channels == NonZero::new(1),
             pool: ThreadPool::new(2),
-            buffer_update_rate: (config.update_rate_hz / MAX_BUFFER_REFRESH_RATE as f64)
+            buffer_update_rate: (config.update_rate_hz / config.buffer_update_rate_hz)
                 .floor()
                 .max(1.0) as usize,
             last_buffer_update: usize::MAX - 1,
@@ -363,6 +366,7 @@ impl AnalysisChain {
             normalize_amplitude: self.listening_volume.is_some(),
             update_rate_hz: self.update_rate,
             resolution: analyzer_config.resolution,
+            buffer_update_rate_hz: self.buffer_update_rate_hz,
             start_frequency: analyzer_config.start_frequency,
             end_frequency: analyzer_config.end_frequency,
             log_frequency_scale: analyzer_config.log_frequency_scale,
@@ -388,7 +392,13 @@ impl AnalysisChain {
             self.latency_samples = self.chunker.latency_samples();
             self.chunk_duration =
                 Duration::from_secs_f64(self.chunk_size as f64 / sample_rate as f64);
-            self.buffer_update_rate = (config.update_rate_hz / MAX_BUFFER_REFRESH_RATE as f64)
+        }
+
+        if self.update_rate != config.update_rate_hz
+            || self.buffer_update_rate_hz != config.buffer_update_rate_hz
+        {
+            self.buffer_update_rate_hz = config.buffer_update_rate_hz;
+            self.buffer_update_rate = (config.update_rate_hz / self.buffer_update_rate_hz)
                 .floor()
                 .max(1.0) as usize;
         }
