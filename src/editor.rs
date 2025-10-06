@@ -5,8 +5,9 @@ use nih_plug_egui::{
     create_egui_editor,
     egui::{self, Align2, Color32, FontId, Mesh, Pos2, Rect, Shape},
 };
+use parking_lot::{Mutex, RwLock};
 use std::{
-    sync::{Arc, Mutex, RwLock},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use triple_buffer::Output;
@@ -243,8 +244,8 @@ pub fn create(
             egui_ctx.request_repaint();
 
             egui::CentralPanel::default().show(egui_ctx, |ui| {
-                let settings = *shared_state.settings.read().unwrap();
-                let color_table = &shared_state.color_table.read().unwrap();
+                let settings = *shared_state.settings.read();
+                let color_table = &shared_state.color_table.read();
                 let start = Instant::now();
 
                 let painter = ui.painter();
@@ -255,7 +256,7 @@ pub fn create(
                 mesh.reserve_triangles(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES * 6);
                 mesh.reserve_vertices(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES * 6);
 
-                let mut lock = analyzer_output.lock().unwrap();
+                let mut lock = analyzer_output.lock();
                 let (spectrogram, metrics) = lock.read();
 
                 let front = spectrogram.data.front().unwrap();
@@ -302,62 +303,62 @@ pub fn create(
                 painter.extend([Shape::Mesh(mesh.into())]);
 
                 let now = Instant::now();
-                let frame_elapsed = now.duration_since(*shared_state.last_frame.lock().unwrap());
-
-                if settings.show_performance && buffering_duration < Duration::from_millis(500) {
-                    let processing_proportion =
-                        processing_duration.as_secs_f64() / chunk_duration.as_secs_f64();
-                    let buffering_proportion =
-                        buffering_duration.as_secs_f64() / (1.0 / PERFORMANCE_METER_TARGET_FPS);
-
-                    painter.text(
-                        Pos2 {
-                            x: max_x - 32.0,
-                            y: 64.0,
-                        },
-                        Align2::RIGHT_BOTTOM,
-                        format!(
-                            "{:.0}% ({:.1}ms) processing",
-                            processing_proportion * 100.0,
-                            processing_duration.as_secs_f64() * 1000.0,
-                        ),
-                        FontId {
-                            size: 12.0,
-                            family: egui::FontFamily::Monospace,
-                        },
-                        if processing_proportion >= 0.95 {
-                            Color32::RED
-                        } else if processing_proportion >= 0.8 {
-                            Color32::YELLOW
-                        } else {
-                            Color32::from_rgb(224, 224, 224)
-                        },
-                    );
-                    painter.text(
-                        Pos2 {
-                            x: max_x - 32.0,
-                            y: 80.0,
-                        },
-                        Align2::RIGHT_BOTTOM,
-                        format!(
-                            "{:.1}ms buffering",
-                            buffering_duration.as_secs_f64() * 1000.0
-                        ),
-                        FontId {
-                            size: 12.0,
-                            family: egui::FontFamily::Monospace,
-                        },
-                        if buffering_proportion >= 1.0 {
-                            Color32::RED
-                        } else if buffering_proportion >= 0.6 {
-                            Color32::YELLOW
-                        } else {
-                            Color32::from_rgb(224, 224, 224)
-                        },
-                    );
-                }
+                let frame_elapsed = now.duration_since(*shared_state.last_frame.lock());
 
                 if settings.show_performance {
+                    if buffering_duration < Duration::from_millis(500) {
+                        let processing_proportion =
+                            processing_duration.as_secs_f64() / chunk_duration.as_secs_f64();
+                        let buffering_proportion =
+                            buffering_duration.as_secs_f64() / (1.0 / PERFORMANCE_METER_TARGET_FPS);
+
+                        painter.text(
+                            Pos2 {
+                                x: max_x - 32.0,
+                                y: 64.0,
+                            },
+                            Align2::RIGHT_BOTTOM,
+                            format!(
+                                "{:.0}% ({:.1}ms) processing",
+                                processing_proportion * 100.0,
+                                processing_duration.as_secs_f64() * 1000.0,
+                            ),
+                            FontId {
+                                size: 12.0,
+                                family: egui::FontFamily::Monospace,
+                            },
+                            if processing_proportion >= 0.95 {
+                                Color32::RED
+                            } else if processing_proportion >= 0.8 {
+                                Color32::YELLOW
+                            } else {
+                                Color32::from_rgb(224, 224, 224)
+                            },
+                        );
+                        painter.text(
+                            Pos2 {
+                                x: max_x - 32.0,
+                                y: 80.0,
+                            },
+                            Align2::RIGHT_BOTTOM,
+                            format!(
+                                "{:.1}ms buffering",
+                                buffering_duration.as_secs_f64() * 1000.0
+                            ),
+                            FontId {
+                                size: 12.0,
+                                family: egui::FontFamily::Monospace,
+                            },
+                            if buffering_proportion >= 1.0 {
+                                Color32::RED
+                            } else if buffering_proportion >= 0.6 {
+                                Color32::YELLOW
+                            } else {
+                                Color32::from_rgb(224, 224, 224)
+                            },
+                        );
+                    }
+
                     painter.text(
                         Pos2 {
                             x: max_x - 32.0,
@@ -381,23 +382,26 @@ pub fn create(
                             Color32::from_rgb(224, 224, 224)
                         },
                     );
-                    let raster_elapsed = now.duration_since(start);
+                    let tessellate_elapsed = now.duration_since(start);
                     painter.text(
                         Pos2 {
                             x: max_x - 32.0,
                             y: 48.0,
                         },
                         Align2::RIGHT_BOTTOM,
-                        format!("{:.1}ms rasterize", raster_elapsed.as_secs_f64() * 1000.0),
+                        format!(
+                            "{:.1}ms tessellate",
+                            tessellate_elapsed.as_secs_f64() * 1000.0
+                        ),
                         FontId {
                             size: 12.0,
                             family: egui::FontFamily::Monospace,
                         },
-                        if raster_elapsed
+                        if tessellate_elapsed
                             >= Duration::from_secs_f64(1.0 / (PERFORMANCE_METER_TARGET_FPS * 4.0))
                         {
                             Color32::RED
-                        } else if raster_elapsed
+                        } else if tessellate_elapsed
                             >= Duration::from_secs_f64(1.0 / (PERFORMANCE_METER_TARGET_FPS * 8.0))
                         {
                             Color32::YELLOW
@@ -415,7 +419,7 @@ pub fn create(
                 .default_open(false)
                 .show(egui_ctx, |ui| {
                     ui.collapsing("Render Options", |ui| {
-                        let mut settings = shared_state.settings.write().unwrap();
+                        let mut settings = shared_state.settings.write();
 
                         if ui
                             .add(
@@ -427,7 +431,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            shared_state.color_table.write().unwrap().build(
+                            shared_state.color_table.write().build(
                                 settings.left_hue,
                                 settings.right_hue,
                                 settings.minimum_lightness,
@@ -444,7 +448,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            shared_state.color_table.write().unwrap().build(
+                            shared_state.color_table.write().build(
                                 settings.left_hue,
                                 settings.right_hue,
                                 settings.minimum_lightness,
@@ -458,7 +462,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            shared_state.color_table.write().unwrap().build(
+                            shared_state.color_table.write().build(
                                 settings.left_hue,
                                 settings.right_hue,
                                 settings.minimum_lightness,
@@ -505,7 +509,7 @@ pub fn create(
                         ui.checkbox(&mut settings.show_performance, "Show performance counters");
 
                         if ui.button("Reset Render Options").clicked() {
-                            shared_state.color_table.write().unwrap().build(
+                            shared_state.color_table.write().build(
                                 settings.left_hue,
                                 settings.right_hue,
                                 settings.minimum_lightness,
@@ -515,10 +519,10 @@ pub fn create(
                     });
 
                     ui.collapsing("Analysis Options", |ui| {
-                        let mut settings = shared_state.cached_analysis_settings.lock().unwrap();
+                        let mut settings = shared_state.cached_analysis_settings.lock();
 
                         let update = |settings| {
-                            let mut lock = analysis_chain.lock().unwrap();
+                            let mut lock = analysis_chain.lock();
                             let analysis_chain = lock.as_mut().unwrap();
                             analysis_chain.update_config(settings);
                         };
@@ -740,7 +744,7 @@ pub fn create(
                     });
                 });
 
-            *shared_state.last_frame.lock().unwrap() = Instant::now();
+            *shared_state.last_frame.lock() = Instant::now();
         },
     )
 }

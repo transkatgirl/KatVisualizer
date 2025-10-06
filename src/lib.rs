@@ -1,12 +1,17 @@
+use mimalloc::MiMalloc;
 use nih_plug::{prelude::*, util::StftHelper};
 use nih_plug_egui::EguiState;
+use parking_lot::Mutex;
 use std::{
     num::NonZero,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use threadpool::ThreadPool;
 use triple_buffer::{Input, Output, triple_buffer};
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 use crate::analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram};
 
@@ -148,7 +153,7 @@ impl Plugin for MyPlugin {
         buffer_config: &BufferConfig,
         context: &mut impl InitContext<Self>,
     ) -> bool {
-        let mut analysis_chain = self.analysis_chain.lock().unwrap();
+        let mut analysis_chain = self.analysis_chain.lock();
 
         let analysis_config = match &*analysis_chain {
             Some(old_chain) => old_chain.config(),
@@ -174,7 +179,7 @@ impl Plugin for MyPlugin {
         _aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        if let Ok(mut lock) = self.analysis_chain.try_lock() {
+        if let Some(mut lock) = self.analysis_chain.try_lock() {
             let analysis_chain = lock.as_mut().unwrap();
 
             if analysis_chain.latency_samples != self.latency_samples {
@@ -314,21 +319,32 @@ impl AnalysisChain {
                     self.right_analyzer.clone()
                 };
 
-                analyzer.lock().unwrap().0.copy_from_slice(buffer);
-                let gain = self.gain;
-                let listening_volume = self.listening_volume;
+                if self.single_input {
+                    let mut lock = analyzer.lock();
+                    let (ref _buffer, ref mut analyzer) = *lock;
 
-                self.pool.execute(move || {
-                    let mut lock = analyzer.lock().unwrap();
-                    let (ref mut buffer, ref mut analyzer) = *lock;
+                    analyzer.analyze(
+                        buffer.iter().map(|s| *s as f64),
+                        self.gain,
+                        self.listening_volume,
+                    );
+                } else {
+                    analyzer.lock().0.copy_from_slice(buffer);
+                    let gain = self.gain;
+                    let listening_volume = self.listening_volume;
 
-                    analyzer.analyze(buffer.iter().map(|s| *s as f64), gain, listening_volume);
-                });
+                    self.pool.execute(move || {
+                        let mut lock = analyzer.lock();
+                        let (ref mut buffer, ref mut analyzer) = *lock;
+
+                        analyzer.analyze(buffer.iter().map(|s| *s as f64), gain, listening_volume);
+                    });
+                }
 
                 if channel_idx == 1 || (channel_idx == 0 && self.single_input) {
                     self.pool.join();
-                    let left_lock = self.left_analyzer.lock().unwrap();
-                    let right_lock = self.right_analyzer.lock().unwrap();
+                    let left_lock = self.left_analyzer.lock();
+                    let right_lock = self.right_analyzer.lock();
                     let left_output = left_lock.1.last_analysis();
                     let right_output = right_lock.1.last_analysis();
 
@@ -360,7 +376,7 @@ impl AnalysisChain {
             });
     }
     pub(crate) fn config(&self) -> AnalysisChainConfig {
-        let analyzer = self.left_analyzer.lock().unwrap();
+        let analyzer = self.left_analyzer.lock();
         let analyzer_config = analyzer.1.config();
 
         AnalysisChainConfig {
@@ -387,7 +403,7 @@ impl AnalysisChain {
             None
         };
 
-        let old_left_analyzer = self.left_analyzer.lock().unwrap();
+        let old_left_analyzer = self.left_analyzer.lock();
         let old_analyzer_config = old_left_analyzer.1.config();
         let sample_rate = old_analyzer_config.sample_rate;
 
@@ -432,8 +448,8 @@ impl AnalysisChain {
         } else if self.update_rate != config.update_rate_hz {
             drop(old_left_analyzer);
 
-            self.left_analyzer.lock().unwrap().0 = vec![0.0; self.chunk_size];
-            self.right_analyzer.lock().unwrap().0 = vec![0.0; self.chunk_size];
+            self.left_analyzer.lock().0 = vec![0.0; self.chunk_size];
+            self.right_analyzer.lock().0 = vec![0.0; self.chunk_size];
         }
 
         self.update_rate = config.update_rate_hz;
