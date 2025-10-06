@@ -51,6 +51,8 @@ fn draw_bargraph(
     }
 }
 
+// TODO: Draw this as a texture rather than a mesh
+
 fn draw_spectrogram(
     mesh: &mut Mesh,
     spectrogram: &BetterSpectrogram,
@@ -252,9 +254,13 @@ pub fn create(
                 let max_x = painter.clip_rect().max.x;
                 let max_y = painter.clip_rect().max.y;
 
-                let mut mesh = Mesh::default();
-                mesh.reserve_triangles(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES * 6);
-                mesh.reserve_vertices(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES * 6);
+                let mut bargraph_mesh = Mesh::default();
+                bargraph_mesh.reserve_triangles(MAX_FREQUENCY_BINS * 6);
+                bargraph_mesh.reserve_vertices(MAX_FREQUENCY_BINS * 6);
+
+                let mut spectrogram_mesh = Mesh::default();
+                spectrogram_mesh.reserve_triangles(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES * 6);
+                spectrogram_mesh.reserve_vertices(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES * 6);
 
                 egui_ctx.tessellation_options_mut(|options| {
                     options.coarse_tessellation_culling = false;
@@ -271,7 +277,7 @@ pub fn create(
 
                 if settings.bargraph_height != 0.0 {
                     draw_bargraph(
-                        &mut mesh,
+                        &mut bargraph_mesh,
                         &front.0,
                         Rect {
                             min: Pos2 { x: 0.0, y: 0.0 },
@@ -287,7 +293,7 @@ pub fn create(
 
                 if settings.bargraph_height != 1.0 {
                     draw_spectrogram(
-                        &mut mesh,
+                        &mut spectrogram_mesh,
                         spectrogram,
                         Rect {
                             min: Pos2 {
@@ -304,7 +310,10 @@ pub fn create(
 
                 drop(lock);
 
-                painter.extend([Shape::Mesh(mesh.into())]);
+                painter.extend([
+                    Shape::Mesh(bargraph_mesh.into()),
+                    Shape::Mesh(spectrogram_mesh.into()),
+                ]);
 
                 let now = Instant::now();
                 let frame_elapsed = now.duration_since(*shared_state.last_frame.lock());
