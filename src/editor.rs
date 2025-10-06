@@ -30,7 +30,7 @@ fn draw_bargraph(
     let band_width = width / analysis.data.len() as f32;
 
     for (i, (pan, volume)) in analysis.data.iter().enumerate() {
-        let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
+        let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
 
         let start_x = bounds.min.x + i as f32 * band_width;
 
