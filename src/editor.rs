@@ -251,6 +251,10 @@ pub fn create(
                 let max_x = painter.clip_rect().max.x;
                 let max_y = painter.clip_rect().max.y;
 
+                let mut mesh = Mesh::default();
+                mesh.reserve_triangles(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES * 6);
+                mesh.reserve_vertices(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES * 6);
+
                 let mut lock = analyzer_output.lock().unwrap();
                 let (spectrogram, metrics) = lock.read();
 
@@ -259,10 +263,6 @@ pub fn create(
                 let buffering_duration = start.duration_since(metrics.finished);
                 let processing_duration = metrics.processing;
                 let chunk_duration = front.1;
-
-                let mut mesh = Mesh::default();
-                mesh.reserve_triangles(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES * 6);
-                mesh.reserve_vertices(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES * 6);
 
                 if settings.bargraph_height != 0.0 {
                     draw_bargraph(
