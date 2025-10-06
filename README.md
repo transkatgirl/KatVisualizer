@@ -43,4 +43,4 @@ standalone binary: run it with the `--input-device` and `--output-device` option
 	- [x] Settings
 	- [ ] Frequency & amplitude display
 
-Other important improvements: Support saving and loading configuration
+Other important improvements: Support saving and loading configuration, further analysis performance optimization
