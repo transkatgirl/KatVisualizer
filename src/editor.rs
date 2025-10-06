@@ -6,7 +6,7 @@ use nih_plug_egui::{
     egui::{self, Align2, Color32, FontId, Mesh, Pos2, Rect, Shape},
 };
 use std::{
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
 use triple_buffer::Output;
@@ -202,10 +202,10 @@ impl ColorTable {
 }
 
 struct SharedState {
-    settings: RenderSettings,
-    last_frame: Instant,
-    color_table: ColorTable,
-    cached_analysis_settings: AnalysisChainConfig,
+    settings: RwLock<RenderSettings>,
+    last_frame: Mutex<Instant>,
+    color_table: RwLock<ColorTable>,
+    cached_analysis_settings: Mutex<AnalysisChainConfig>,
 }
 
 const PERFORMANCE_METER_TARGET_FPS: f64 = 60.0;
@@ -227,12 +227,12 @@ pub fn create(
             settings.minimum_lightness,
         );
 
-        Mutex::new(SharedState {
-            settings,
-            last_frame: Instant::now(),
-            color_table,
-            cached_analysis_settings: AnalysisChainConfig::default(),
-        })
+        SharedState {
+            settings: RwLock::new(settings),
+            last_frame: Mutex::new(Instant::now()),
+            color_table: RwLock::new(color_table),
+            cached_analysis_settings: Mutex::new(AnalysisChainConfig::default()),
+        }
     };
 
     create_egui_editor(
@@ -240,12 +240,11 @@ pub fn create(
         (),
         |_, _| {},
         move |egui_ctx, _setter, _state| {
-            let mut shared_state = shared_state.lock().unwrap();
             egui_ctx.request_repaint();
 
             egui::CentralPanel::default().show(egui_ctx, |ui| {
-                let settings = shared_state.settings;
-                let color_table = &shared_state.color_table;
+                let settings = *shared_state.settings.read().unwrap();
+                let color_table = &shared_state.color_table.read().unwrap();
                 let start = Instant::now();
 
                 let painter = ui.painter();
@@ -303,7 +302,7 @@ pub fn create(
                 painter.extend([Shape::Mesh(mesh.into())]);
 
                 let now = Instant::now();
-                let frame_elapsed = now.duration_since(shared_state.last_frame);
+                let frame_elapsed = now.duration_since(*shared_state.last_frame.lock().unwrap());
 
                 if settings.show_performance && buffering_duration < Duration::from_millis(500) {
                     let processing_proportion =
@@ -416,9 +415,11 @@ pub fn create(
                 .default_open(false)
                 .show(egui_ctx, |ui| {
                     ui.collapsing("Render Options", |ui| {
+                        let mut settings = shared_state.settings.write().unwrap();
+
                         if ui
                             .add(
-                                egui::Slider::new(&mut shared_state.settings.left_hue, 0.0..=360.0)
+                                egui::Slider::new(&mut settings.left_hue, 0.0..=360.0)
                                     .suffix("°")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
@@ -426,8 +427,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            let settings = shared_state.settings;
-                            shared_state.color_table.build(
+                            shared_state.color_table.write().unwrap().build(
                                 settings.left_hue,
                                 settings.right_hue,
                                 settings.minimum_lightness,
@@ -436,19 +436,15 @@ pub fn create(
 
                         if ui
                             .add(
-                                egui::Slider::new(
-                                    &mut shared_state.settings.right_hue,
-                                    0.0..=360.0,
-                                )
-                                .suffix("°")
-                                .step_by(1.0)
-                                .fixed_decimals(0)
-                                .text("Right channel hue"),
+                                egui::Slider::new(&mut settings.right_hue, 0.0..=360.0)
+                                    .suffix("°")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Right channel hue"),
                             )
                             .changed()
                         {
-                            let settings = shared_state.settings;
-                            shared_state.color_table.build(
+                            shared_state.color_table.write().unwrap().build(
                                 settings.left_hue,
                                 settings.right_hue,
                                 settings.minimum_lightness,
@@ -457,16 +453,12 @@ pub fn create(
 
                         if ui
                             .add(
-                                egui::Slider::new(
-                                    &mut shared_state.settings.minimum_lightness,
-                                    0.0..=0.3,
-                                )
-                                .text("Minimum OkLCH lightness value"),
+                                egui::Slider::new(&mut settings.minimum_lightness, 0.0..=0.3)
+                                    .text("Minimum OkLCH lightness value"),
                             )
                             .changed()
                         {
-                            let settings = shared_state.settings;
-                            shared_state.color_table.build(
+                            shared_state.color_table.write().unwrap().build(
                                 settings.left_hue,
                                 settings.right_hue,
                                 settings.minimum_lightness,
@@ -474,7 +466,7 @@ pub fn create(
                         };
 
                         ui.add(
-                            egui::Slider::new(&mut shared_state.settings.max_db, 0.0..=-75.0)
+                            egui::Slider::new(&mut settings.max_db, 0.0..=-75.0)
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix("dB")
                                 .step_by(1.0)
@@ -483,7 +475,7 @@ pub fn create(
                         );
 
                         ui.add(
-                            egui::Slider::new(&mut shared_state.settings.min_db, 0.0..=-75.0)
+                            egui::Slider::new(&mut settings.min_db, 0.0..=-75.0)
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix("dB")
                                 .step_by(1.0)
@@ -491,8 +483,7 @@ pub fn create(
                                 .text("Minimum (normalized) amplitude"),
                         );
 
-                        let mut spectrogram_duration =
-                            shared_state.settings.spectrogram_duration.as_secs_f64();
+                        let mut spectrogram_duration = settings.spectrogram_duration.as_secs_f64();
                         if ui
                             .add(
                                 egui::Slider::new(&mut spectrogram_duration, 0.05..=2.0)
@@ -502,36 +493,29 @@ pub fn create(
                             )
                             .changed()
                         {
-                            shared_state.settings.spectrogram_duration =
+                            settings.spectrogram_duration =
                                 Duration::from_secs_f64(spectrogram_duration);
                         };
 
                         ui.add(
-                            egui::Slider::new(
-                                &mut shared_state.settings.bargraph_height,
-                                0.0..=1.0,
-                            )
-                            .text("Bargraph height"),
+                            egui::Slider::new(&mut settings.bargraph_height, 0.0..=1.0)
+                                .text("Bargraph height"),
                         );
 
-                        ui.checkbox(
-                            &mut shared_state.settings.show_performance,
-                            "Show performance counters",
-                        );
+                        ui.checkbox(&mut settings.show_performance, "Show performance counters");
 
                         if ui.button("Reset Render Options").clicked() {
-                            let settings = RenderSettings::default();
-                            shared_state.color_table.build(
+                            shared_state.color_table.write().unwrap().build(
                                 settings.left_hue,
                                 settings.right_hue,
                                 settings.minimum_lightness,
                             );
-                            shared_state.settings = settings;
+                            *settings = RenderSettings::default();
                         }
                     });
 
                     ui.collapsing("Analysis Options", |ui| {
-                        let settings = &mut shared_state.cached_analysis_settings;
+                        let mut settings = shared_state.cached_analysis_settings.lock().unwrap();
 
                         let update = |settings| {
                             let mut lock = analysis_chain.lock().unwrap();
@@ -555,7 +539,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(settings);
+                            update(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -570,7 +554,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(settings);
+                            update(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -582,7 +566,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(settings);
+                            update(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
@@ -601,7 +585,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(settings);
+                            update(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -619,7 +603,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(settings);
+                            update(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -638,7 +622,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(settings);
+                            update(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -665,7 +649,7 @@ pub fn create(
                                     settings.end_frequency = 0.0;
                                 }
                                 if settings.end_frequency > settings.start_frequency {
-                                    update(settings);
+                                    update(&settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
                                 }
@@ -687,7 +671,7 @@ pub fn create(
                                     settings.end_frequency = 0.0;
                                 }
                                 if settings.end_frequency > settings.start_frequency {
-                                    update(settings);
+                                    update(&settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
                                 }
@@ -702,7 +686,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(settings);
+                            update(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
@@ -717,7 +701,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(settings);
+                            update(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -732,7 +716,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(settings);
+                            update(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -744,19 +728,19 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(settings);
+                            update(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
 
                         if ui.button("Reset Analysis Options").clicked() {
                             *settings = AnalysisChainConfig::default();
-                            update(settings);
+                            update(&settings);
                         }
                     });
                 });
 
-            shared_state.last_frame = Instant::now();
+            *shared_state.last_frame.lock().unwrap() = Instant::now();
         },
     )
 }
