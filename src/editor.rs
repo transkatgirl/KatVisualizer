@@ -4,13 +4,14 @@ use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
     egui::{
-        self, Align2, Color32, ColorImage, FontId, ImageData, Mesh, Pos2, Rect, Shape,
-        TextureHandle, TextureOptions, epaint::Vertex,
+        self, Align2, Color32, ColorImage, FontId, ImageData, Mesh, Pos2, Rect, Shape, TextureId,
+        TextureOptions,
+        epaint::{ImageDelta, Vertex},
     },
 };
 use parking_lot::{Mutex, RwLock};
 use std::{
-    sync::{Arc, OnceLock},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use triple_buffer::Output;
@@ -181,7 +182,7 @@ struct SharedState {
     last_frame: Mutex<Instant>,
     color_table: RwLock<ColorTable>,
     cached_analysis_settings: Mutex<AnalysisChainConfig>,
-    spectrogram_texture: OnceLock<TextureHandle>,
+    spectrogram_texture: Arc<RwLock<Option<TextureId>>>,
 }
 
 const PERFORMANCE_METER_TARGET_FPS: f64 = 60.0;
@@ -208,14 +209,37 @@ pub fn create(
             last_frame: Mutex::new(Instant::now()),
             color_table: RwLock::new(color_table),
             cached_analysis_settings: Mutex::new(AnalysisChainConfig::default()),
-            spectrogram_texture: OnceLock::new(),
+            spectrogram_texture: Arc::new(RwLock::new(None)),
         }
     };
+
+    let spectrogram_texture = shared_state.spectrogram_texture.clone();
 
     create_egui_editor(
         egui_state.clone(),
         (),
         move |egui_ctx, _| {
+            let manager = egui_ctx.tex_manager();
+            let mut manager = manager.write();
+            let mut spectrogram_texture = spectrogram_texture.write();
+
+            if let Some(ref id) = *spectrogram_texture {
+                if manager.meta(*id).is_some() {
+                    manager.free(*id);
+                }
+            }
+
+            *spectrogram_texture = Some(manager.alloc(
+                "spectrogram".to_string(),
+                ImageData::Color(Arc::new(ColorImage::new([1, 1], Color32::BLACK))),
+                TextureOptions {
+                    magnification: egui::TextureFilter::Nearest,
+                    minification: egui::TextureFilter::Linear,
+                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
+                    mipmap_mode: None,
+                },
+            ));
+
             egui_ctx.tessellation_options_mut(|options| {
                 options.coarse_tessellation_culling = false;
             });
@@ -227,24 +251,7 @@ pub fn create(
                 let settings = *shared_state.settings.read();
                 let color_table = &shared_state.color_table.read();
                 let start = Instant::now();
-                let mut spectrogram_texture = shared_state
-                    .spectrogram_texture
-                    .get_or_init(|| {
-                        let manager = egui_ctx.tex_manager();
-
-                        let texture_id = manager.write().alloc(
-                            "spectrogram".to_string(),
-                            ImageData::Color(Arc::new(ColorImage::new([1, 1], Color32::BLACK))),
-                            TextureOptions {
-                                magnification: egui::TextureFilter::Nearest,
-                                minification: egui::TextureFilter::Linear,
-                                wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                                mipmap_mode: None,
-                            },
-                        );
-                        TextureHandle::new(manager, texture_id)
-                    })
-                    .clone();
+                let spectrogram_texture = shared_state.spectrogram_texture.read().unwrap();
 
                 let painter = ui.painter();
                 let max_x = painter.clip_rect().max.x;
@@ -300,13 +307,17 @@ pub fn create(
 
                 drop(lock);
 
-                spectrogram_texture.set(
-                    spectrogram_image,
-                    TextureOptions {
-                        magnification: egui::TextureFilter::Nearest,
-                        minification: egui::TextureFilter::Linear,
-                        wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                        mipmap_mode: None,
+                egui_ctx.tex_manager().write().set(
+                    spectrogram_texture,
+                    ImageDelta {
+                        image: ImageData::Color(Arc::new(spectrogram_image)),
+                        options: TextureOptions {
+                            magnification: egui::TextureFilter::Nearest,
+                            minification: egui::TextureFilter::Linear,
+                            wrap_mode: egui::TextureWrapMode::ClampToEdge,
+                            mipmap_mode: None,
+                        },
+                        pos: None,
                     },
                 );
 
@@ -344,7 +355,7 @@ pub fn create(
                                 color: Color32::WHITE,
                             },
                         ],
-                        texture_id: spectrogram_texture.id(),
+                        texture_id: spectrogram_texture,
                     })),
                 ]);
 
@@ -625,7 +636,7 @@ pub fn create(
                             .add(
                                 egui::Slider::new(
                                     &mut settings.update_rate_hz,
-                                    128.0..=SPECTROGRAM_SLICES as f64 * 8.0,
+                                    128.0..=SPECTROGRAM_SLICES as f64 * 4.0,
                                 )
                                 .logarithmic(true)
                                 .suffix("hz")
