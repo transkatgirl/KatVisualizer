@@ -3,11 +3,14 @@ use ndarray::Array2;
 use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
-    egui::{self, Align2, Color32, FontId, Mesh, Pos2, Rect, Shape},
+    egui::{
+        self, Align2, Color32, ColorImage, FontId, ImageData, Mesh, Pos2, Rect, Shape,
+        TextureHandle, TextureOptions, epaint::Vertex,
+    },
 };
 use parking_lot::{Mutex, RwLock};
 use std::{
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
 use triple_buffer::Output;
@@ -51,57 +54,26 @@ fn draw_bargraph(
     }
 }
 
-// TODO: Draw this as a texture rather than a mesh
-
-fn draw_spectrogram(
-    mesh: &mut Mesh,
+fn draw_spectrogram_image(
+    image: &mut ColorImage,
     spectrogram: &BetterSpectrogram,
-    bounds: Rect,
     color_table: &ColorTable,
     (max_db, min_db): (f32, f32),
-    duration: Duration,
 ) {
-    let width = bounds.max.x - bounds.min.x;
-    let height = bounds.max.y - bounds.min.y;
+    let target_duration = spectrogram.data.front().unwrap().1;
 
-    let second_height = height / duration.as_secs_f32();
-    let duration_s = duration.as_secs_f32();
+    let image_width = image.width();
+    let image_height = image.height();
 
-    let mut last_elapsed = 0.0;
-
-    for (analysis, length) in &spectrogram.data {
-        let elapsed = last_elapsed + length.as_secs_f32();
-
-        if elapsed > duration_s {
+    for (y, (analysis, length)) in spectrogram.data.iter().enumerate() {
+        if analysis.data.len() != image_width || y == image_height || *length != target_duration {
             break;
         }
 
-        let band_width = width / analysis.data.len() as f32;
-
-        let start_y = bounds.min.y + last_elapsed * second_height;
-        let end_y = bounds.min.y + elapsed * second_height;
-
-        for (i, (pan, volume)) in analysis.data.iter().enumerate() {
+        for (x, (pan, volume)) in analysis.data.iter().enumerate() {
             let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
-
-            let start_x = bounds.min.x + i as f32 * band_width;
-
-            mesh.add_colored_rect(
-                Rect {
-                    min: Pos2 {
-                        x: start_x,
-                        y: start_y,
-                    },
-                    max: Pos2 {
-                        x: start_x + band_width,
-                        y: end_y,
-                    },
-                },
-                color_table.lookup(*pan, intensity),
-            );
+            image.pixels[(image_width * y) + x] = color_table.lookup(*pan, intensity);
         }
-
-        last_elapsed = elapsed;
     }
 }
 
@@ -209,6 +181,7 @@ struct SharedState {
     last_frame: Mutex<Instant>,
     color_table: RwLock<ColorTable>,
     cached_analysis_settings: Mutex<AnalysisChainConfig>,
+    spectrogram_texture: OnceLock<TextureHandle>,
 }
 
 const PERFORMANCE_METER_TARGET_FPS: f64 = 60.0;
@@ -235,20 +208,43 @@ pub fn create(
             last_frame: Mutex::new(Instant::now()),
             color_table: RwLock::new(color_table),
             cached_analysis_settings: Mutex::new(AnalysisChainConfig::default()),
+            spectrogram_texture: OnceLock::new(),
         }
     };
 
     create_egui_editor(
         egui_state.clone(),
         (),
-        |_, _| {},
-        move |egui_ctx, _setter, _state| {
+        move |egui_ctx, _| {
+            egui_ctx.tessellation_options_mut(|options| {
+                options.coarse_tessellation_culling = false;
+            });
+        },
+        move |egui_ctx, _setter, _| {
             egui_ctx.request_repaint();
 
             egui::CentralPanel::default().show(egui_ctx, |ui| {
                 let settings = *shared_state.settings.read();
                 let color_table = &shared_state.color_table.read();
                 let start = Instant::now();
+                let mut spectrogram_texture = shared_state
+                    .spectrogram_texture
+                    .get_or_init(|| {
+                        let manager = egui_ctx.tex_manager();
+
+                        let texture_id = manager.write().alloc(
+                            "spectrogram".to_string(),
+                            ImageData::Color(Arc::new(ColorImage::new([1, 1], Color32::BLACK))),
+                            TextureOptions {
+                                magnification: egui::TextureFilter::Nearest,
+                                minification: egui::TextureFilter::Linear,
+                                wrap_mode: egui::TextureWrapMode::ClampToEdge,
+                                mipmap_mode: None,
+                            },
+                        );
+                        TextureHandle::new(manager, texture_id)
+                    })
+                    .clone();
 
                 let painter = ui.painter();
                 let max_x = painter.clip_rect().max.x;
@@ -258,18 +254,20 @@ pub fn create(
                 bargraph_mesh.reserve_triangles(MAX_FREQUENCY_BINS * 6);
                 bargraph_mesh.reserve_vertices(MAX_FREQUENCY_BINS * 6);
 
-                let mut spectrogram_mesh = Mesh::default();
-                spectrogram_mesh.reserve_triangles(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES * 6);
-                spectrogram_mesh.reserve_vertices(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES * 6);
-
-                egui_ctx.tessellation_options_mut(|options| {
-                    options.coarse_tessellation_culling = false;
-                });
-
                 let mut lock = analyzer_output.lock();
                 let (spectrogram, metrics) = lock.read();
 
                 let front = spectrogram.data.front().unwrap();
+
+                let spectrogram_width = front.0.data.len();
+                let spectrogram_height = (settings.spectrogram_duration.as_secs_f64()
+                    / front.1.as_secs_f64())
+                .round() as usize;
+
+                let mut spectrogram_image = ColorImage {
+                    size: [spectrogram_width, spectrogram_height],
+                    pixels: vec![Color32::BLACK; spectrogram_width * spectrogram_height],
+                };
 
                 let buffering_duration = start.duration_since(metrics.finished);
                 let processing_duration = metrics.processing;
@@ -292,27 +290,62 @@ pub fn create(
                 }
 
                 if settings.bargraph_height != 1.0 {
-                    draw_spectrogram(
-                        &mut spectrogram_mesh,
+                    draw_spectrogram_image(
+                        &mut spectrogram_image,
                         spectrogram,
-                        Rect {
-                            min: Pos2 {
-                                x: 0.0,
-                                y: max_y * settings.bargraph_height,
-                            },
-                            max: Pos2 { x: max_x, y: max_y },
-                        },
                         color_table,
                         (settings.max_db, settings.min_db),
-                        settings.spectrogram_duration,
                     );
                 }
 
                 drop(lock);
 
+                spectrogram_texture.set(
+                    spectrogram_image,
+                    TextureOptions {
+                        magnification: egui::TextureFilter::Nearest,
+                        minification: egui::TextureFilter::Linear,
+                        wrap_mode: egui::TextureWrapMode::ClampToEdge,
+                        mipmap_mode: None,
+                    },
+                );
+
+                let spectrogram_bounds = Rect {
+                    min: Pos2 {
+                        x: 0.0,
+                        y: max_y * settings.bargraph_height,
+                    },
+                    max: Pos2 { x: max_x, y: max_y },
+                };
+
                 painter.extend([
-                    Shape::Mesh(bargraph_mesh.into()),
-                    Shape::Mesh(spectrogram_mesh.into()),
+                    Shape::Mesh(Arc::new(bargraph_mesh)),
+                    Shape::Mesh(Arc::new(Mesh {
+                        indices: vec![0, 1, 2, 2, 1, 3],
+                        vertices: vec![
+                            Vertex {
+                                pos: spectrogram_bounds.left_top(),
+                                uv: Pos2 { x: 0.0, y: 0.0 },
+                                color: Color32::WHITE,
+                            },
+                            Vertex {
+                                pos: spectrogram_bounds.right_top(),
+                                uv: Pos2 { x: 1.0, y: 0.0 },
+                                color: Color32::WHITE,
+                            },
+                            Vertex {
+                                pos: spectrogram_bounds.left_bottom(),
+                                uv: Pos2 { x: 0.0, y: 1.0 },
+                                color: Color32::WHITE,
+                            },
+                            Vertex {
+                                pos: spectrogram_bounds.right_bottom(),
+                                uv: Pos2 { x: 1.0, y: 1.0 },
+                                color: Color32::WHITE,
+                            },
+                        ],
+                        texture_id: spectrogram_texture.id(),
+                    })),
                 ]);
 
                 let now = Instant::now();
@@ -395,7 +428,7 @@ pub fn create(
                             Color32::from_rgb(224, 224, 224)
                         },
                     );
-                    let tessellate_elapsed = now.duration_since(start);
+                    let rasterize_elapsed = now.duration_since(start);
                     painter.text(
                         Pos2 {
                             x: max_x - 32.0,
@@ -403,18 +436,18 @@ pub fn create(
                         },
                         Align2::RIGHT_BOTTOM,
                         format!(
-                            "{:.1}ms tessellate",
-                            tessellate_elapsed.as_secs_f64() * 1000.0
+                            "{:.1}ms rasterize",
+                            rasterize_elapsed.as_secs_f64() * 1000.0
                         ),
                         FontId {
                             size: 12.0,
                             family: egui::FontFamily::Monospace,
                         },
-                        if tessellate_elapsed
+                        if rasterize_elapsed
                             >= Duration::from_secs_f64(1.0 / (PERFORMANCE_METER_TARGET_FPS * 4.0))
                         {
                             Color32::RED
-                        } else if tessellate_elapsed
+                        } else if rasterize_elapsed
                             >= Duration::from_secs_f64(1.0 / (PERFORMANCE_METER_TARGET_FPS * 8.0))
                         {
                             Color32::YELLOW
