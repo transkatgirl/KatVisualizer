@@ -3,7 +3,10 @@ use ndarray::Array2;
 use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
-    egui::{self, Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, emath::GuiRounding},
+    egui::{
+        self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, Shape, emath::GuiRounding,
+        epaint::RectShape,
+    },
 };
 use std::{
     sync::{Arc, Mutex},
@@ -18,7 +21,8 @@ use crate::{
 };
 
 fn draw_bargraph<F>(
-    painter: &Painter,
+    pixels_per_point: f32,
+    shapes: &mut Vec<Shape>,
     analysis: &BetterAnalysis,
     bounds: Rect,
     color: F,
@@ -29,14 +33,13 @@ fn draw_bargraph<F>(
     let width = bounds.max.x - bounds.min.x;
     let height = bounds.max.y - bounds.min.y;
 
-    let pixels_per_point = painter.pixels_per_point();
     let band_width = width / analysis.data.len() as f32;
 
     for (i, (pan, volume)) in analysis.data.iter().enumerate() {
         let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
         let color = color(*pan, intensity);
 
-        painter.rect_filled(
+        shapes.push(Shape::Rect(RectShape::filled(
             Rect {
                 min: Pos2 {
                     x: (bounds.min.x + i as f32 * band_width).round_to_pixels(pixels_per_point),
@@ -50,12 +53,13 @@ fn draw_bargraph<F>(
             },
             CornerRadius::ZERO,
             color,
-        );
+        )));
     }
 }
 
 fn draw_spectrogram<F>(
-    painter: &Painter,
+    pixels_per_point: f32,
+    shapes: &mut Vec<Shape>,
     spectrogram: &BetterSpectrogram,
     bounds: Rect,
     color: F,
@@ -68,7 +72,6 @@ fn draw_spectrogram<F>(
     let height = bounds.max.y - bounds.min.y;
 
     let second_height = height / duration.as_secs_f32();
-    let pixels_per_point = painter.pixels_per_point();
 
     let mut last_elapsed = Duration::ZERO;
 
@@ -85,7 +88,7 @@ fn draw_spectrogram<F>(
             let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
             let color = color(*pan, intensity);
 
-            painter.rect_filled(
+            shapes.push(Shape::Rect(RectShape::filled(
                 Rect {
                     min: Pos2 {
                         x: (bounds.min.x + i as f32 * band_width).round_to_pixels(pixels_per_point),
@@ -102,7 +105,7 @@ fn draw_spectrogram<F>(
                 },
                 CornerRadius::ZERO,
                 color,
-            );
+            )));
         }
 
         last_elapsed = elapsed;
@@ -240,6 +243,8 @@ pub fn create(
         })
     };
 
+    let shapes = Mutex::new(Vec::with_capacity(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES));
+
     create_egui_editor(
         egui_state.clone(),
         (),
@@ -266,9 +271,14 @@ pub fn create(
                 let processing_duration = metrics.processing;
                 let chunk_duration = front.1;
 
+                let mut shapes = shapes.lock().unwrap();
+
+                shapes.clear();
+
                 if settings.bargraph_height != 0.0 {
                     draw_bargraph(
-                        painter,
+                        painter.pixels_per_point(),
+                        &mut shapes,
                         &front.0,
                         Rect {
                             min: Pos2 { x: 0.0, y: 0.0 },
@@ -284,7 +294,8 @@ pub fn create(
 
                 if settings.bargraph_height != 1.0 {
                     draw_spectrogram(
-                        painter,
+                        painter.pixels_per_point(),
+                        &mut shapes,
                         spectrogram,
                         Rect {
                             min: Pos2 {
@@ -300,6 +311,9 @@ pub fn create(
                 }
 
                 drop(lock);
+
+                painter.extend(shapes.iter().cloned());
+                drop(shapes);
 
                 let now = Instant::now();
                 let frame_elapsed = now.duration_since(shared_state.last_frame);
