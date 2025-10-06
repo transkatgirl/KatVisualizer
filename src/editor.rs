@@ -3,7 +3,7 @@ use ndarray::Array2;
 use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
-    egui::{self, Align2, Color32, FontId, Mesh, Pos2, Rect, Shape, emath::GuiRounding},
+    egui::{self, Align2, Color32, FontId, Mesh, Pos2, Rect, Shape},
 };
 use std::{
     sync::{Arc, Mutex},
@@ -17,16 +17,13 @@ use crate::{
     analyzer::{BetterAnalysis, BetterSpectrogram, map_value_f32},
 };
 
-fn draw_bargraph<F>(
-    pixels_per_point: f32,
+fn draw_bargraph(
     mesh: &mut Mesh,
     analysis: &BetterAnalysis,
     bounds: Rect,
-    color: F,
+    color_table: &ColorTable,
     (max_db, min_db): (f32, f32),
-) where
-    F: Fn(f32, f32) -> Color32,
-{
+) {
     let width = bounds.max.x - bounds.min.x;
     let height = bounds.max.y - bounds.min.y;
 
@@ -34,72 +31,70 @@ fn draw_bargraph<F>(
 
     for (i, (pan, volume)) in analysis.data.iter().enumerate() {
         let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
-        let color = color(*pan, intensity);
+
+        let start_x = bounds.min.x + i as f32 * band_width;
 
         mesh.add_colored_rect(
             Rect {
                 min: Pos2 {
-                    x: (bounds.min.x + i as f32 * band_width).round_to_pixels(pixels_per_point),
-                    y: (bounds.max.y - intensity * height).round_to_pixels(pixels_per_point),
+                    x: start_x,
+                    y: bounds.max.y - intensity * height,
                 },
                 max: Pos2 {
-                    x: (bounds.min.x + i as f32 * band_width + band_width)
-                        .round_to_pixels(pixels_per_point),
-                    y: (bounds.max.y).round_to_pixels(pixels_per_point),
+                    x: start_x + band_width,
+                    y: bounds.max.y,
                 },
             },
-            color,
+            color_table.lookup(*pan, intensity),
         );
     }
 }
 
-fn draw_spectrogram<F>(
-    pixels_per_point: f32,
+fn draw_spectrogram(
     mesh: &mut Mesh,
     spectrogram: &BetterSpectrogram,
     bounds: Rect,
-    color: F,
+    color_table: &ColorTable,
     (max_db, min_db): (f32, f32),
     duration: Duration,
-) where
-    F: Fn(f32, f32) -> Color32,
-{
+) {
     let width = bounds.max.x - bounds.min.x;
     let height = bounds.max.y - bounds.min.y;
 
     let second_height = height / duration.as_secs_f32();
+    let duration_s = duration.as_secs_f32();
 
-    let mut last_elapsed = Duration::ZERO;
+    let mut last_elapsed = 0.0;
 
     for (analysis, length) in &spectrogram.data {
-        let elapsed = last_elapsed + *length;
+        let elapsed = last_elapsed + length.as_secs_f32();
 
-        if elapsed > duration {
+        if elapsed > duration_s {
             break;
         }
 
         let band_width = width / analysis.data.len() as f32;
 
+        let start_y = bounds.min.y + last_elapsed * second_height;
+        let end_y = bounds.min.y + elapsed * second_height;
+
         for (i, (pan, volume)) in analysis.data.iter().enumerate() {
             let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
-            let color = color(*pan, intensity);
+
+            let start_x = bounds.min.x + i as f32 * band_width;
 
             mesh.add_colored_rect(
                 Rect {
                     min: Pos2 {
-                        x: (bounds.min.x + i as f32 * band_width).round_to_pixels(pixels_per_point),
-                        y: (bounds.min.y + last_elapsed.as_secs_f32() * second_height)
-                            .round_to_pixels(pixels_per_point),
+                        x: start_x,
+                        y: start_y,
                     },
                     max: Pos2 {
-                        x: (bounds.min.x + i as f32 * band_width + band_width)
-                            .round_to_pixels(pixels_per_point),
-                        y: (bounds.min.y
-                            + (elapsed.as_secs_f32() * second_height).max(bounds.max.y))
-                        .round_to_pixels(pixels_per_point),
+                        x: start_x + band_width,
+                        y: end_y,
                     },
                 },
-                color,
+                color_table.lookup(*pan, intensity),
             );
         }
 
@@ -270,7 +265,6 @@ pub fn create(
 
                 if settings.bargraph_height != 0.0 {
                     draw_bargraph(
-                        painter.pixels_per_point(),
                         &mut mesh,
                         &front.0,
                         Rect {
@@ -280,14 +274,13 @@ pub fn create(
                                 y: max_y * settings.bargraph_height,
                             },
                         },
-                        |split, intensity| color_table.lookup(split, intensity),
+                        color_table,
                         (settings.max_db, settings.min_db),
                     );
                 }
 
                 if settings.bargraph_height != 1.0 {
                     draw_spectrogram(
-                        painter.pixels_per_point(),
                         &mut mesh,
                         spectrogram,
                         Rect {
@@ -297,7 +290,7 @@ pub fn create(
                             },
                             max: Pos2 { x: max_x, y: max_y },
                         },
-                        |split, intensity| color_table.lookup(split, intensity),
+                        color_table,
                         (settings.max_db, settings.min_db),
                         settings.spectrogram_duration,
                     );
