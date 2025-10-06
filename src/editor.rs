@@ -256,6 +256,10 @@ pub fn create(
                 mesh.reserve_triangles(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES * 6);
                 mesh.reserve_vertices(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES * 6);
 
+                egui_ctx.tessellation_options_mut(|options| {
+                    options.coarse_tessellation_culling = false;
+                });
+
                 let mut lock = analyzer_output.lock();
                 let (spectrogram, metrics) = lock.read();
 
