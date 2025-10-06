@@ -208,6 +208,8 @@ struct SharedState {
     cached_analysis_settings: AnalysisChainConfig,
 }
 
+const PERFORMANCE_METER_TARGET_FPS: f64 = 60.0;
+
 pub fn create(
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
@@ -307,7 +309,7 @@ pub fn create(
                     let processing_proportion =
                         processing_duration.as_secs_f64() / chunk_duration.as_secs_f64();
                     let buffering_proportion =
-                        buffering_duration.as_secs_f64() / frame_elapsed.as_secs_f64();
+                        buffering_duration.as_secs_f64() / (1.0 / PERFORMANCE_METER_TARGET_FPS);
 
                     painter.text(
                         Pos2 {
@@ -368,29 +370,37 @@ pub fn create(
                             size: 12.0,
                             family: egui::FontFamily::Monospace,
                         },
-                        if frame_elapsed >= Duration::from_secs_f64(1.0 / 30.0) {
+                        if frame_elapsed
+                            >= Duration::from_secs_f64(1.0 / (PERFORMANCE_METER_TARGET_FPS * 0.5))
+                        {
                             Color32::RED
-                        } else if frame_elapsed >= Duration::from_secs_f64(1.0 / 55.0) {
+                        } else if frame_elapsed
+                            >= Duration::from_secs_f64(1.0 / (PERFORMANCE_METER_TARGET_FPS * 0.9))
+                        {
                             Color32::YELLOW
                         } else {
                             Color32::from_rgb(224, 224, 224)
                         },
                     );
-                    let draw_elapsed = now.duration_since(start);
+                    let raster_elapsed = now.duration_since(start);
                     painter.text(
                         Pos2 {
                             x: max_x - 32.0,
                             y: 48.0,
                         },
                         Align2::RIGHT_BOTTOM,
-                        format!("{:.1}ms composite", draw_elapsed.as_secs_f64() * 1000.0),
+                        format!("{:.1}ms rasterize", raster_elapsed.as_secs_f64() * 1000.0),
                         FontId {
                             size: 12.0,
                             family: egui::FontFamily::Monospace,
                         },
-                        if draw_elapsed >= Duration::from_secs_f64(1.0 / (60.0 * 4.0)) {
+                        if raster_elapsed
+                            >= Duration::from_secs_f64(1.0 / (PERFORMANCE_METER_TARGET_FPS * 4.0))
+                        {
                             Color32::RED
-                        } else if draw_elapsed >= Duration::from_secs_f64(1.0 / (60.0 * 8.0)) {
+                        } else if raster_elapsed
+                            >= Duration::from_secs_f64(1.0 / (PERFORMANCE_METER_TARGET_FPS * 8.0))
+                        {
                             Color32::YELLOW
                         } else {
                             Color32::from_rgb(224, 224, 224)
