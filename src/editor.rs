@@ -263,6 +263,8 @@ pub fn create(
                 let lock = analysis_output.lock();
                 let (ref spectrogram, ref metrics) = *lock;
 
+                // TODO: Copy the spectrogram on the render thread to avoid locking it for the entire rasterization period
+
                 let front = spectrogram.data.front().unwrap();
 
                 let spectrogram_width = front.0.data.len();
@@ -639,7 +641,7 @@ pub fn create(
                             .add(
                                 egui::Slider::new(
                                     &mut settings.update_rate_hz,
-                                    128.0..=SPECTROGRAM_SLICES as f64 * 4.0,
+                                    128.0..=(SPECTROGRAM_SLICES as f64 / 2.0),
                                 )
                                 .logarithmic(true)
                                 .suffix("hz")

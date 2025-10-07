@@ -37,7 +37,7 @@ pub struct PluginParams {
 }
 
 const MAX_FREQUENCY_BINS: usize = 2048;
-const SPECTROGRAM_SLICES: usize = 1024; // TODO: Pass the spectrogram in small chunks and then collate it on the render thread
+const SPECTROGRAM_SLICES: usize = 16384;
 
 impl Default for MyPlugin {
     fn default() -> Self {
