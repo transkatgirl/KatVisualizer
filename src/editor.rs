@@ -6,7 +6,7 @@ use nih_plug_egui::{
     egui::{
         self, Align2, Color32, ColorImage, FontId, ImageData, Mesh, Pos2, Rect, Shape, TextureId,
         TextureOptions,
-        epaint::{ImageDelta, Vertex},
+        epaint::{ImageDelta, Vertex, WHITE_UV},
     },
 };
 use parking_lot::{Mutex, RwLock};
@@ -33,24 +33,56 @@ fn draw_bargraph(
 
     let band_width = width / analysis.data.len() as f32;
 
+    let mut vertices = mesh.vertices.len() as u32;
+
     for (i, (pan, volume)) in analysis.data.iter().enumerate() {
         let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
 
         let start_x = bounds.min.x + i as f32 * band_width;
 
-        mesh.add_colored_rect(
-            Rect {
-                min: Pos2 {
-                    x: start_x,
-                    y: bounds.max.y - intensity * height,
-                },
-                max: Pos2 {
-                    x: start_x + band_width,
-                    y: bounds.max.y,
-                },
+        let rect = Rect {
+            min: Pos2 {
+                x: start_x,
+                y: bounds.max.y - intensity * height,
             },
-            color_table.lookup(*pan, intensity),
-        );
+            max: Pos2 {
+                x: start_x + band_width,
+                y: bounds.max.y,
+            },
+        };
+        let color = color_table.lookup(*pan, intensity);
+
+        mesh.indices.extend_from_slice(&[
+            vertices,
+            vertices + 1,
+            vertices + 2,
+            vertices + 2,
+            vertices + 1,
+            vertices + 3,
+        ]);
+        mesh.vertices.extend_from_slice(&[
+            Vertex {
+                pos: rect.left_top(),
+                uv: WHITE_UV,
+                color,
+            },
+            Vertex {
+                pos: rect.right_top(),
+                uv: WHITE_UV,
+                color,
+            },
+            Vertex {
+                pos: rect.left_bottom(),
+                uv: WHITE_UV,
+                color,
+            },
+            Vertex {
+                pos: rect.right_bottom(),
+                uv: WHITE_UV,
+                color,
+            },
+        ]);
+        vertices += 4;
     }
 }
 
@@ -262,8 +294,6 @@ pub fn create(
 
                 let lock = analysis_output.lock();
                 let (ref spectrogram, ref metrics) = *lock;
-
-                // TODO: Copy the spectrogram on the render thread to avoid locking it for the entire rasterization period
 
                 let front = spectrogram.data.front().unwrap();
 
