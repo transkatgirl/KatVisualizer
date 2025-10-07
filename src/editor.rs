@@ -279,18 +279,22 @@ pub fn create(
             egui_ctx.request_repaint();
 
             egui::CentralPanel::default().show(egui_ctx, |ui| {
-                let settings = *shared_state.settings.read();
-                let color_table = &shared_state.color_table.read();
-                let start = Instant::now();
-                let spectrogram_texture = shared_state.spectrogram_texture.read().unwrap();
+                let mut bargraph_mesh = Mesh::default();
+                bargraph_mesh.reserve_triangles(MAX_FREQUENCY_BINS * 6);
+                bargraph_mesh.reserve_vertices(MAX_FREQUENCY_BINS * 6);
+
+                let mut spectrogram_image_pixels =
+                    vec![Color32::BLACK; MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES];
 
                 let painter = ui.painter();
                 let max_x = painter.clip_rect().max.x;
                 let max_y = painter.clip_rect().max.y;
 
-                let mut bargraph_mesh = Mesh::default();
-                bargraph_mesh.reserve_triangles(MAX_FREQUENCY_BINS * 6);
-                bargraph_mesh.reserve_vertices(MAX_FREQUENCY_BINS * 6);
+                let settings = *shared_state.settings.read();
+                let color_table = &shared_state.color_table.read();
+                let spectrogram_texture = shared_state.spectrogram_texture.read().unwrap();
+
+                let start = Instant::now();
 
                 let lock = analysis_output.lock();
                 let (ref spectrogram, ref metrics) = *lock;
@@ -302,9 +306,11 @@ pub fn create(
                     / front.1.as_secs_f64())
                 .round() as usize;
 
+                spectrogram_image_pixels.truncate(spectrogram_width * spectrogram_height);
+
                 let mut spectrogram_image = ColorImage {
                     size: [spectrogram_width, spectrogram_height],
-                    pixels: vec![Color32::BLACK; spectrogram_width * spectrogram_height],
+                    pixels: spectrogram_image_pixels,
                 };
 
                 let buffering_duration = start.duration_since(metrics.finished);
