@@ -14,7 +14,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use triple_buffer::Output;
 
 use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS, MyPlugin,
@@ -190,7 +189,7 @@ const PERFORMANCE_METER_TARGET_FPS: f64 = 60.0;
 pub fn create(
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
-    analyzer_output: Arc<Mutex<Output<(BetterSpectrogram, AnalysisMetrics)>>>,
+    analysis_output: Arc<Mutex<(BetterSpectrogram, AnalysisMetrics)>>,
     _async_executor: AsyncExecutor<MyPlugin>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
@@ -261,8 +260,8 @@ pub fn create(
                 bargraph_mesh.reserve_triangles(MAX_FREQUENCY_BINS * 6);
                 bargraph_mesh.reserve_vertices(MAX_FREQUENCY_BINS * 6);
 
-                let mut lock = analyzer_output.lock();
-                let (spectrogram, metrics) = lock.read();
+                let lock = analysis_output.lock();
+                let (ref spectrogram, ref metrics) = *lock;
 
                 let front = spectrogram.data.front().unwrap();
 
@@ -363,9 +362,14 @@ pub fn create(
                 let frame_elapsed = now.duration_since(*shared_state.last_frame.lock());
 
                 if settings.show_performance {
+                    let rasterize_elapsed = now.duration_since(start);
+
                     if buffering_duration < Duration::from_millis(500) {
-                        let processing_proportion =
-                            processing_duration.as_secs_f64() / chunk_duration.as_secs_f64();
+                        let rasterize_secs = rasterize_elapsed.as_secs_f64();
+                        let chunk_secs = chunk_duration.as_secs_f64();
+                        let processing_proportion = (processing_duration.as_secs_f64()
+                            + (rasterize_secs * (chunk_secs / frame_elapsed.as_secs_f64())))
+                            / chunk_secs;
                         let buffering_proportion =
                             buffering_duration.as_secs_f64() / (1.0 / PERFORMANCE_METER_TARGET_FPS);
 
@@ -439,7 +443,6 @@ pub fn create(
                             Color32::from_rgb(224, 224, 224)
                         },
                     );
-                    let rasterize_elapsed = now.duration_since(start);
                     painter.text(
                         Pos2 {
                             x: max_x - 32.0,
@@ -661,25 +664,6 @@ pub fn create(
                                 .step_by(32.0)
                                 .fixed_decimals(0)
                                 .text("Resolution"),
-                            )
-                            .changed()
-                        {
-                            update(&settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        };
-
-                        if ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut settings.buffer_update_rate_hz,
-                                    128.0..=1024.0,
-                                )
-                                .logarithmic(true)
-                                .suffix("hz")
-                                .step_by(128.0)
-                                .fixed_decimals(0)
-                                .text("(Approximate) buffer refresh rate"),
                             )
                             .changed()
                         {

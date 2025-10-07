@@ -8,7 +8,6 @@ use std::{
     time::{Duration, Instant},
 };
 use threadpool::ThreadPool;
-use triple_buffer::{Input, Output, triple_buffer};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -28,10 +27,7 @@ pub struct MyPlugin {
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     latency_samples: u32,
-    metrics: AnalysisMetrics,
-    spectrogram: BetterSpectrogram,
-    buffer_input: Input<(BetterSpectrogram, AnalysisMetrics)>,
-    buffer_output: Arc<Mutex<Output<(BetterSpectrogram, AnalysisMetrics)>>>,
+    analysis_output: Arc<Mutex<(BetterSpectrogram, AnalysisMetrics)>>,
 }
 
 #[derive(Params)]
@@ -45,26 +41,17 @@ const SPECTROGRAM_SLICES: usize = 1024; // TODO: Pass the spectrogram in small c
 
 impl Default for MyPlugin {
     fn default() -> Self {
-        let spectrogram = (
-            BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
-            AnalysisMetrics {
-                processing: Duration::ZERO,
-                finished: Instant::now(),
-            },
-        );
-        let (buffer_input, buffer_output) = triple_buffer(&spectrogram);
-
         Self {
             params: Arc::new(PluginParams::default()),
             analysis_chain: Arc::new(Mutex::new(None)),
             latency_samples: 0,
-            spectrogram: BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
-            metrics: AnalysisMetrics {
-                processing: Duration::ZERO,
-                finished: Instant::now(),
-            },
-            buffer_input,
-            buffer_output: Arc::new(Mutex::new(buffer_output)),
+            analysis_output: Arc::new(Mutex::new((
+                BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
+                AnalysisMetrics {
+                    processing: Duration::ZERO,
+                    finished: Instant::now(),
+                },
+            ))),
         }
     }
 }
@@ -142,7 +129,7 @@ impl Plugin for MyPlugin {
         editor::create(
             self.params.clone(),
             self.analysis_chain.clone(),
-            self.buffer_output.clone(),
+            self.analysis_output.clone(),
             async_executor,
         )
     }
@@ -187,17 +174,7 @@ impl Plugin for MyPlugin {
                 self.latency_samples = analysis_chain.latency_samples;
             }
 
-            analysis_chain.analyze(
-                buffer,
-                &mut self.spectrogram,
-                &mut self.metrics,
-                |spectrogram, metrics| {
-                    let write_buffer = self.buffer_input.input_buffer_mut();
-                    write_buffer.0.clone_from(spectrogram);
-                    write_buffer.1 = *metrics;
-                    self.buffer_input.publish();
-                },
-            );
+            analysis_chain.analyze(buffer, &self.analysis_output);
         }
 
         ProcessStatus::Normal
@@ -210,7 +187,6 @@ pub(crate) struct AnalysisChainConfig {
     listening_volume: f64,
     normalize_amplitude: bool,
     update_rate_hz: f64,
-    buffer_update_rate_hz: f64,
 
     resolution: usize,
     start_frequency: f64,
@@ -227,7 +203,6 @@ impl Default for AnalysisChainConfig {
             listening_volume: 89.0,
             normalize_amplitude: true,
             update_rate_hz: 512.0,
-            buffer_update_rate_hz: 256.0,
             resolution: 512,
             start_frequency: 20.0,
             end_frequency: 20000.0,
@@ -244,16 +219,12 @@ pub(crate) struct AnalysisChain {
     right_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
     gain: f64,
     update_rate: f64,
-    buffer_update_rate_hz: f64,
     listening_volume: Option<f64>,
     latency_samples: u32,
     chunk_size: usize,
     chunk_duration: Duration,
     single_input: bool,
     pool: ThreadPool,
-    buffer_update_rate: usize,
-    last_buffer_update: usize,
-    duration_samples: usize,
 }
 
 impl AnalysisChain {
@@ -279,7 +250,6 @@ impl AnalysisChain {
             right_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], analyzer))),
             gain: config.gain,
             update_rate: config.update_rate_hz,
-            buffer_update_rate_hz: config.buffer_update_rate_hz,
             listening_volume: if config.normalize_amplitude {
                 Some(config.listening_volume)
             } else {
@@ -289,24 +259,14 @@ impl AnalysisChain {
             chunk_duration: Duration::from_secs_f64(chunk_size as f64 / sample_rate as f64),
             single_input: layout.main_input_channels == NonZero::new(1),
             pool: ThreadPool::new(2),
-            buffer_update_rate: (config.update_rate_hz / config.buffer_update_rate_hz)
-                .floor()
-                .max(1.0) as usize,
-            last_buffer_update: usize::MAX - 1,
-            duration_samples: 0,
         }
     }
-    fn analyze<F>(
+    fn analyze(
         &mut self,
         buffer: &mut Buffer,
-        spectrogram: &mut BetterSpectrogram,
-        metrics: &mut AnalysisMetrics,
-        mut callback: F,
-    ) where
-        F: FnMut(&BetterSpectrogram, &AnalysisMetrics),
-    {
-        metrics.finished = Instant::now();
-        self.duration_samples = 0;
+        output: &Mutex<(BetterSpectrogram, AnalysisMetrics)>,
+    ) {
+        let mut finished = Instant::now();
 
         self.chunker
             .process_analyze_only(buffer, 1, |channel_idx, buffer| {
@@ -342,6 +302,8 @@ impl AnalysisChain {
                 }
 
                 if channel_idx == 1 || (channel_idx == 0 && self.single_input) {
+                    let (ref mut spectrogram, ref mut metrics) = *output.lock();
+
                     self.pool.join();
                     let left_lock = self.left_analyzer.lock();
                     let right_lock = self.right_analyzer.lock();
@@ -357,21 +319,11 @@ impl AnalysisChain {
                         analysis_output.1 = self.chunk_duration;
                     });
 
-                    self.last_buffer_update += 1;
-                    self.duration_samples += 1;
+                    let now = Instant::now();
+                    metrics.processing = now.duration_since(finished);
+                    metrics.finished = now;
 
-                    if self.last_buffer_update >= self.buffer_update_rate {
-                        let finished = Instant::now();
-                        metrics.processing = finished
-                            .duration_since(metrics.finished)
-                            .div_f64(self.duration_samples as f64);
-                        metrics.finished = finished;
-
-                        callback(spectrogram, metrics);
-
-                        self.last_buffer_update = 0;
-                        self.duration_samples = 0;
-                    }
+                    finished = now;
                 }
             });
     }
@@ -387,7 +339,6 @@ impl AnalysisChain {
             normalize_amplitude: self.listening_volume.is_some(),
             update_rate_hz: self.update_rate,
             resolution: analyzer_config.resolution,
-            buffer_update_rate_hz: self.buffer_update_rate_hz,
             start_frequency: analyzer_config.start_frequency,
             end_frequency: analyzer_config.end_frequency,
             log_frequency_scale: analyzer_config.log_frequency_scale,
@@ -413,15 +364,6 @@ impl AnalysisChain {
             self.latency_samples = self.chunker.latency_samples();
             self.chunk_duration =
                 Duration::from_secs_f64(self.chunk_size as f64 / sample_rate as f64);
-        }
-
-        if self.update_rate != config.update_rate_hz
-            || self.buffer_update_rate_hz != config.buffer_update_rate_hz
-        {
-            self.buffer_update_rate_hz = config.buffer_update_rate_hz;
-            self.buffer_update_rate = (config.update_rate_hz / self.buffer_update_rate_hz)
-                .floor()
-                .max(1.0) as usize;
         }
 
         if old_analyzer_config.resolution != config.resolution
@@ -453,8 +395,6 @@ impl AnalysisChain {
         }
 
         self.update_rate = config.update_rate_hz;
-        self.last_buffer_update = usize::MAX - 1;
-        self.duration_samples = 0;
     }
 }
 

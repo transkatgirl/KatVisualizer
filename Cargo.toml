@@ -29,12 +29,12 @@ nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28
 serde = { version = "1.0", features = [
 	"derive",
 ] }
-triple_buffer = "8.1.1"
-color = "0.3.2"
-threadpool = "1.8.1"
-ndarray = "0.16.1"
+#triple_buffer = "8.1.1"
+color       = "0.3.2"
+threadpool  = "1.8.1"
+ndarray     = "0.16.1"
 parking_lot = "0.12.5"
-mimalloc = "0.1.48"
+mimalloc    = "0.1.48"
 
 [profile.release]
 opt-level = 3
