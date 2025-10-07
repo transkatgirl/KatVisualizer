@@ -202,7 +202,7 @@ impl Default for RenderSettings {
             right_hue: 328.0,
             minimum_lightness: 0.13,
             min_db: -70.0,
-            max_db: -9.0,
+            max_db: -12.0,
             bargraph_height: 0.4,
             spectrogram_duration: Duration::from_secs_f64(0.5),
             show_performance: true,
