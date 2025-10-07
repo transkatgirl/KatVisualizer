@@ -112,7 +112,7 @@ fn draw_spectrogram_image(
     }
 }
 
-fn get_frequency_amplitude_pan(
+fn get_frequency_amplitude_pan_time(
     cursor: Pos2,
     spectrogram: &BetterSpectrogram,
     frequencies: &[(f32, f32, f32)],
@@ -120,7 +120,7 @@ fn get_frequency_amplitude_pan(
     spectrogram_bounds: Rect,
     (bargraph_max_db, bargraph_min_db): (f32, f32),
     spectrogram_height: usize,
-) -> Option<((f32, f32, f32), f32, Option<f32>)> {
+) -> Option<((f32, f32, f32), f32, Option<(f32, Duration)>)> {
     if bargraph_bounds.contains(cursor) {
         let frequency = frequencies[map_value_f32(
             cursor.x,
@@ -158,10 +158,11 @@ fn get_frequency_amplitude_pan(
         .floor() as usize;
 
         let frequency = frequencies[x];
+        let duration = spectrogram.data[0].duration;
 
         let item = if spectrogram.data.len() > y
             && spectrogram.data[y].data.len() == frequencies.len()
-            && spectrogram.data[y].duration == spectrogram.data[0].duration
+            && spectrogram.data[y].duration == duration
         {
             Some(spectrogram.data[y].data[x])
         } else {
@@ -169,7 +170,11 @@ fn get_frequency_amplitude_pan(
         };
 
         if let Some((pan, amplitude)) = item {
-            Some((frequency, amplitude, Some(pan)))
+            Some((
+                frequency,
+                amplitude,
+                Some((pan, duration.mul_f64(y as f64))),
+            ))
         } else {
             None
         }
@@ -423,7 +428,7 @@ pub fn create(
                 }
 
                 let under_pointer = if let Some(pointer) = egui_ctx.pointer_latest_pos() {
-                    get_frequency_amplitude_pan(
+                    get_frequency_amplitude_pan_time(
                         pointer,
                         spectrogram,
                         &frequencies,
@@ -482,9 +487,15 @@ pub fn create(
                     })),
                 ]);
 
-                if let Some((frequency, amplitude, pan)) = under_pointer {
-                    let text = if let Some(pan) = pan {
-                        format!("{:.0}hz, {:+.0}dB\n{:+.2} pan", frequency.1, amplitude, pan)
+                if let Some((frequency, amplitude, additional)) = under_pointer {
+                    let text = if let Some((pan, elapsed)) = additional {
+                        format!(
+                            "{:.0}hz, {:+.0}dB\n{:+.2} pan, -{:.3}s",
+                            frequency.1,
+                            amplitude,
+                            pan,
+                            elapsed.as_secs_f64()
+                        )
                     } else {
                         format!("{:.0}hz, {:+.0}dB", frequency.1, amplitude)
                     };
