@@ -684,7 +684,7 @@ pub fn create(
                             .add(
                                 egui::Slider::new(
                                     &mut settings.update_rate_hz,
-                                    128.0..=(SPECTROGRAM_SLICES as f64 / 2.0),
+                                    128.0..=SPECTROGRAM_SLICES as f64,
                                 )
                                 .logarithmic(true)
                                 .suffix("hz")
