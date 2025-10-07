@@ -312,11 +312,14 @@ impl AnalysisChain {
 
                     spectrogram.update_fn(|analysis_output| {
                         if self.single_input {
-                            analysis_output.0.update_mono(left_output);
+                            analysis_output.update_mono(left_output, self.chunk_duration);
                         } else {
-                            analysis_output.0.update_stereo(left_output, right_output);
+                            analysis_output.update_stereo(
+                                left_output,
+                                right_output,
+                                self.chunk_duration,
+                            );
                         }
-                        analysis_output.1 = self.chunk_duration;
                     });
 
                     let now = Instant::now();

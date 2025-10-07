@@ -92,13 +92,16 @@ fn draw_spectrogram_image(
     color_table: &ColorTable,
     (max_db, min_db): (f32, f32),
 ) {
-    let target_duration = spectrogram.data.front().unwrap().1;
+    let target_duration = spectrogram.data.front().unwrap().duration;
 
     let image_width = image.width();
     let image_height = image.height();
 
-    for (y, (analysis, length)) in spectrogram.data.iter().enumerate() {
-        if analysis.data.len() != image_width || y == image_height || *length != target_duration {
+    for (y, analysis) in spectrogram.data.iter().enumerate() {
+        if analysis.data.len() != image_width
+            || y == image_height
+            || analysis.duration != target_duration
+        {
             break;
         }
 
@@ -301,9 +304,9 @@ pub fn create(
 
                 let front = spectrogram.data.front().unwrap();
 
-                let spectrogram_width = front.0.data.len();
+                let spectrogram_width = front.data.len();
                 let spectrogram_height = (settings.spectrogram_duration.as_secs_f64()
-                    / front.1.as_secs_f64())
+                    / front.duration.as_secs_f64())
                 .round() as usize;
 
                 spectrogram_image_pixels.truncate(spectrogram_width * spectrogram_height);
@@ -315,12 +318,12 @@ pub fn create(
 
                 let buffering_duration = start.duration_since(metrics.finished);
                 let processing_duration = metrics.processing;
-                let chunk_duration = front.1;
+                let chunk_duration = front.duration;
 
                 if settings.bargraph_height != 0.0 {
                     draw_bargraph(
                         &mut bargraph_mesh,
-                        &front.0,
+                        &front,
                         Rect {
                             min: Pos2 { x: 0.0, y: 0.0 },
                             max: Pos2 {
@@ -516,7 +519,7 @@ pub fn create(
                     );
                 }
             });
-            /*egui::TopBottomPanel::bottom("my_panel").show(egui_ctx, move |ui| {
+            /*egui::TopBottomPanel::top("my_panel").show(egui_ctx, move |ui| {
                 ui.label("Hello World!");
             });*/
             egui::Window::new("Settings")

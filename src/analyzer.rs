@@ -135,16 +135,18 @@ impl BetterAnalyzer {
 
 #[derive(Clone)]
 pub struct BetterAnalysis {
+    pub duration: Duration,
     pub data: Vec<(f32, f32)>,
 }
 
 impl BetterAnalysis {
     pub fn new(capacity: usize) -> Self {
         Self {
+            duration: Duration::ZERO,
             data: Vec::with_capacity(capacity),
         }
     }
-    pub fn update_stereo(&mut self, left: &[f64], right: &[f64]) {
+    pub fn update_stereo(&mut self, left: &[f64], right: &[f64], duration: Duration) {
         let new_length = left.len().min(right.len());
 
         if self.data.len() == new_length {
@@ -164,8 +166,10 @@ impl BetterAnalysis {
                 self.data.push((pan as f32, volume as f32));
             }
         }
+
+        self.duration = duration;
     }
-    pub fn update_mono(&mut self, data: &[f64]) {
+    pub fn update_mono(&mut self, data: &[f64], duration: Duration) {
         let new_length = data.len();
 
         if self.data.len() == new_length {
@@ -181,41 +185,40 @@ impl BetterAnalysis {
                 self.data.push((0.0, *volume as f32));
             }
         }
+
+        self.duration = duration;
     }
 }
 
 #[derive(Clone)]
 pub struct BetterSpectrogram {
-    pub data: VecDeque<(BetterAnalysis, Duration)>,
+    pub data: VecDeque<BetterAnalysis>,
 }
 
 impl BetterSpectrogram {
     pub fn new(length: usize, slice_capacity: usize) -> Self {
         Self {
             data: VecDeque::from(vec![
-                (
-                    BetterAnalysis {
-                        data: vec![(0.0, -f32::INFINITY); slice_capacity],
-                    },
-                    Duration::from_secs(1)
-                );
+                BetterAnalysis {
+                    duration: Duration::from_secs(1),
+                    data: vec![(0.0, -f32::INFINITY); slice_capacity],
+                };
                 length
             ]),
         }
     }
-    pub fn update(&mut self, analysis: &BetterAnalysis, since_last: Duration) {
+    pub fn update(&mut self, analysis: &BetterAnalysis) {
         self.update_fn(|buffer| {
-            if buffer.0.data.len() == analysis.data.len() {
-                buffer.0.data.copy_from_slice(&analysis.data);
+            if buffer.data.len() == analysis.data.len() {
+                buffer.data.copy_from_slice(&analysis.data);
             } else {
-                buffer.0.data.clone_from(&analysis.data);
+                buffer.data.clone_from(&analysis.data);
             }
-            buffer.1 = since_last;
         });
     }
     pub fn update_fn<F>(&mut self, callback: F)
     where
-        F: Fn(&mut (BetterAnalysis, Duration)),
+        F: Fn(&mut BetterAnalysis),
     {
         let mut buffer = self.data.pop_back().unwrap();
         callback(&mut buffer);
