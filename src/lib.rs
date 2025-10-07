@@ -28,6 +28,7 @@ pub struct MyPlugin {
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     latency_samples: u32,
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
+    analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
 }
 
 #[derive(Params)]
@@ -52,6 +53,7 @@ impl Default for MyPlugin {
                     finished: Instant::now(),
                 },
             ))),
+            analysis_frequencies: Arc::new(RwLock::new(Vec::with_capacity(MAX_FREQUENCY_BINS))),
         }
     }
 }
@@ -130,12 +132,7 @@ impl Plugin for MyPlugin {
             self.params.clone(),
             self.analysis_chain.clone(),
             self.analysis_output.clone(),
-            self.analysis_chain
-                .lock()
-                .as_ref()
-                .unwrap()
-                .frequencies
-                .clone(),
+            self.analysis_frequencies.clone(),
             async_executor,
         )
     }
@@ -157,6 +154,7 @@ impl Plugin for MyPlugin {
             &analysis_config,
             buffer_config.sample_rate as usize,
             audio_io_layout,
+            self.analysis_frequencies.clone(),
         );
         context.set_latency_samples(new_chain.latency_samples);
         self.latency_samples = new_chain.latency_samples;
@@ -243,7 +241,12 @@ pub(crate) struct AnalysisChain {
 }
 
 impl AnalysisChain {
-    fn new(config: &AnalysisChainConfig, sample_rate: usize, layout: &AudioIOLayout) -> Self {
+    fn new(
+        config: &AnalysisChainConfig,
+        sample_rate: usize,
+        layout: &AudioIOLayout,
+        frequency_list_container: Arc<RwLock<Vec<(f32, f32, f32)>>>,
+    ) -> Self {
         let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
             resolution: config.resolution,
             start_frequency: config.start_frequency,
@@ -258,16 +261,21 @@ impl AnalysisChain {
         let chunk_size = (sample_rate as f64 / config.update_rate_hz).round() as usize;
         chunker.set_block_size(chunk_size);
 
-        Self {
-            latency_samples: chunker.latency_samples(),
-            chunker,
-            frequencies: Arc::new(RwLock::new(
+        {
+            let mut frequencies = frequency_list_container.write();
+            frequencies.clear();
+            frequencies.extend(
                 analyzer
                     .frequencies()
                     .iter()
-                    .map(|(a, b, c)| (*a as f32, *b as f32, *c as f32))
-                    .collect(),
-            )),
+                    .map(|(a, b, c)| (*a as f32, *b as f32, *c as f32)),
+            );
+        }
+
+        Self {
+            latency_samples: chunker.latency_samples(),
+            chunker,
+            frequencies: frequency_list_container,
             left_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], analyzer.clone()))),
             right_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], analyzer))),
             gain: config.gain,
@@ -409,11 +417,15 @@ impl AnalysisChain {
             });
             drop(old_left_analyzer);
 
-            *self.frequencies.write() = analyzer
-                .frequencies()
-                .iter()
-                .map(|(a, b, c)| (*a as f32, *b as f32, *c as f32))
-                .collect();
+            let mut frequencies = self.frequencies.write();
+            frequencies.clear();
+            frequencies.extend(
+                analyzer
+                    .frequencies()
+                    .iter()
+                    .map(|(a, b, c)| (*a as f32, *b as f32, *c as f32)),
+            );
+
             self.left_analyzer =
                 Arc::new(Mutex::new((vec![0.0; self.chunk_size], analyzer.clone())));
             self.right_analyzer = Arc::new(Mutex::new((vec![0.0; self.chunk_size], analyzer)));
