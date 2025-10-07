@@ -396,15 +396,19 @@ pub fn create(
                 if settings.show_performance {
                     let rasterize_elapsed = now.duration_since(start);
 
-                    if buffering_duration < Duration::from_millis(500) {
-                        let rasterize_secs = rasterize_elapsed.as_secs_f64();
-                        let chunk_secs = chunk_duration.as_secs_f64();
-                        let processing_proportion = (processing_duration.as_secs_f64()
-                            + (rasterize_secs * (chunk_secs / frame_elapsed.as_secs_f64())))
-                            / chunk_secs;
-                        let buffering_proportion =
-                            buffering_duration.as_secs_f64() / (1.0 / PERFORMANCE_METER_TARGET_FPS);
+                    let rasterize_secs = rasterize_elapsed.as_secs_f64();
+                    let chunk_secs = chunk_duration.as_secs_f64();
+                    let frame_secs = frame_elapsed.as_secs_f64();
 
+                    let rasterize_processing_duration = rasterize_secs / (frame_secs / chunk_secs);
+                    let adjusted_processing_duration =
+                        processing_duration.as_secs_f64() + rasterize_processing_duration;
+                    let rasterize_proportion = rasterize_secs / frame_secs;
+                    let processing_proportion = adjusted_processing_duration / chunk_secs;
+                    let buffering_proportion =
+                        buffering_duration.as_secs_f64() / (1.0 / PERFORMANCE_METER_TARGET_FPS);
+
+                    if buffering_duration < Duration::from_millis(500) {
                         painter.text(
                             Pos2 {
                                 x: max_x - 32.0,
@@ -414,7 +418,7 @@ pub fn create(
                             format!(
                                 "{:.0}% ({:.1}ms) processing",
                                 processing_proportion * 100.0,
-                                processing_duration.as_secs_f64() * 1000.0,
+                                adjusted_processing_duration * 1000.0,
                             ),
                             FontId {
                                 size: 12.0,
@@ -482,8 +486,9 @@ pub fn create(
                         },
                         Align2::RIGHT_BOTTOM,
                         format!(
-                            "{:.1}ms rasterize",
-                            rasterize_elapsed.as_secs_f64() * 1000.0
+                            "{:.0}% ({:.1}ms) rasterize",
+                            rasterize_proportion * 100.0,
+                            rasterize_elapsed.as_secs_f64() * 1000.0,
                         ),
                         FontId {
                             size: 12.0,
@@ -491,10 +496,12 @@ pub fn create(
                         },
                         if rasterize_elapsed
                             >= Duration::from_secs_f64(1.0 / (PERFORMANCE_METER_TARGET_FPS * 4.0))
+                            || rasterize_proportion > 0.25
                         {
                             Color32::RED
                         } else if rasterize_elapsed
                             >= Duration::from_secs_f64(1.0 / (PERFORMANCE_METER_TARGET_FPS * 8.0))
+                            || rasterize_proportion > 0.125
                         {
                             Color32::YELLOW
                         } else {
