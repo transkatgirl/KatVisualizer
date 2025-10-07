@@ -280,8 +280,8 @@ pub fn create(
 
             egui::CentralPanel::default().show(egui_ctx, |ui| {
                 let mut bargraph_mesh = Mesh::default();
-                bargraph_mesh.reserve_triangles(MAX_FREQUENCY_BINS * 6);
-                bargraph_mesh.reserve_vertices(MAX_FREQUENCY_BINS * 6);
+                bargraph_mesh.reserve_triangles(MAX_FREQUENCY_BINS * 2);
+                bargraph_mesh.reserve_vertices(MAX_FREQUENCY_BINS * 4);
 
                 let mut spectrogram_image_pixels =
                     vec![Color32::BLACK; MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES];
