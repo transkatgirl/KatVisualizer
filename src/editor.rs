@@ -805,7 +805,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(&settings);
+                            update_and_clear(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -823,7 +823,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(&settings);
+                            update_and_clear(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -850,7 +850,7 @@ pub fn create(
                                     settings.end_frequency = 0.0;
                                 }
                                 if settings.end_frequency > settings.start_frequency {
-                                    update(&settings);
+                                    update_and_clear(&settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
                                 }
@@ -872,7 +872,7 @@ pub fn create(
                                     settings.end_frequency = 0.0;
                                 }
                                 if settings.end_frequency > settings.start_frequency {
-                                    update(&settings);
+                                    update_and_clear(&settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
                                 }
