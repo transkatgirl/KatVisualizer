@@ -225,6 +225,7 @@ pub fn create(
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
+    analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
     _async_executor: AsyncExecutor<MyPlugin>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
@@ -296,6 +297,7 @@ pub fn create(
                 let settings = *shared_state.settings.read();
                 let color_table = &shared_state.color_table.read();
                 let spectrogram_texture = shared_state.spectrogram_texture.read().unwrap();
+                let analysis_frequencies = analysis_frequencies.read();
 
                 let start = Instant::now();
 
@@ -398,6 +400,10 @@ pub fn create(
                         texture_id: spectrogram_texture,
                     })),
                 ]);
+
+                /*if let Some(pointer) = egui_ctx.pointer_hover_pos() {
+
+                }*/
 
                 let now = Instant::now();
                 let frame_elapsed = now.duration_since(*shared_state.last_frame.lock());
@@ -635,6 +641,15 @@ pub fn create(
                             analysis_chain.update_config(settings);
                         };
 
+                        let update_and_clear = |settings| {
+                            let mut lock = analysis_chain.lock();
+                            let analysis_chain = lock.as_mut().unwrap();
+                            analysis_chain.update_config(settings);
+
+                            analysis_output.lock().0 =
+                                BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS);
+                        };
+
                         ui.colored_label(
                             Color32::YELLOW,
                             "Editing these options temporarily interrupts audio analysis.",
@@ -779,7 +794,7 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(&settings);
+                            update_and_clear(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }

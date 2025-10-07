@@ -1,7 +1,7 @@
 use mimalloc::MiMalloc;
 use nih_plug::{prelude::*, util::StftHelper};
 use nih_plug_egui::EguiState;
-use parking_lot::{FairMutex, Mutex};
+use parking_lot::{FairMutex, Mutex, RwLock};
 use std::{
     num::NonZero,
     sync::Arc,
@@ -130,6 +130,12 @@ impl Plugin for MyPlugin {
             self.params.clone(),
             self.analysis_chain.clone(),
             self.analysis_output.clone(),
+            self.analysis_chain
+                .lock()
+                .as_ref()
+                .unwrap()
+                .frequencies
+                .clone(),
             async_executor,
         )
     }
@@ -156,6 +162,14 @@ impl Plugin for MyPlugin {
         self.latency_samples = new_chain.latency_samples;
 
         *analysis_chain = Some(new_chain);
+
+        *self.analysis_output.lock() = (
+            BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
+            AnalysisMetrics {
+                processing: Duration::ZERO,
+                finished: Instant::now(),
+            },
+        );
 
         true
     }
@@ -225,6 +239,7 @@ pub(crate) struct AnalysisChain {
     chunk_duration: Duration,
     single_input: bool,
     pool: ThreadPool,
+    pub(crate) frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
 }
 
 impl AnalysisChain {
@@ -246,6 +261,13 @@ impl AnalysisChain {
         Self {
             latency_samples: chunker.latency_samples(),
             chunker,
+            frequencies: Arc::new(RwLock::new(
+                analyzer
+                    .frequencies()
+                    .iter()
+                    .map(|(a, b, c)| (*a as f32, *b as f32, *c as f32))
+                    .collect(),
+            )),
             left_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], analyzer.clone()))),
             right_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], analyzer))),
             gain: config.gain,
@@ -387,6 +409,11 @@ impl AnalysisChain {
             });
             drop(old_left_analyzer);
 
+            *self.frequencies.write() = analyzer
+                .frequencies()
+                .iter()
+                .map(|(a, b, c)| (*a as f32, *b as f32, *c as f32))
+                .collect();
             self.left_analyzer =
                 Arc::new(Mutex::new((vec![0.0; self.chunk_size], analyzer.clone())));
             self.right_analyzer = Arc::new(Mutex::new((vec![0.0; self.chunk_size], analyzer)));
