@@ -41,7 +41,7 @@ pub struct PluginParams {
 }
 
 const MAX_FREQUENCY_BINS: usize = 2048;
-const SPECTROGRAM_SLICES: usize = 2048;
+const SPECTROGRAM_SLICES: usize = 1024;
 
 impl Default for MyPlugin {
     fn default() -> Self {
