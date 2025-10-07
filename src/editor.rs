@@ -490,11 +490,11 @@ pub fn create(
                 if let Some((frequency, amplitude, additional)) = under_pointer {
                     let text = if let Some((pan, elapsed)) = additional {
                         format!(
-                            "{:.0}hz, {:+.0}dB\n{:+.2} pan, -{:.3}s",
+                            "{:.0}hz, -{:.3}s\n{:+.0}dB, {:+.2} pan",
                             frequency.1,
+                            elapsed.as_secs_f64(),
                             amplitude,
-                            pan,
-                            elapsed.as_secs_f64()
+                            pan
                         )
                     } else {
                         format!("{:.0}hz, {:+.0}dB", frequency.1, amplitude)
