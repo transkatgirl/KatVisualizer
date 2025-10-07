@@ -41,6 +41,6 @@ standalone binary: run it with the `--input-device` and `--output-device` option
 	- [x] Spectrogram
 	- [x] Performance counters
 	- [x] Settings
-	- [ ] Frequency & amplitude display
+	- [x] Frequency & amplitude display
 
 Other important improvements: Support saving and loading configuration, color based on frequency

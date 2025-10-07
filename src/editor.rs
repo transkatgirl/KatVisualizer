@@ -112,6 +112,72 @@ fn draw_spectrogram_image(
     }
 }
 
+fn get_frequency_amplitude_pan(
+    cursor: Pos2,
+    spectrogram: &BetterSpectrogram,
+    frequencies: &[(f32, f32, f32)],
+    bargraph_bounds: Rect,
+    spectrogram_bounds: Rect,
+    (bargraph_max_db, bargraph_min_db): (f32, f32),
+    spectrogram_height: usize,
+) -> Option<((f32, f32, f32), f32, Option<f32>)> {
+    if bargraph_bounds.contains(cursor) {
+        let frequency = frequencies[map_value_f32(
+            cursor.x,
+            bargraph_bounds.min.x,
+            bargraph_bounds.max.x,
+            0.0,
+            frequencies.len() as f32,
+        )
+        .floor() as usize];
+        let amplitude = map_value_f32(
+            bargraph_bounds.max.y - cursor.y,
+            bargraph_bounds.min.y,
+            bargraph_bounds.max.y,
+            bargraph_min_db,
+            bargraph_max_db,
+        );
+
+        Some((frequency, amplitude, None))
+    } else if spectrogram_bounds.contains(cursor) {
+        let x = map_value_f32(
+            cursor.x,
+            spectrogram_bounds.min.x,
+            spectrogram_bounds.max.x,
+            0.0,
+            frequencies.len() as f32,
+        )
+        .floor() as usize;
+        let y = map_value_f32(
+            cursor.y,
+            spectrogram_bounds.min.y,
+            spectrogram_bounds.max.y,
+            0.0,
+            spectrogram_height as f32,
+        )
+        .floor() as usize;
+
+        let frequency = frequencies[x];
+
+        let item = if spectrogram.data.len() > y
+            && spectrogram.data[y].data.len() == frequencies.len()
+            && spectrogram.data[y].duration == spectrogram.data[0].duration
+        {
+            Some(spectrogram.data[y].data[x])
+        } else {
+            None
+        };
+
+        if let Some((pan, amplitude)) = item {
+            Some((frequency, amplitude, Some(pan)))
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Copy)]
 struct RenderSettings {
     left_hue: f32,
@@ -297,7 +363,22 @@ pub fn create(
                 let settings = *shared_state.settings.read();
                 let color_table = &shared_state.color_table.read();
                 let spectrogram_texture = shared_state.spectrogram_texture.read().unwrap();
-                let analysis_frequencies = analysis_frequencies.read();
+                let frequencies = analysis_frequencies.read();
+
+                let bargraph_bounds = Rect {
+                    min: Pos2 { x: 0.0, y: 0.0 },
+                    max: Pos2 {
+                        x: max_x,
+                        y: max_y * settings.bargraph_height,
+                    },
+                };
+                let spectrogram_bounds = Rect {
+                    min: Pos2 {
+                        x: 0.0,
+                        y: max_y * settings.bargraph_height,
+                    },
+                    max: Pos2 { x: max_x, y: max_y },
+                };
 
                 let start = Instant::now();
 
@@ -326,13 +407,7 @@ pub fn create(
                     draw_bargraph(
                         &mut bargraph_mesh,
                         &front,
-                        Rect {
-                            min: Pos2 { x: 0.0, y: 0.0 },
-                            max: Pos2 {
-                                x: max_x,
-                                y: max_y * settings.bargraph_height,
-                            },
-                        },
+                        bargraph_bounds,
                         color_table,
                         (settings.max_db, settings.min_db),
                     );
@@ -346,6 +421,20 @@ pub fn create(
                         (settings.max_db, settings.min_db),
                     );
                 }
+
+                let under_pointer = if let Some(pointer) = egui_ctx.pointer_latest_pos() {
+                    get_frequency_amplitude_pan(
+                        pointer,
+                        spectrogram,
+                        &frequencies,
+                        bargraph_bounds,
+                        spectrogram_bounds,
+                        (settings.max_db, settings.min_db),
+                        spectrogram_height,
+                    )
+                } else {
+                    None
+                };
 
                 drop(lock);
 
@@ -362,14 +451,6 @@ pub fn create(
                         pos: None,
                     },
                 );
-
-                let spectrogram_bounds = Rect {
-                    min: Pos2 {
-                        x: 0.0,
-                        y: max_y * settings.bargraph_height,
-                    },
-                    max: Pos2 { x: max_x, y: max_y },
-                };
 
                 painter.extend([
                     Shape::Mesh(Arc::new(bargraph_mesh)),
@@ -401,9 +482,24 @@ pub fn create(
                     })),
                 ]);
 
-                /*if let Some(pointer) = egui_ctx.pointer_hover_pos() {
+                if let Some((frequency, amplitude, pan)) = under_pointer {
+                    let text = if let Some(pan) = pan {
+                        format!("{:.0}hz, {:+.0}dB\n{:+.2} pan", frequency.1, amplitude, pan)
+                    } else {
+                        format!("{:.0}hz, {:+.0}dB", frequency.1, amplitude)
+                    };
 
-                }*/
+                    painter.text(
+                        Pos2 { x: 16.0, y: 16.0 },
+                        Align2::LEFT_TOP,
+                        text,
+                        FontId {
+                            size: 12.0,
+                            family: egui::FontFamily::Monospace,
+                        },
+                        Color32::from_rgb(224, 224, 224),
+                    );
+                }
 
                 let now = Instant::now();
                 let frame_elapsed = now.duration_since(*shared_state.last_frame.lock());
@@ -427,9 +523,9 @@ pub fn create(
                         painter.text(
                             Pos2 {
                                 x: max_x - 32.0,
-                                y: 64.0,
+                                y: 48.0,
                             },
-                            Align2::RIGHT_BOTTOM,
+                            Align2::RIGHT_TOP,
                             format!(
                                 "{:.0}% ({:.1}ms) processing",
                                 processing_proportion * 100.0,
@@ -450,9 +546,9 @@ pub fn create(
                         painter.text(
                             Pos2 {
                                 x: max_x - 32.0,
-                                y: 80.0,
+                                y: 64.0,
                             },
-                            Align2::RIGHT_BOTTOM,
+                            Align2::RIGHT_TOP,
                             format!(
                                 "{:.1}ms buffering",
                                 buffering_duration.as_secs_f64() * 1000.0
@@ -474,9 +570,9 @@ pub fn create(
                     painter.text(
                         Pos2 {
                             x: max_x - 32.0,
-                            y: 32.0,
+                            y: 16.0,
                         },
-                        Align2::RIGHT_BOTTOM,
+                        Align2::RIGHT_TOP,
                         format!("{:2}ms frame", frame_elapsed.as_millis()),
                         FontId {
                             size: 12.0,
@@ -497,9 +593,9 @@ pub fn create(
                     painter.text(
                         Pos2 {
                             x: max_x - 32.0,
-                            y: 48.0,
+                            y: 32.0,
                         },
-                        Align2::RIGHT_BOTTOM,
+                        Align2::RIGHT_TOP,
                         format!(
                             "{:.0}% ({:.1}ms) rasterize",
                             rasterize_proportion * 100.0,
@@ -525,9 +621,6 @@ pub fn create(
                     );
                 }
             });
-            /*egui::TopBottomPanel::top("my_panel").show(egui_ctx, move |ui| {
-                ui.label("Hello World!");
-            });*/
             egui::Window::new("Settings")
                 .id(egui::Id::new("settings"))
                 .default_open(false)
