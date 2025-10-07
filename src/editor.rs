@@ -936,7 +936,7 @@ pub fn create(
 
                         if ui.button("Reset Analysis Options").clicked() {
                             *settings = AnalysisChainConfig::default();
-                            update(&settings);
+                            update_and_clear(&settings);
                         }
                     });
                 });
