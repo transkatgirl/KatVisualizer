@@ -9,7 +9,7 @@ use nih_plug_egui::{
         epaint::{ImageDelta, Vertex, WHITE_UV},
     },
 };
-use parking_lot::{Mutex, RwLock};
+use parking_lot::{FairMutex, Mutex, RwLock};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -221,7 +221,7 @@ const PERFORMANCE_METER_TARGET_FPS: f64 = 60.0;
 pub fn create(
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
-    analysis_output: Arc<Mutex<(BetterSpectrogram, AnalysisMetrics)>>,
+    analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
     _async_executor: AsyncExecutor<MyPlugin>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();

@@ -1,7 +1,7 @@
 use mimalloc::MiMalloc;
 use nih_plug::{prelude::*, util::StftHelper};
 use nih_plug_egui::EguiState;
-use parking_lot::Mutex;
+use parking_lot::{FairMutex, Mutex};
 use std::{
     num::NonZero,
     sync::Arc,
@@ -27,7 +27,7 @@ pub struct MyPlugin {
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     latency_samples: u32,
-    analysis_output: Arc<Mutex<(BetterSpectrogram, AnalysisMetrics)>>,
+    analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
 }
 
 #[derive(Params)]
@@ -45,7 +45,7 @@ impl Default for MyPlugin {
             params: Arc::new(PluginParams::default()),
             analysis_chain: Arc::new(Mutex::new(None)),
             latency_samples: 0,
-            analysis_output: Arc::new(Mutex::new((
+            analysis_output: Arc::new(FairMutex::new((
                 BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
                 AnalysisMetrics {
                     processing: Duration::ZERO,
@@ -264,7 +264,7 @@ impl AnalysisChain {
     fn analyze(
         &mut self,
         buffer: &mut Buffer,
-        output: &Mutex<(BetterSpectrogram, AnalysisMetrics)>,
+        output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
     ) {
         let mut finished = Instant::now();
 
