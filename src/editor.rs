@@ -488,17 +488,30 @@ pub fn create(
                 ]);
 
                 if let Some((frequency, amplitude, additional)) = under_pointer {
+                    let analysis_settings = shared_state.cached_analysis_settings.lock();
+
+                    let amplitude_text = if analysis_settings.normalize_amplitude {
+                        format!(
+                            "{:.0} phon",
+                            amplitude + analysis_settings.listening_volume as f32
+                        )
+                    } else {
+                        format!("{:+.0}dBFS", amplitude)
+                    };
+
                     let text = if let Some((pan, elapsed)) = additional {
                         format!(
-                            "{:.0}hz, -{:.3}s\n{:+.0}dB, {:+.2} pan",
+                            "{:.0}hz, -{:.3}s\n{}, {:+.2} pan",
                             frequency.1,
                             elapsed.as_secs_f64(),
-                            amplitude,
+                            amplitude_text,
                             pan
                         )
                     } else {
-                        format!("{:.0}hz, {:+.0}dB", frequency.1, amplitude)
+                        format!("{:.0}hz, {}", frequency.1, amplitude_text)
                     };
+
+                    drop(analysis_settings);
 
                     painter.text(
                         Pos2 { x: 16.0, y: 16.0 },
