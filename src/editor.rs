@@ -337,7 +337,7 @@ pub fn create(
 
             *spectrogram_texture = Some(manager.alloc(
                 "spectrogram".to_string(),
-                ImageData::Color(Arc::new(ColorImage::new([1, 1], Color32::BLACK))),
+                ImageData::Color(Arc::new(ColorImage::new([1, 1], Color32::TRANSPARENT))),
                 TextureOptions {
                     magnification: egui::TextureFilter::Nearest,
                     minification: egui::TextureFilter::Linear,
@@ -359,7 +359,7 @@ pub fn create(
                 bargraph_mesh.reserve_vertices(MAX_FREQUENCY_BINS * 4);
 
                 let mut spectrogram_image_pixels =
-                    vec![Color32::BLACK; MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES];
+                    vec![Color32::TRANSPARENT; MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES];
 
                 let painter = ui.painter();
                 let max_x = painter.clip_rect().max.x;
