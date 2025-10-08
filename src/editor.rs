@@ -826,7 +826,7 @@ pub fn create(
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.gain, 20.0..=-20.0)
+                                egui::Slider::new(&mut settings.gain, 40.0..=-20.0)
                                     .clamping(egui::SliderClamping::Never)
                                     .suffix("dB")
                                     .step_by(1.0)
