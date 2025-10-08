@@ -701,7 +701,7 @@ pub fn create(
                         };
 
                         ui.add(
-                            egui::Slider::new(&mut settings.max_db, 0.0..=-75.0)
+                            egui::Slider::new(&mut settings.max_db, 0.0..=-100.0)
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix("dB")
                                 .step_by(1.0)
@@ -710,7 +710,7 @@ pub fn create(
                         );
 
                         ui.add(
-                            egui::Slider::new(&mut settings.min_db, 0.0..=-75.0)
+                            egui::Slider::new(&mut settings.min_db, 0.0..=-100.0)
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix("dB")
                                 .step_by(1.0)
