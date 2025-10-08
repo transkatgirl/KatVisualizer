@@ -203,7 +203,7 @@ impl Default for RenderSettings {
             left_hue: 195.0,
             right_hue: 328.0,
             minimum_lightness: 0.13,
-            maximum_lightness: 0.8,
+            maximum_lightness: 0.83,
             maximum_chroma: 0.1,
             min_db: -72.0,
             max_db: -12.0,
