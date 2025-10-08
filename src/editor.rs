@@ -835,6 +835,7 @@ pub fn create(
                                     .fixed_decimals(0)
                                     .text("Input gain"),
                             )
+                            .on_hover_text("This setting adjusts the amplitude of the incoming signal before it's processed (but does not affect the plugin's output channels; audio is always passed through unmodified).\n\nAll internal audio processing is done using 64-bit floating point, so this can be adjusted freely without concern for clipping.")
                             .changed()
                         {
                             update(&settings);
@@ -898,6 +899,7 @@ pub fn create(
                                 .fixed_decimals(0)
                                 .text("Update rate"),
                             )
+                            .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows. This setting allows you to adjust the number of overlapping windows per second, effectively setting the spectrogram's vertical resolution (and the associated amount of CPU usage required).\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution.)")
                             .changed()
                         {
                             update_and_clear(&settings);
@@ -916,6 +918,7 @@ pub fn create(
                                 .fixed_decimals(0)
                                 .text("Resolution"),
                             )
+                            .on_hover_text("In order to apply the VQT transform, the selected frequency range needs to be split into a set number of frequency bins. This setting allows you to adjust the number of bins used, effectively setting the horizontal resolution of the spectrogram and bargraph (and the associated amount of CPU usage required).\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution, as it does not change the width of the transform's filters.)")
                             .changed()
                         {
                             update_and_clear(&settings);
