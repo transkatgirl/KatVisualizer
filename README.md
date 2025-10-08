@@ -38,11 +38,11 @@ standalone binary: run it with the `--input-device` and `--output-device` option
 - [ ] UI
 	- [x] Bargraph
 	- [x] Spectrogram
-		- [ ] Horizontal mode
 	- [x] Performance counters
 	- [x] Settings
 		- [ ] Usage information
 		- [ ] Configuration persistence
 		- [ ] Adjustable color coding (by channel, frequency, or amplitude)
+		- [ ] Horizontal mode
+		- [ ] Automatic range detection
 	- [x] Frequency & amplitude display
-	- [ ] Automatic range detection
