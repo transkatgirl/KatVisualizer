@@ -852,6 +852,7 @@ pub fn create(
                                 &mut settings.normalize_amplitude,
                                 "Perform amplitude normalization",
                             )
+                            .on_hover_text("If this is enabled, amplitude values are normalized using the ISO 226:2023 equal-loudness contours, which maps the amplitudes of frequency bins into phons, a psychoacoustic unit of loudness measurement.\nIf this is disabled, amplitude values are not normalized.")
                             .changed()
                         {
                             update(&settings);
@@ -862,12 +863,13 @@ pub fn create(
                         if settings.normalize_amplitude {
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut settings.listening_volume, 100.0..=20.0)
+                                    egui::Slider::new(&mut settings.listening_volume, 120.0..=20.0)
                                         .suffix(" dB SPL")
                                         .step_by(1.0)
                                         .fixed_decimals(0)
                                         .text("0dbFS output volume"),
                                 )
+                                .on_hover_text("When normalizing amplitude values using an equal-loudness contour, a reference value is necessary to convert dBFS into db SPL.\nIn order to improve the accuracy of amplitude normalization and get accurate phon values, this value should be set to the db SPL value corresponding to 0 dbFS on your system.")
                                 .changed()
                             {
                                 if settings.normalize_amplitude {
