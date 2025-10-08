@@ -44,5 +44,4 @@ standalone binary: run it with the `--input-device` and `--output-device` option
 		- [ ] Configuration persistence
 		- [ ] Adjustable color coding (by channel, frequency, or amplitude)
 		- [ ] Horizontal mode
-		- [ ] Automatic range detection
 	- [x] Frequency & amplitude display

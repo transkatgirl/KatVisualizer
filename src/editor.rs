@@ -649,9 +649,9 @@ pub fn create(
                 .id(egui::Id::new("settings"))
                 .default_open(false)
                 .show(egui_ctx, |ui| {
-                    ui.collapsing("Render Options", |ui| {
-                        let mut settings = shared_state.settings.write();
+                    let mut settings = shared_state.settings.write();
 
+                    ui.collapsing("Render Options", |ui| {
                         if ui
                             .add(
                                 egui::Slider::new(&mut settings.left_hue, 0.0..=360.0)
@@ -750,6 +750,7 @@ pub fn create(
                     });
 
                     ui.collapsing("Analysis Options", |ui| {
+                        let mut render_settings = settings;
                         let mut settings = shared_state.cached_analysis_settings.lock();
 
                         let update = |settings| {
@@ -788,6 +789,11 @@ pub fn create(
                             return;
                         };
 
+                        let old_min_phon =
+                            (render_settings.min_db + settings.listening_volume as f32).max(0.0);
+                        let old_max_phon =
+                            (render_settings.max_db + settings.listening_volume as f32).min(100.0);
+
                         if ui
                             .add(
                                 egui::Slider::new(&mut settings.listening_volume, 100.0..=20.0)
@@ -799,6 +805,12 @@ pub fn create(
                             .changed()
                         {
                             update(&settings);
+                            if settings.normalize_amplitude {
+                                render_settings.min_db =
+                                    old_min_phon - settings.listening_volume as f32;
+                                render_settings.max_db =
+                                    old_max_phon - settings.listening_volume as f32;
+                            }
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
