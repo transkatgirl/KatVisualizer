@@ -5,7 +5,7 @@ use nih_plug_egui::{
     create_egui_editor,
     egui::{
         self, Align2, Color32, ColorImage, FontId, ImageData, Mesh, Pos2, Rect, Shape, TextureId,
-        TextureOptions,
+        TextureOptions, ThemePreference,
         epaint::{ImageDelta, Vertex, WHITE_UV},
     },
 };
@@ -360,6 +360,8 @@ pub fn create(
             egui_ctx.tessellation_options_mut(|options| {
                 options.coarse_tessellation_culling = false;
             });
+
+            egui_ctx.set_theme(ThemePreference::Dark);
         },
         move |egui_ctx, _setter, _| {
             egui_ctx.request_repaint();
