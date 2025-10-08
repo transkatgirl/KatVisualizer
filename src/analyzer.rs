@@ -153,7 +153,7 @@ impl BetterAnalysis {
             for (index, (left, right)) in left.iter().zip(right.iter()).enumerate() {
                 let (pan, volume) = calculate_pan_and_volume(*left, *right);
 
-                self.data[index] = (pan as f32, volume as f32);
+                self.data[index] = ((pan * 2.0) as f32, volume as f32);
             }
         } else {
             assert!(self.data.capacity() >= new_length);
