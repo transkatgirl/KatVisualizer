@@ -7,23 +7,23 @@ pub struct BetterAnalyzerConfiguration {
     pub resolution: usize,
     pub start_frequency: f64,
     pub end_frequency: f64,
-    pub log_frequency_scale: bool,
+    pub erb_frequency_scale: bool,
 
     pub sample_rate: usize,
     pub time_resolution: (f64, f64),
-    pub spectral_reassignment: bool,
+    pub nc_method: bool,
 }
 
 impl Default for BetterAnalyzerConfiguration {
     fn default() -> Self {
         Self {
-            resolution: 300,
+            resolution: 512,
             start_frequency: 20.0,
             end_frequency: 20000.0,
-            log_frequency_scale: false,
+            erb_frequency_scale: true,
             sample_rate: 48000,
-            time_resolution: (75.0, 200.0),
-            spectral_reassignment: false,
+            time_resolution: (70.0, 120.0),
+            nc_method: true,
         }
     }
 }
@@ -46,10 +46,10 @@ impl BetterAnalyzer {
         assert!(config.time_resolution.0 <= 1000.0);
         assert!(config.time_resolution.1 <= 1000.0);
 
-        let frequency_scale = if config.log_frequency_scale {
-            FrequencyScale::Logarithmic
-        } else {
+        let frequency_scale = if config.erb_frequency_scale {
             FrequencyScale::Erb
+        } else {
+            FrequencyScale::Logarithmic
         };
 
         let frequency_bands = frequency_scale.generate_bands(
@@ -71,7 +71,7 @@ impl BetterAnalyzer {
             1.0,
             config.time_resolution.1,
             config.sample_rate,
-            config.spectral_reassignment,
+            config.nc_method,
         );
 
         let frequency_bands: Vec<_> = frequency_bands

@@ -203,9 +203,9 @@ pub(crate) struct AnalysisChainConfig {
     resolution: usize,
     start_frequency: f64,
     end_frequency: f64,
-    log_frequency_scale: bool,
+    erb_frequency_scale: bool,
     time_resolution: (f64, f64),
-    spectral_reassignment: bool,
+    nc_method: bool,
 }
 
 impl Default for AnalysisChainConfig {
@@ -216,11 +216,11 @@ impl Default for AnalysisChainConfig {
             normalize_amplitude: true,
             update_rate_hz: 512.0,
             resolution: 512,
-            start_frequency: 20.0,
-            end_frequency: 20000.0,
-            log_frequency_scale: false,
-            time_resolution: (70.0, 120.0),
-            spectral_reassignment: true,
+            start_frequency: BetterAnalyzerConfiguration::default().start_frequency,
+            end_frequency: BetterAnalyzerConfiguration::default().end_frequency,
+            erb_frequency_scale: BetterAnalyzerConfiguration::default().erb_frequency_scale,
+            time_resolution: BetterAnalyzerConfiguration::default().time_resolution,
+            nc_method: BetterAnalyzerConfiguration::default().nc_method,
         }
     }
 }
@@ -251,10 +251,10 @@ impl AnalysisChain {
             resolution: config.resolution,
             start_frequency: config.start_frequency,
             end_frequency: config.end_frequency,
-            log_frequency_scale: config.log_frequency_scale,
+            erb_frequency_scale: config.erb_frequency_scale,
             sample_rate,
             time_resolution: config.time_resolution,
-            spectral_reassignment: config.spectral_reassignment,
+            nc_method: config.nc_method,
         });
 
         let mut chunker = StftHelper::new(2, sample_rate, 0);
@@ -374,9 +374,9 @@ impl AnalysisChain {
             resolution: analyzer_config.resolution,
             start_frequency: analyzer_config.start_frequency,
             end_frequency: analyzer_config.end_frequency,
-            log_frequency_scale: analyzer_config.log_frequency_scale,
+            erb_frequency_scale: analyzer_config.erb_frequency_scale,
             time_resolution: analyzer_config.time_resolution,
-            spectral_reassignment: analyzer_config.spectral_reassignment,
+            nc_method: analyzer_config.nc_method,
         }
     }
     pub(crate) fn update_config(&mut self, config: &AnalysisChainConfig) {
@@ -402,18 +402,18 @@ impl AnalysisChain {
         if old_analyzer_config.resolution != config.resolution
             || old_analyzer_config.start_frequency != config.start_frequency
             || old_analyzer_config.end_frequency != config.end_frequency
-            || old_analyzer_config.log_frequency_scale != config.log_frequency_scale
+            || old_analyzer_config.erb_frequency_scale != config.erb_frequency_scale
             || old_analyzer_config.time_resolution != config.time_resolution
-            || old_analyzer_config.spectral_reassignment != config.spectral_reassignment
+            || old_analyzer_config.nc_method != config.nc_method
         {
             let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
                 resolution: config.resolution,
                 start_frequency: config.start_frequency,
                 end_frequency: config.end_frequency,
-                log_frequency_scale: config.log_frequency_scale,
+                erb_frequency_scale: config.erb_frequency_scale,
                 sample_rate,
                 time_resolution: config.time_resolution,
-                spectral_reassignment: config.spectral_reassignment,
+                nc_method: config.nc_method,
             });
             drop(old_left_analyzer);
 

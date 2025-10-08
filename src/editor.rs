@@ -973,9 +973,10 @@ pub fn create(
 
                         if ui
                             .checkbox(
-                                &mut settings.log_frequency_scale,
-                                "Use logarithmic (non-perceptual) frequency scale",
+                                &mut settings.erb_frequency_scale,
+                                "Use ERB frequency scale",
                             )
+                            .on_hover_text("If this is enabled, frequencies will be displayed using the Equivalent Rectangular Bandwidth scale, a psychoacoustic measure of pitch perception.\nIf this is disabled, frequencies will be displayed on a base 2 logarithmic scale, which is used by most musical scales.")
                             .changed()
                         {
                             update_and_clear(&settings);
@@ -985,12 +986,13 @@ pub fn create(
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.time_resolution.0, 20.0..=400.0)
+                                egui::Slider::new(&mut settings.time_resolution.0, 20.0..=200.0)
                                     .suffix("ms")
                                     .step_by(5.0)
                                     .fixed_decimals(0)
                                     .text("Minimum time resolution"),
                             )
+                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff.\n\nSince this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.")
                             .changed()
                         {
                             update(&settings);
@@ -1000,12 +1002,13 @@ pub fn create(
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.time_resolution.1, 20.0..=400.0)
+                                egui::Slider::new(&mut settings.time_resolution.1, 20.0..=200.0)
                                     .suffix("ms")
                                     .step_by(5.0)
                                     .fixed_decimals(0)
                                     .text("Maximum time resolution"),
                             )
+                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff.\n\nSince this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.")
                             .changed()
                         {
                             update(&settings);
@@ -1015,9 +1018,10 @@ pub fn create(
 
                         if ui
                             .checkbox(
-                                &mut settings.spectral_reassignment,
-                                "Use NC method (spectral reassignment based windowing)",
+                                &mut settings.nc_method,
+                                "Use NC method",
                             )
+                            .on_hover_text("If this is enabled, VQT windowing is performed using the NC method, a form of spectral reassignment using phase information which usually outperforms typical window functions.\nIf this is disabled, windowing is performed using the Blackman window function.\n\nYou should keep this enabled unless you have a good reason not to do so.")
                             .changed()
                         {
                             update(&settings);
