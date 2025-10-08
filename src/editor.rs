@@ -1000,7 +1000,7 @@ pub fn create(
                                     .text("Minimum time resolution"),
                             )
                             .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff. Since this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.")
-                            /*.on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff. Since this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.\n\nThe default time resolution values are based on ERB bandwidths and should be acceptable for most use cases.")*/
+                            /*.on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff. Since this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.\n\nThe default time resolution values are based on ERB bandwidths and should be acceptable for most use cases.")*/ // TODO
                             .changed()
                         {
                             update(&settings);
@@ -1017,7 +1017,7 @@ pub fn create(
                                     .text("Maximum time resolution"),
                             )
                             .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff. Since this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.")
-                            /*.on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff. Since this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.\n\nThe default time resolution values are based on ERB bandwidths and should be acceptable for most use cases.")*/
+                            /*.on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff. Since this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.\n\nThe default time resolution values are based on ERB bandwidths and should be acceptable for most use cases.")*/ // TODO
                             .changed()
                         {
                             update(&settings);
