@@ -212,7 +212,7 @@ impl Default for AnalysisChainConfig {
     fn default() -> Self {
         Self {
             gain: 0.0,
-            listening_volume: 89.0,
+            listening_volume: 92.0,
             normalize_amplitude: true,
             update_rate_hz: 512.0,
             resolution: 512,
