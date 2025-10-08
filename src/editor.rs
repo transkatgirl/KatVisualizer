@@ -847,30 +847,7 @@ pub fn create(
                         let old_max_phon =
                             (render_settings.max_db + settings.listening_volume as f32).min(100.0);
 
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut settings.listening_volume, 100.0..=20.0)
-                                    .suffix(" dB SPL")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("0dbFS output volume"),
-                            )
-                            .changed()
-                        {
-                            if settings.normalize_amplitude {
-                                update_and_clear(&settings);
-                                render_settings.min_db =
-                                    old_min_phon - settings.listening_volume as f32;
-                                render_settings.max_db =
-                                    old_max_phon - settings.listening_volume as f32;
-                            } else {
-                                update(&settings);
-                            }
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        };
-
-                        if ui
+                            if ui
                             .checkbox(
                                 &mut settings.normalize_amplitude,
                                 "Perform amplitude normalization",
@@ -880,6 +857,31 @@ pub fn create(
                             update(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
+                        }
+
+                        if settings.normalize_amplitude {
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut settings.listening_volume, 100.0..=20.0)
+                                        .suffix(" dB SPL")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("0dbFS output volume"),
+                                )
+                                .changed()
+                            {
+                                if settings.normalize_amplitude {
+                                    update_and_clear(&settings);
+                                    render_settings.min_db =
+                                        old_min_phon - settings.listening_volume as f32;
+                                    render_settings.max_db =
+                                        old_max_phon - settings.listening_volume as f32;
+                                } else {
+                                    update(&settings);
+                                }
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            };
                         }
 
                         if ui
@@ -988,11 +990,11 @@ pub fn create(
                             .add(
                                 egui::Slider::new(&mut settings.time_resolution.0, 20.0..=200.0)
                                     .suffix("ms")
-                                    .step_by(5.0)
+                                    .step_by(1.0)
                                     .fixed_decimals(0)
                                     .text("Minimum time resolution"),
                             )
-                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff.\n\nSince this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.")
+                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff. Since this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.\n\nThe default time resolution values are based on ERB bandwidths and should be acceptable for most use cases.")
                             .changed()
                         {
                             update(&settings);
@@ -1004,11 +1006,11 @@ pub fn create(
                             .add(
                                 egui::Slider::new(&mut settings.time_resolution.1, 20.0..=200.0)
                                     .suffix("ms")
-                                    .step_by(5.0)
+                                    .step_by(1.0)
                                     .fixed_decimals(0)
                                     .text("Maximum time resolution"),
                             )
-                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff.\n\nSince this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.")
+                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff. Since this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.\n\nThe default time resolution values are based on ERB bandwidths and should be acceptable for most use cases.")
                             .changed()
                         {
                             update(&settings);
