@@ -499,6 +499,8 @@ pub fn create(
                         format!("{:+.0}dBFS", amplitude)
                     };
 
+                    drop(analysis_settings);
+
                     let text = if let Some((pan, elapsed)) = additional {
                         format!(
                             "{:.0}hz, -{:.3}s\n{}, {:+.2} pan",
@@ -510,8 +512,6 @@ pub fn create(
                     } else {
                         format!("{:.0}hz, {}", frequency.1, amplitude_text)
                     };
-
-                    drop(analysis_settings);
 
                     painter.text(
                         Pos2 { x: 16.0, y: 16.0 },
@@ -706,7 +706,7 @@ pub fn create(
                                 .suffix("dB")
                                 .step_by(1.0)
                                 .fixed_decimals(0)
-                                .text("Maximum (normalized) amplitude"),
+                                .text("Maximum amplitude"),
                         );
 
                         ui.add(
@@ -715,7 +715,7 @@ pub fn create(
                                 .suffix("dB")
                                 .step_by(1.0)
                                 .fixed_decimals(0)
-                                .text("Minimum (normalized) amplitude"),
+                                .text("Minimum amplitude"),
                         );
 
                         let mut spectrogram_duration = settings.spectrogram_duration.as_secs_f64();
