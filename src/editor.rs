@@ -188,6 +188,7 @@ struct RenderSettings {
     left_hue: f32,
     right_hue: f32,
     minimum_lightness: f32,
+    maximum_lightness: f32,
     min_db: f32,
     max_db: f32,
     bargraph_height: f32,
@@ -201,6 +202,7 @@ impl Default for RenderSettings {
             left_hue: 195.0,
             right_hue: 328.0,
             minimum_lightness: 0.13,
+            maximum_lightness: 0.75,
             min_db: -72.0,
             max_db: -12.0,
             bargraph_height: 0.4,
@@ -216,8 +218,8 @@ struct ColorTable {
     max: f32,
 }
 
-const MAX_LIGHTNESS: f32 = 0.72;
-const MAX_CHROMA: f32 = 0.12;
+const MAX_CHROMA: f32 = 0.1;
+const MAX_LIGHTNESS: f32 = 0.83;
 const COLOR_TABLE_SIZE: usize = 2048;
 
 impl ColorTable {
@@ -228,16 +230,16 @@ impl ColorTable {
             max: (size - 1) as f32,
         }
     }
-    fn build(&mut self, left_hue: f32, right_hue: f32, min_lightness: f32) {
+    fn build(&mut self, left_hue: f32, right_hue: f32, min_lightness: f32, max_lightness: f32) {
         let left_color = DynamicColor {
             cs: ColorSpaceTag::Oklch,
             flags: Flags::default(),
-            components: [MAX_LIGHTNESS, MAX_CHROMA, left_hue, 1.0],
+            components: [max_lightness, MAX_CHROMA, left_hue, 1.0],
         };
         let right_color = DynamicColor {
             cs: ColorSpaceTag::Oklch,
             flags: Flags::default(),
-            components: [MAX_LIGHTNESS, MAX_CHROMA, right_hue, 1.0],
+            components: [max_lightness, MAX_CHROMA, right_hue, 1.0],
         };
 
         for split_index in 0..self.size {
@@ -308,6 +310,7 @@ pub fn create(
             settings.left_hue,
             settings.right_hue,
             settings.minimum_lightness,
+            settings.maximum_lightness,
         );
 
         SharedState {
@@ -666,6 +669,7 @@ pub fn create(
                                 settings.left_hue,
                                 settings.right_hue,
                                 settings.minimum_lightness,
+                                settings.maximum_lightness,
                             );
                         };
 
@@ -683,6 +687,7 @@ pub fn create(
                                 settings.left_hue,
                                 settings.right_hue,
                                 settings.minimum_lightness,
+                                settings.maximum_lightness,
                             );
                         };
 
@@ -697,6 +702,25 @@ pub fn create(
                                 settings.left_hue,
                                 settings.right_hue,
                                 settings.minimum_lightness,
+                                settings.maximum_lightness,
+                            );
+                        };
+
+                        if ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut settings.maximum_lightness,
+                                    0.5..=MAX_LIGHTNESS,
+                                )
+                                .text("Maximum OkLCH lightness value"),
+                            )
+                            .changed()
+                        {
+                            shared_state.color_table.write().build(
+                                settings.left_hue,
+                                settings.right_hue,
+                                settings.minimum_lightness,
+                                settings.maximum_lightness,
                             );
                         };
 
@@ -744,6 +768,7 @@ pub fn create(
                                 settings.left_hue,
                                 settings.right_hue,
                                 settings.minimum_lightness,
+                                settings.maximum_lightness,
                             );
                             *settings = RenderSettings::default();
                         }
