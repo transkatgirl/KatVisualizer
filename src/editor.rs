@@ -780,7 +780,7 @@ pub fn create(
                                     .suffix("dB")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
-                                    .text("Gain"),
+                                    .text("Input gain"),
                             )
                             .changed()
                         {
