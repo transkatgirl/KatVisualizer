@@ -22,7 +22,7 @@ impl Default for BetterAnalyzerConfiguration {
             end_frequency: 20000.0,
             erb_frequency_scale: true,
             sample_rate: 48000,
-            time_resolution: (40.0, 89.0),
+            time_resolution: (40.0, 108.0),
             nc_method: true,
         }
     }
