@@ -804,12 +804,14 @@ pub fn create(
                             )
                             .changed()
                         {
-                            update(&settings);
                             if settings.normalize_amplitude {
+                                update_and_clear(&settings);
                                 render_settings.min_db =
                                     old_min_phon - settings.listening_volume as f32;
                                 render_settings.max_db =
                                     old_max_phon - settings.listening_volume as f32;
+                            } else {
+                                update(&settings);
                             }
                             egui_ctx.request_discard("Changed setting");
                             return;
