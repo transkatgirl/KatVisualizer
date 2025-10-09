@@ -13,7 +13,7 @@ pub struct BetterAnalyzerConfiguration {
     pub sample_rate: usize,
     pub time_resolution: f64,
     pub erb_time_resolution: bool,
-    pub erb_min_time_resolution: f64,
+    pub erb_time_resolution_clamp: (f64, f64),
     pub erb_bandwidth_divisor: f64,
     pub nc_method: bool,
 }
@@ -28,7 +28,7 @@ impl Default for BetterAnalyzerConfiguration {
             sample_rate: 48000,
             time_resolution: 37.0,
             erb_time_resolution: true,
-            erb_min_time_resolution: 20.0,
+            erb_time_resolution_clamp: (20.0, 40.0),
             erb_bandwidth_divisor: 1.0,
             nc_method: true,
         }
@@ -52,8 +52,8 @@ impl BetterAnalyzer {
         assert!(config.sample_rate > 0);
         assert!(config.time_resolution <= 1000.0);
         assert!(config.time_resolution > 0.0);
-        assert!(config.erb_min_time_resolution <= 37.2);
-        assert!(config.erb_min_time_resolution >= 0.0);
+        assert!(config.erb_time_resolution_clamp.0 >= 0.0);
+        assert!(config.erb_time_resolution_clamp.1 >= config.erb_time_resolution_clamp.0);
 
         let frequency_scale = if config.erb_frequency_scale {
             FrequencyScale::Erb
@@ -68,7 +68,8 @@ impl BetterAnalyzer {
             |center| {
                 if config.erb_time_resolution {
                     ((24.7 * (0.00437 * center + 1.0)) / config.erb_bandwidth_divisor)
-                        .min(1.0 / (config.erb_min_time_resolution / 1000.0))
+                        .min(1.0 / (config.erb_time_resolution_clamp.0 / 1000.0))
+                        .max(1.0 / (config.erb_time_resolution_clamp.1 / 1000.0))
                 } else {
                     1.0 / (config.time_resolution / 1000.0)
                 }

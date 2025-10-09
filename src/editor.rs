@@ -1000,9 +1000,9 @@ pub fn create(
                         if ui
                             .checkbox(
                                 &mut settings.erb_time_resolution,
-                                "Use bounded ERB time resolution",
+                                "Use adjusted ERB time resolution",
                             )
-                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nIf this setting is enabled, the appropriate time resolution will be determined using a bounded version of the ERB scale.\nIf this setting is disabled, time resolution is determined by a configuration option.")
+                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nIf this setting is enabled, the appropriate time resolution will be determined using an adjusted version of the ERB scale.\nIf this setting is disabled, time resolution is determined by a configuration option.")
                             .changed()
                         {
                             update(&settings);
@@ -1013,11 +1013,27 @@ pub fn create(
                         if settings.erb_time_resolution {
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut settings.erb_min_time_resolution, 0.0..=37.0)
+                                    egui::Slider::new(&mut settings.erb_time_resolution_clamp.0, 0.0..=37.0)
                                         .suffix("ms")
                                         .step_by(1.0)
                                         .fixed_decimals(0)
                                         .text("ERB minimum time resolution"),
+                                )
+                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
+                                .changed()
+                            {
+                                update(&settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            };
+
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut settings.erb_time_resolution_clamp.1, 37.0..=100.0)
+                                        .suffix("ms")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("ERB maximum time resolution"),
                                 )
                                 .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
                                 .changed()
