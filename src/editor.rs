@@ -523,7 +523,12 @@ pub fn create(
                             pan
                         )
                     } else {
-                        format!("{:.0}hz, {}", frequency.1, amplitude_text)
+                        format!(
+                            "{:.0}hz, {}\n{:.0}ms res",
+                            frequency.1,
+                            amplitude_text,
+                            (1.0 / (frequency.2 - frequency.0)) * 1000.0
+                        )
                     };
 
                     painter.text(
