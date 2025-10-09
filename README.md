@@ -1,12 +1,14 @@
 # KatVisualizer
 
-An attempt at making music visualizer which better matches what you hear.
+A realtime music visualizer which better matches what you hear.
 
 The current processing chain consists of the following:
-- ERB-scale VQT utilizing ERB bandwidths
+- ERB-scale VQT with ERB bandwidths
 - NC method windowing & spectral reassignment
 - ISO 226:2023 equal loudness contour
 - Extraction of panning information
+
+During rendering, color information is processed in the OkLCH color space.
 
 ## Building
 
