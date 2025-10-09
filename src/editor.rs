@@ -918,7 +918,7 @@ pub fn create(
                                 .fixed_decimals(0)
                                 .text("Resolution"),
                             )
-                            .on_hover_text("In order to apply the VQT transform, the selected frequency range needs to be split into a set number of frequency bins. This setting allows you to adjust the number of bins used, effectively setting the horizontal resolution of the spectrogram and bargraph (and the associated amount of CPU usage required).\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution, as it does not change the width of the transform's filters.)")
+                            .on_hover_text("In order to apply the VQT transform, the selected frequency range needs to be split into a set number of frequency bins. This setting allows you to adjust the number of bins used, effectively setting the horizontal resolution of the spectrogram and bargraph (and the associated amount of CPU usage required).\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution, as it does not change the transform's filters.)")
                             .changed()
                         {
                             update_and_clear(&settings);
@@ -992,32 +992,28 @@ pub fn create(
                         }
 
                         if ui
-                            .add(
-                                egui::Slider::new(&mut settings.time_resolution.0, 20.0..=200.0)
-                                    .suffix("ms")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Minimum time resolution"),
+                            .checkbox(
+                                &mut settings.variable_q,
+                                "Use variable Q",
                             )
-                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff. Since this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.")
-                            /*.on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff. Since this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.\n\nThe default time resolution values are based on ERB bandwidths and should be acceptable for most use cases.")*/ // TODO
+                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nIf this setting is enabled, the time resolution varies depending on frequency, increasing at lower frequencies.\nIf this setting is disabled, the time resolution is constant across all frequencies.")
                             .changed()
                         {
                             update(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
-                        };
+                        }
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.time_resolution.1, 20.0..=200.0)
+                                egui::Slider::new(&mut settings.time_resolution, 20.0..=200.0)
                                     .suffix("ms")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
-                                    .text("Maximum time resolution"),
+                                    .text("Time resolution"),
                             )
-                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff. Since this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.")
-                            /*.on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff. Since this analyzer uses a Variable Q Transform, the tradeoff can by adjusted in a variable way to allow for better time resolution in lower frequencies.\n\nThe default time resolution values are based on ERB bandwidths and should be acceptable for most use cases.")*/ // TODO
+                            /*.on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff.\n\nThe default time resolution value is based on ERB widths and should be acceptable for most use cases.") */
+                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff.")
                             .changed()
                         {
                             update(&settings);

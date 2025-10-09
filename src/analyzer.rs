@@ -1,3 +1,4 @@
+use core::f64;
 use std::{collections::VecDeque, f64::consts::PI, time::Duration};
 
 use serde::{Deserialize, Serialize};
@@ -10,7 +11,8 @@ pub struct BetterAnalyzerConfiguration {
     pub erb_frequency_scale: bool,
 
     pub sample_rate: usize,
-    pub time_resolution: (f64, f64),
+    pub variable_q: bool,
+    pub time_resolution: f64,
     pub nc_method: bool,
 }
 
@@ -22,8 +24,9 @@ impl Default for BetterAnalyzerConfiguration {
             end_frequency: 20000.0,
             erb_frequency_scale: true,
             sample_rate: 48000,
-            time_resolution: (40.0, 108.0),
+            time_resolution: 40.0,
             nc_method: true,
+            variable_q: true,
         }
     }
 }
@@ -43,8 +46,7 @@ impl BetterAnalyzer {
         assert!(config.end_frequency > config.start_frequency);
         assert!(config.resolution > 0);
         assert!(config.sample_rate > 0);
-        assert!(config.time_resolution.0 <= 1000.0);
-        assert!(config.time_resolution.1 <= 1000.0);
+        assert!(config.time_resolution <= 1000.0);
 
         let frequency_scale = if config.erb_frequency_scale {
             FrequencyScale::Erb
@@ -64,15 +66,27 @@ impl BetterAnalyzer {
             .map(|band| PrecomputedNormalizer::new(band.center))
             .collect();
 
-        let transform = VQsDFT::new(
-            &frequency_bands,
-            BLACKMAN_WINDOW,
-            config.time_resolution.0,
-            1.0,
-            config.time_resolution.1,
-            config.sample_rate,
-            config.nc_method,
-        );
+        let transform = if config.variable_q {
+            VQsDFT::new(
+                &frequency_bands,
+                BLACKMAN_WINDOW,
+                config.time_resolution,
+                1.0,
+                1000.0,
+                config.sample_rate,
+                config.nc_method,
+            )
+        } else {
+            VQsDFT::new(
+                &frequency_bands,
+                BLACKMAN_WINDOW,
+                f64::INFINITY,
+                1.0,
+                config.time_resolution,
+                config.sample_rate,
+                config.nc_method,
+            )
+        };
 
         let frequency_bands: Vec<_> = frequency_bands
             .iter()
