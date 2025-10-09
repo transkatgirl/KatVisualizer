@@ -1,6 +1,6 @@
 # KatVisualizer
 
-A realtime music visualizer which better matches what you hear.
+A realtime music visualizer designed to better match human hearing.
 
 The current processing chain consists of the following:
 - ERB-scale VQT with ERB bandwidths
@@ -12,27 +12,27 @@ During rendering, color information is processed in the OkLCH color space.
 
 ## Building
 
-requires the Rust programming language
+Compiling this program requires the [Rust Programming Language](https://rust-lang.org/tools/install/).
 
-VST3 and CLAP plugins can be built with the following command:
+In order to build this program as a VST3 or CLAP plugin, run the following command:
 
 ```bash
 cargo xtask bundle katvisualizer --release
 ```
 
-alternatively, standalone binaries can be built using the following command:
+Alternatively, this program can run in a standalone mode which processes audio from the microphone. In order to build a standalone mode binary, run the following command:
 
 ```bash
 cargo build --release --features $channel_config
 ```
 
-where `$channel_config` is one of the following: `force-mono, force-mono-to-stereo, force-stereo`. due to a limitation of nih-plug, channel configurations cannot be changed in standalone mode at runtime.
+(`$channel_config` must be set to one of the following: `force-mono, force-mono-to-stereo, force-stereo`. Due to a limitation of nih-plug, channel configurations cannot be changed in standalone mode at runtime.)
 
 ## Usage
 
-plugins: can be used like any other DAW metering plugin.
+The compiled VST3 or CLAP plugin can be in a DAW like any other metering plugin.
 
-standalone binary: run it with the `--input-device` and `--output-device` options to select an input and output device (input is disabled by default). run it with `--help` for additional information.
+Usage information for the standalone binary can be found by running it with the `--help` command (keep in mind that not all available CLI flags are relevant to this program). You will likely want to use the `--input-device` and `--output-device` CLI flags.
 
 ## TODOs
 
