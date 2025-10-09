@@ -424,12 +424,26 @@ impl FrequencyScale {
                     self.scale(low),
                     self.scale(high),
                 ));
+                let lower = self.inv_scale(map_value_f64(
+                    i - 0.5,
+                    0.0,
+                    target_max,
+                    self.scale(low),
+                    self.scale(high),
+                ));
+                let higher = self.inv_scale(map_value_f64(
+                    i + 0.5,
+                    0.0,
+                    target_max,
+                    self.scale(low),
+                    self.scale(high),
+                ));
                 let bandwidth = bandwidth(center);
 
                 FrequencyBand {
-                    low: center - (bandwidth / 2.0),
+                    low: (center - (bandwidth / 2.0)).min(lower),
                     center,
-                    high: center + (bandwidth / 2.0),
+                    high: (center + (bandwidth / 2.0)).max(higher),
                 }
             })
             .collect()

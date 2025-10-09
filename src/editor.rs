@@ -911,14 +911,14 @@ pub fn create(
                             .add(
                                 egui::Slider::new(
                                     &mut settings.resolution,
-                                    128..=MAX_FREQUENCY_BINS,
+                                    64..=MAX_FREQUENCY_BINS,
                                 )
                                 .suffix(" bins")
-                                .step_by(128.0)
+                                .step_by(64.0)
                                 .fixed_decimals(0)
                                 .text("Resolution"),
                             )
-                            .on_hover_text("In order to convert data into frequency domain, the selected frequency range needs to be split into a set number of frequency bins. This setting allows you to adjust the number of bins used, effectively setting the horizontal resolution of the spectrogram and bargraph (and the associated amount of CPU usage required).\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution, as it does not change the transform's filters.)")
+                            .on_hover_text("In order to convert data into frequency domain, the selected frequency range needs to be split into a set number of frequency bins. This setting allows you to adjust the number of bins used, effectively setting the horizontal resolution of the spectrogram and bargraph (and the associated amount of CPU usage required).\n\nThis setting does not decrease the time resolution, as it does not increase the width of the transform's filters beyond the time resolution setting.")
                             .changed()
                         {
                             update_and_clear(&settings);
