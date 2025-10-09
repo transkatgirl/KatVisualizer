@@ -14,6 +14,7 @@ pub struct BetterAnalyzerConfiguration {
     pub time_resolution: f64,
     pub erb_time_resolution: bool,
     pub erb_min_time_resolution: f64,
+    pub erb_bandwidth_divisor: f64,
     pub nc_method: bool,
 }
 
@@ -28,6 +29,7 @@ impl Default for BetterAnalyzerConfiguration {
             time_resolution: 37.0,
             erb_time_resolution: true,
             erb_min_time_resolution: 20.0,
+            erb_bandwidth_divisor: 1.0,
             nc_method: true,
         }
     }
@@ -65,7 +67,7 @@ impl BetterAnalyzer {
             config.end_frequency,
             |center| {
                 if config.erb_time_resolution {
-                    (24.7 * (0.00437 * center + 1.0))
+                    ((24.7 * (0.00437 * center + 1.0)) / config.erb_bandwidth_divisor)
                         .min(1.0 / (config.erb_min_time_resolution / 1000.0))
                 } else {
                     1.0 / (config.time_resolution / 1000.0)

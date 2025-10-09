@@ -206,6 +206,7 @@ pub(crate) struct AnalysisChainConfig {
     erb_frequency_scale: bool,
     erb_time_resolution: bool,
     erb_min_time_resolution: f64,
+    erb_bandwidth_divisor: f64,
     time_resolution: f64,
     nc_method: bool,
 }
@@ -223,6 +224,7 @@ impl Default for AnalysisChainConfig {
             erb_frequency_scale: BetterAnalyzerConfiguration::default().erb_frequency_scale,
             erb_time_resolution: BetterAnalyzerConfiguration::default().erb_time_resolution,
             erb_min_time_resolution: BetterAnalyzerConfiguration::default().erb_min_time_resolution,
+            erb_bandwidth_divisor: BetterAnalyzerConfiguration::default().erb_bandwidth_divisor,
             time_resolution: BetterAnalyzerConfiguration::default().time_resolution,
             nc_method: BetterAnalyzerConfiguration::default().nc_method,
         }
@@ -259,6 +261,7 @@ impl AnalysisChain {
             sample_rate,
             erb_time_resolution: config.erb_time_resolution,
             erb_min_time_resolution: config.erb_min_time_resolution,
+            erb_bandwidth_divisor: config.erb_bandwidth_divisor,
             time_resolution: config.time_resolution,
             nc_method: config.nc_method,
         });
@@ -383,6 +386,7 @@ impl AnalysisChain {
             erb_frequency_scale: analyzer_config.erb_frequency_scale,
             erb_time_resolution: analyzer_config.erb_time_resolution,
             erb_min_time_resolution: analyzer_config.erb_min_time_resolution,
+            erb_bandwidth_divisor: analyzer_config.erb_bandwidth_divisor,
             time_resolution: analyzer_config.time_resolution,
             nc_method: analyzer_config.nc_method,
         }
@@ -413,6 +417,7 @@ impl AnalysisChain {
             || old_analyzer_config.erb_frequency_scale != config.erb_frequency_scale
             || old_analyzer_config.erb_time_resolution != config.erb_time_resolution
             || old_analyzer_config.erb_min_time_resolution != config.erb_min_time_resolution
+            || old_analyzer_config.erb_bandwidth_divisor != config.erb_bandwidth_divisor
             || old_analyzer_config.time_resolution != config.time_resolution
             || old_analyzer_config.nc_method != config.nc_method
         {
@@ -424,6 +429,7 @@ impl AnalysisChain {
                 sample_rate,
                 erb_time_resolution: config.erb_time_resolution,
                 erb_min_time_resolution: config.erb_min_time_resolution,
+                erb_bandwidth_divisor: config.erb_bandwidth_divisor,
                 time_resolution: config.time_resolution,
                 nc_method: config.nc_method,
             });

@@ -1019,7 +1019,20 @@ pub fn create(
                                         .fixed_decimals(0)
                                         .text("ERB minimum time resolution"),
                                 )
-                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, bounding the time resolution is useful to improve visualization readability. This setting allows you to adjust this bound.\n\nThe default value for this bound is based on the length of temporal auditory pre-masking.")
+                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
+                                .changed()
+                            {
+                                update(&settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            };
+
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut settings.erb_bandwidth_divisor, 0.5..=2.0)
+                                        .text("ERB bandwidth divisor"),
+                                )
+                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, adjusting the time resolution calculated by this function may be useful to improve visualization readability. This setting allows you to change how this adjustment is performed.")
                                 .changed()
                             {
                                 update(&settings);
