@@ -1028,7 +1028,7 @@ pub fn create(
                         } else {
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut settings.time_resolution, 20.0..=200.0)
+                                    egui::Slider::new(&mut settings.time_resolution, 10.0..=200.0)
                                         .clamping(egui::SliderClamping::Never)
                                         .suffix("ms")
                                         .step_by(1.0)

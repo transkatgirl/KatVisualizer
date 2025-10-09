@@ -27,7 +27,7 @@ impl Default for BetterAnalyzerConfiguration {
             sample_rate: 48000,
             time_resolution: 37.0,
             erb_time_resolution: true,
-            erb_min_time_resolution: 25.0,
+            erb_min_time_resolution: 20.0,
             nc_method: true,
         }
     }
