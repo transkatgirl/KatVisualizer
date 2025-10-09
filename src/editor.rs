@@ -1004,10 +1004,27 @@ pub fn create(
                             return;
                         }
 
-                        if !settings.erb_time_resolution {
+                        if settings.erb_time_resolution {
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut settings.erb_min_time_resolution, 0.0..=37.0)
+                                        .suffix("ms")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("ERB minimum time resolution"),
+                                )
+                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, bounding the time resolution is useful to improve visualization readability. This setting allows you to adjust this bound.\n\nFor reference, the duration of temporal auditory pre-masking is ~20ms.")
+                                .changed()
+                            {
+                                update(&settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            };
+                        } else {
                             if ui
                                 .add(
                                     egui::Slider::new(&mut settings.time_resolution, 20.0..=200.0)
+                                        .clamping(egui::SliderClamping::Never)
                                         .suffix("ms")
                                         .step_by(1.0)
                                         .fixed_decimals(0)
