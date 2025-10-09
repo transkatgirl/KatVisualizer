@@ -11,8 +11,8 @@ pub struct BetterAnalyzerConfiguration {
     pub erb_frequency_scale: bool,
 
     pub sample_rate: usize,
-    pub variable_q: bool,
     pub time_resolution: f64,
+    pub erb_time_resolution: bool,
     pub nc_method: bool,
 }
 
@@ -24,9 +24,9 @@ impl Default for BetterAnalyzerConfiguration {
             end_frequency: 20000.0,
             erb_frequency_scale: true,
             sample_rate: 48000,
-            time_resolution: 40.0,
+            time_resolution: 37.0,
+            erb_time_resolution: true,
             nc_method: true,
-            variable_q: true,
         }
     }
 }
@@ -58,7 +58,13 @@ impl BetterAnalyzer {
             config.resolution,
             config.start_frequency,
             config.end_frequency,
-            0.5,
+            |center| {
+                if config.erb_time_resolution {
+                    (24.7 * (0.00437 * center + 1.0)).min(1.0 / (20.0 / 1000.0))
+                } else {
+                    1.0 / (config.time_resolution / 1000.0)
+                }
+            },
         );
 
         let normalizers: Vec<_> = frequency_bands
@@ -66,27 +72,15 @@ impl BetterAnalyzer {
             .map(|band| PrecomputedNormalizer::new(band.center))
             .collect();
 
-        let transform = if config.variable_q {
-            VQsDFT::new(
-                &frequency_bands,
-                BLACKMAN_WINDOW,
-                config.time_resolution,
-                1.0,
-                1000.0,
-                config.sample_rate,
-                config.nc_method,
-            )
-        } else {
-            VQsDFT::new(
-                &frequency_bands,
-                BLACKMAN_WINDOW,
-                f64::INFINITY,
-                1.0,
-                config.time_resolution,
-                config.sample_rate,
-                config.nc_method,
-            )
-        };
+        let transform = VQsDFT::new(
+            &frequency_bands,
+            BLACKMAN_WINDOW,
+            1000.0,
+            1.0,
+            1000.0,
+            config.sample_rate,
+            config.nc_method,
+        );
 
         let frequency_bands: Vec<_> = frequency_bands
             .iter()
@@ -408,34 +402,28 @@ impl FrequencyScale {
             Self::Mel => 700.0 * ((2.0_f64.powf(x)) - 1.0),*/
         }
     }
-    fn generate_bands(&self, n: usize, low: f64, high: f64, bandwidth: f64) -> Vec<FrequencyBand> {
+    fn generate_bands<F>(&self, n: usize, low: f64, high: f64, bandwidth: F) -> Vec<FrequencyBand>
+    where
+        F: Fn(f64) -> f64,
+    {
         (0..n)
             .map(|i| {
                 let i = i as f64;
                 let target_max = (n - 1) as f64;
 
+                let center = self.inv_scale(map_value_f64(
+                    i,
+                    0.0,
+                    target_max,
+                    self.scale(low),
+                    self.scale(high),
+                ));
+                let bandwidth = bandwidth(center);
+
                 FrequencyBand {
-                    low: self.inv_scale(map_value_f64(
-                        i - bandwidth,
-                        0.0,
-                        target_max,
-                        self.scale(low),
-                        self.scale(high),
-                    )),
-                    center: self.inv_scale(map_value_f64(
-                        i,
-                        0.0,
-                        target_max,
-                        self.scale(low),
-                        self.scale(high),
-                    )),
-                    high: self.inv_scale(map_value_f64(
-                        i + bandwidth,
-                        0.0,
-                        target_max,
-                        self.scale(low),
-                        self.scale(high),
-                    )),
+                    low: center - (bandwidth / 2.0),
+                    center,
+                    high: center + (bandwidth / 2.0),
                 }
             })
             .collect()

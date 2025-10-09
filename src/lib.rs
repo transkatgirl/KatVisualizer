@@ -204,7 +204,7 @@ pub(crate) struct AnalysisChainConfig {
     start_frequency: f64,
     end_frequency: f64,
     erb_frequency_scale: bool,
-    variable_q: bool,
+    erb_time_resolution: bool,
     time_resolution: f64,
     nc_method: bool,
 }
@@ -220,7 +220,7 @@ impl Default for AnalysisChainConfig {
             start_frequency: BetterAnalyzerConfiguration::default().start_frequency,
             end_frequency: BetterAnalyzerConfiguration::default().end_frequency,
             erb_frequency_scale: BetterAnalyzerConfiguration::default().erb_frequency_scale,
-            variable_q: BetterAnalyzerConfiguration::default().variable_q,
+            erb_time_resolution: BetterAnalyzerConfiguration::default().erb_time_resolution,
             time_resolution: BetterAnalyzerConfiguration::default().time_resolution,
             nc_method: BetterAnalyzerConfiguration::default().nc_method,
         }
@@ -255,7 +255,7 @@ impl AnalysisChain {
             end_frequency: config.end_frequency,
             erb_frequency_scale: config.erb_frequency_scale,
             sample_rate,
-            variable_q: config.variable_q,
+            erb_time_resolution: config.erb_time_resolution,
             time_resolution: config.time_resolution,
             nc_method: config.nc_method,
         });
@@ -378,7 +378,7 @@ impl AnalysisChain {
             start_frequency: analyzer_config.start_frequency,
             end_frequency: analyzer_config.end_frequency,
             erb_frequency_scale: analyzer_config.erb_frequency_scale,
-            variable_q: analyzer_config.variable_q,
+            erb_time_resolution: analyzer_config.erb_time_resolution,
             time_resolution: analyzer_config.time_resolution,
             nc_method: analyzer_config.nc_method,
         }
@@ -407,7 +407,7 @@ impl AnalysisChain {
             || old_analyzer_config.start_frequency != config.start_frequency
             || old_analyzer_config.end_frequency != config.end_frequency
             || old_analyzer_config.erb_frequency_scale != config.erb_frequency_scale
-            || old_analyzer_config.variable_q != config.variable_q
+            || old_analyzer_config.erb_time_resolution != config.erb_time_resolution
             || old_analyzer_config.time_resolution != config.time_resolution
             || old_analyzer_config.nc_method != config.nc_method
         {
@@ -417,7 +417,7 @@ impl AnalysisChain {
                 end_frequency: config.end_frequency,
                 erb_frequency_scale: config.erb_frequency_scale,
                 sample_rate,
-                variable_q: config.variable_q,
+                erb_time_resolution: config.erb_time_resolution,
                 time_resolution: config.time_resolution,
                 nc_method: config.nc_method,
             });

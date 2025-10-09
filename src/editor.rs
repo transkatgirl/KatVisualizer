@@ -911,14 +911,14 @@ pub fn create(
                             .add(
                                 egui::Slider::new(
                                     &mut settings.resolution,
-                                    32..=MAX_FREQUENCY_BINS,
+                                    128..=MAX_FREQUENCY_BINS,
                                 )
                                 .suffix(" bins")
-                                .step_by(32.0)
+                                .step_by(128.0)
                                 .fixed_decimals(0)
                                 .text("Resolution"),
                             )
-                            .on_hover_text("In order to apply the VQT transform, the selected frequency range needs to be split into a set number of frequency bins. This setting allows you to adjust the number of bins used, effectively setting the horizontal resolution of the spectrogram and bargraph (and the associated amount of CPU usage required).\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution, as it does not change the transform's filters.)")
+                            .on_hover_text("In order to convert data into frequency domain, the selected frequency range needs to be split into a set number of frequency bins. This setting allows you to adjust the number of bins used, effectively setting the horizontal resolution of the spectrogram and bargraph (and the associated amount of CPU usage required).\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution, as it does not change the transform's filters.)")
                             .changed()
                         {
                             update_and_clear(&settings);
@@ -993,10 +993,10 @@ pub fn create(
 
                         if ui
                             .checkbox(
-                                &mut settings.variable_q,
-                                "Use variable Q",
+                                &mut settings.erb_time_resolution,
+                                "Use bounded ERB time resolution",
                             )
-                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nIf this setting is enabled, the time resolution varies depending on frequency, increasing at lower frequencies.\nIf this setting is disabled, the time resolution is constant across all frequencies.")
+                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nIf this setting is enabled, the appropriate time resolution will be determined using a bounded version of the ERB scale.\nIf this setting is disabled, the time resolution is constant across all frequencies.")
                             .changed()
                         {
                             update(&settings);
@@ -1004,29 +1004,30 @@ pub fn create(
                             return;
                         }
 
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut settings.time_resolution, 20.0..=200.0)
-                                    .suffix("ms")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Time resolution"),
-                            )
-                            /*.on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.\n\nThe default time resolution value is based on ERB widths and should be acceptable for most use cases.") */ // TODO: Figure out how exactly this value is used by the VQsDFT algorithm
-                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.")
-                            .changed()
-                        {
-                            update(&settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        };
+                        if !settings.erb_time_resolution {
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut settings.time_resolution, 20.0..=200.0)
+                                        .suffix("ms")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("Time resolution"),
+                                )
+                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.\n\nThe default time resolution value is based on the upper bound of ERB widths and should be acceptable for most use cases.")
+                                .changed()
+                            {
+                                update(&settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            };
+                        }
 
                         if ui
                             .checkbox(
                                 &mut settings.nc_method,
                                 "Use NC method",
                             )
-                            .on_hover_text("If this is enabled, VQT windowing is performed using the NC method, a form of spectral reassignment using phase information which usually outperforms typical window functions.\nIf this is disabled, windowing is performed using the Blackman window function.")
+                            .on_hover_text("If this is enabled, windowing is performed using the NC method, a form of spectral reassignment using phase information which usually outperforms typical window functions.\nIf this is disabled, windowing is performed using the Blackman window function.")
                             .changed()
                         {
                             update(&settings);
