@@ -1,8 +1,12 @@
 # KatVisualizer
 
-my attempt at making a music visualizer which better matches what you hear.
+An attempt at making music visualizer which better matches what you hear.
 
-a work in progress.
+The current processing chain consists of the following:
+- ERB-scale VQT utilizing ERB bandwidths
+- NC method windowing & spectral reassignment
+- ISO 226:2023 equal loudness contour
+- Extraction of panning information
 
 ## Building
 
@@ -28,20 +32,9 @@ plugins: can be used like any other DAW metering plugin.
 
 standalone binary: run it with the `--input-device` and `--output-device` options to select an input and output device (input is disabled by default). run it with `--help` for additional information.
 
-## Planned Features
+## TODOs
 
-- [x] Processing Chain
-	- [x] ERB-scale VQT
-	- [x] ISO 226:2023 equal loudness contour
-	- [x] Spectral reassignment
-	- [x] Stereo channel separation
-- [ ] UI
-	- [x] Bargraph
-	- [x] Spectrogram
-	- [x] Performance counters
-	- [x] Settings
-		- [ ] Usage information
-		- [ ] Configuration persistence
-		- [ ] Adjustable color coding (by channel, frequency, or amplitude)
-		- [ ] Horizontal mode
-	- [x] Frequency & amplitude display
+- [ ] Finish adding usage information
+- [ ] Configuration persistence
+- [ ] Adjustable color coding (by channel, frequency, or amplitude)
+- [ ] Horizontal mode
