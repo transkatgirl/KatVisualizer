@@ -1026,7 +1026,7 @@ pub fn create(
                                 &mut settings.nc_method,
                                 "Use NC method",
                             )
-                            .on_hover_text("If this is enabled, VQT windowing is performed using the NC method, a form of spectral reassignment using phase information which usually outperforms typical window functions.\nIf this is disabled, windowing is performed using the Blackman window function.\n\nYou should keep this enabled unless you have a good reason not to do so.")
+                            .on_hover_text("If this is enabled, VQT windowing is performed using the NC method, a form of spectral reassignment using phase information which usually outperforms typical window functions.\nIf this is disabled, windowing is performed using the Blackman window function.")
                             .changed()
                         {
                             update(&settings);
