@@ -1001,7 +1001,7 @@ pub fn create(
                                 &mut settings.erb_time_resolution,
                                 "Use bounded ERB time resolution",
                             )
-                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nIf this setting is enabled, the appropriate time resolution will be determined using a bounded version of the ERB scale.\nIf this setting is disabled, the time resolution is constant across all frequencies.")
+                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nIf this setting is enabled, the appropriate time resolution will be determined using a bounded version of the ERB scale.\nIf this setting is disabled, time resolution is determined by a configuration option.")
                             .changed()
                         {
                             update(&settings);
