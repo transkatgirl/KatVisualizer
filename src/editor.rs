@@ -796,6 +796,7 @@ pub fn create(
                         ui.checkbox(&mut settings.show_performance, "Show performance counters");
 
                         if ui.button("Reset Render Options").clicked() {
+                            *settings = RenderSettings::default();
                             shared_state.color_table.write().build(
                                 settings.left_hue,
                                 settings.right_hue,
@@ -803,7 +804,7 @@ pub fn create(
                                 settings.maximum_lightness,
                                 settings.maximum_chroma,
                             );
-                            *settings = RenderSettings::default();
+
                         }
                     });
 
