@@ -1050,7 +1050,7 @@ pub fn create(
                                 &mut settings.nc_method,
                                 "Use NC method",
                             )
-                            .on_hover_text("If this is enabled, windowing is performed using the NC method, a form of spectral reassignment using phase information which usually outperforms typical window functions.\nIf this is disabled, windowing is performed using the Blackman window function.")
+                            .on_hover_text("If this is enabled, windowing is performed using the NC method, a form of spectral reassignment using phase information which usually outperforms typical window functions.\nIf this is disabled, windowing is performed using the Hann window function.")
                             .changed()
                         {
                             update(&settings);

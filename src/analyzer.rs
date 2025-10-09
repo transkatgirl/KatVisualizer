@@ -80,7 +80,7 @@ impl BetterAnalyzer {
 
         let transform = VQsDFT::new(
             &frequency_bands,
-            BLACKMAN_WINDOW,
+            HANN_WINDOW,
             1000.0,
             1.0,
             1000.0,
@@ -450,13 +450,13 @@ impl FrequencyScale {
     }
 }
 
-/*const HANN_WINDOW: &[f64] = &[1.0, 0.5];
-#[allow(clippy::excessive_precision)]
-const HAMMING_WINDOW: &[f64] = &[1.0, 0.4259434938430786];*/
+const HANN_WINDOW: &[f64] = &[1.0, 0.5];
+/*#[allow(clippy::excessive_precision)]
+const HAMMING_WINDOW: &[f64] = &[1.0, 0.4259434938430786];
 #[allow(clippy::excessive_precision)]
 const BLACKMAN_WINDOW: &[f64] = &[1.0, 0.595257580280304, 0.0952545627951622];
 #[allow(clippy::excessive_precision)]
-/*const NUTTALL_WINDOW: &[f64] = &[
+const NUTTALL_WINDOW: &[f64] = &[
     1.0,
     0.6850073933601379,
     0.20272639393806458,
