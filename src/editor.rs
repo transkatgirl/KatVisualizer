@@ -1012,8 +1012,8 @@ pub fn create(
                                     .fixed_decimals(0)
                                     .text("Time resolution"),
                             )
-                            /*.on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff.\n\nThe default time resolution value is based on ERB widths and should be acceptable for most use cases.") */
-                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nThis setting allows you to adjust this tradeoff.")
+                            /*.on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.\n\nThe default time resolution value is based on ERB widths and should be acceptable for most use cases.") */ // TODO: Figure out how exactly this value is used by the VQsDFT algorithm
+                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.")
                             .changed()
                         {
                             update(&settings);
