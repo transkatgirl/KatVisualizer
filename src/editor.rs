@@ -524,7 +524,7 @@ pub fn create(
                         )
                     } else {
                         format!(
-                            "{:.0}hz, {}\n{:.0}ms res",
+                            "{:.0}hz, {}\n{:.0}ms",
                             frequency.1,
                             amplitude_text,
                             (1.0 / (frequency.2 - frequency.0)) * 1000.0
