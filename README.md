@@ -30,9 +30,11 @@ cargo build --release --features $channel_config
 
 ## Usage
 
-The compiled VST3 or CLAP plugin can be in a DAW like any other metering plugin.
+The compiled VST3 or CLAP plugin can be loaded into a DAW like any other metering plugin.
 
 Usage information for the standalone binary can be found by running it with the `--help` command (keep in mind that not all available CLI flags are relevant to this program). You will likely want to use the `--input-device` and `--output-device` CLI flags.
+
+Once the program is running, the window will display a graphical representation of the input audio, along with additional information in the top corners. The parameters used to render this graphical representation can be adjusted in the dragable settings window.
 
 ### Performance
 

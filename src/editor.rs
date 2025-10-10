@@ -747,6 +747,10 @@ pub fn create(
             });
             egui::Window::new("Settings")
                 .id(egui::Id::new("settings"))
+                .default_pos(Pos2 {
+                    x: 16.0,
+                    y: 56.0
+                })
                 .default_open(false)
                 .show(egui_ctx, |ui| {
                     let mut settings = shared_state.settings.write();
