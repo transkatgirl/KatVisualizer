@@ -199,6 +199,7 @@ pub(crate) struct AnalysisChainConfig {
     listening_volume: f64,
     normalize_amplitude: bool,
     update_rate_hz: f64,
+    latency_offset: Duration,
 
     resolution: usize,
     start_frequency: f64,
@@ -219,6 +220,7 @@ impl Default for AnalysisChainConfig {
             normalize_amplitude: true,
             update_rate_hz: 512.0,
             resolution: 512,
+            latency_offset: Duration::ZERO,
             start_frequency: BetterAnalyzerConfiguration::default().start_frequency,
             end_frequency: BetterAnalyzerConfiguration::default().end_frequency,
             erb_frequency_scale: BetterAnalyzerConfiguration::default().erb_frequency_scale,
@@ -239,7 +241,9 @@ pub(crate) struct AnalysisChain {
     gain: f64,
     update_rate: f64,
     listening_volume: Option<f64>,
-    latency_samples: u32,
+    pub(crate) latency_samples: u32,
+    additional_latency: Duration,
+    sample_rate: usize,
     chunk_size: usize,
     chunk_duration: Duration,
     single_input: bool,
@@ -283,7 +287,10 @@ impl AnalysisChain {
         }
 
         Self {
-            latency_samples: chunker.latency_samples(),
+            sample_rate,
+            latency_samples: chunker.latency_samples()
+                + (config.latency_offset.as_secs_f64() * sample_rate as f64) as u32,
+            additional_latency: config.latency_offset,
             chunker,
             frequencies: frequency_list_container,
             left_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], analyzer.clone()))),
@@ -381,6 +388,7 @@ impl AnalysisChain {
                 .unwrap_or(AnalysisChainConfig::default().listening_volume),
             normalize_amplitude: self.listening_volume.is_some(),
             update_rate_hz: self.update_rate,
+            latency_offset: self.additional_latency,
             resolution: analyzer_config.resolution,
             start_frequency: analyzer_config.start_frequency,
             end_frequency: analyzer_config.end_frequency,
@@ -407,9 +415,15 @@ impl AnalysisChain {
         if self.update_rate != config.update_rate_hz {
             self.chunk_size = (sample_rate as f64 / config.update_rate_hz).round() as usize;
             self.chunker.set_block_size(self.chunk_size);
-            self.latency_samples = self.chunker.latency_samples();
+            self.additional_latency = config.latency_offset;
+            self.latency_samples = self.chunker.latency_samples()
+                + (self.additional_latency.as_secs_f64() * self.sample_rate as f64) as u32;
             self.chunk_duration =
                 Duration::from_secs_f64(self.chunk_size as f64 / sample_rate as f64);
+        } else if self.additional_latency != config.latency_offset {
+            self.additional_latency = config.latency_offset;
+            self.latency_samples = self.chunker.latency_samples()
+                + (self.additional_latency.as_secs_f64() * self.sample_rate as f64) as u32;
         }
 
         if old_analyzer_config.resolution != config.resolution

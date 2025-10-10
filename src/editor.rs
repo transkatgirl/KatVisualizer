@@ -947,6 +947,25 @@ pub fn create(
                             return;
                         };
 
+                        let mut latency_offset = settings.latency_offset.as_secs_f64() * 1000.0;
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut latency_offset, 0.0..=500.0)
+                                    .clamping(egui::SliderClamping::Never)
+                                    .suffix("ms")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Latency offset"),
+                            )
+                            .on_hover_text("This setting allows you to manually increase the processing latency reported to the plugin's host.\n\nBy default (when this is set to 0ms), the latency incurred by the audio processing pipeline is already accounted for.")
+                            .changed()
+                        {
+                            settings.latency_offset = Duration::from_secs_f64(latency_offset / 1000.0);
+                            update(&settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        };
+
                         let old_min_phon =
                             (render_settings.min_db as f64 + settings.listening_volume).max(0.0);
                         let old_max_phon =
