@@ -1182,7 +1182,7 @@ pub fn create(
                                         .fixed_decimals(0)
                                         .text("Time resolution"),
                                 )
-                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.\n\nThe default time resolution value is based on the upper bound of ERB widths and should be acceptable for most use cases.")
+                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.\n\nThe default time resolution value is based on the upper bound of ERB widths.")
                                 .changed()
                             {
                                 update(&settings);
