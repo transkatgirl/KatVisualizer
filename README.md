@@ -3,7 +3,7 @@
 A realtime music visualizer designed to better match human hearing.
 
 The current processing chain consists of the following:
-- ERB-scale VQT with ERB bandwidths
+- ERB-scale VQT with ERB based bandwidths
 - NC method windowing & spectral reassignment
 - ISO 226:2023 equal loudness contour
 - Extraction of panning information
