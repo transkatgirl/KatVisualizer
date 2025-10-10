@@ -18,12 +18,81 @@ use std::{
 use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS, MyPlugin,
     PluginParams, SPECTROGRAM_SLICES,
-    analyzer::{BetterAnalysis, BetterSpectrogram, map_value_f32},
+    analyzer::{BetterSpectrogram, map_value_f32},
 };
 
 fn draw_bargraph(
     mesh: &mut Mesh,
-    analysis: &BetterAnalysis,
+    spectrogram: &BetterSpectrogram,
+    bounds: Rect,
+    color_table: &ColorTable,
+    (max_db, min_db): (f32, f32),
+    averaging: Duration,
+) {
+    let front = &spectrogram.data.front().unwrap();
+
+    if averaging.is_zero() {
+        draw_bargraph_from_iter(
+            mesh,
+            front.data.iter().copied(),
+            front.data.len(),
+            bounds,
+            color_table,
+            (max_db, min_db),
+        );
+    } else {
+        let target_len = front.data.len();
+        let target_duration = front.duration;
+
+        let max_index = spectrogram
+            .data
+            .iter()
+            .enumerate()
+            .take_while(|(i, row)| {
+                row.duration.mul_f64(*i as f64) <= averaging
+                    && row.data.len() == target_len
+                    && row.duration == target_duration
+            })
+            .map(|(i, _)| i)
+            .last()
+            .unwrap_or(1);
+
+        if max_index > 1 {
+            let count = max_index as f32 + 1.0;
+
+            let iterator = (0..target_len).map(move |i| {
+                let sum = (0..=max_index)
+                    .map(|ii| spectrogram.data[ii].data[i])
+                    .fold((0.0, 0.0), |acc, d| (acc.0 + d.0, acc.1 + d.1));
+
+                (sum.0 / count, sum.1 / count)
+            });
+
+            draw_bargraph_from_iter(
+                mesh,
+                iterator,
+                target_len,
+                bounds,
+                color_table,
+                (max_db, min_db),
+            );
+        } else {
+            draw_bargraph_from_iter(
+                mesh,
+                front.data.iter().copied(),
+                target_len,
+                bounds,
+                color_table,
+                (max_db, min_db),
+            );
+        };
+    };
+}
+
+fn draw_bargraph_from_iter(
+    mesh: &mut Mesh,
+    analysis: impl Iterator<Item = (f32, f32)>,
+    analysis_len: usize,
     bounds: Rect,
     color_table: &ColorTable,
     (max_db, min_db): (f32, f32),
@@ -31,12 +100,12 @@ fn draw_bargraph(
     let width = bounds.max.x - bounds.min.x;
     let height = bounds.max.y - bounds.min.y;
 
-    let band_width = width / analysis.data.len() as f32;
-
     let mut vertices = mesh.vertices.len() as u32;
 
-    for (i, (pan, volume)) in analysis.data.iter().enumerate() {
-        let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+    let band_width = width / analysis_len as f32;
+
+    for (i, (pan, volume)) in analysis.enumerate() {
+        let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
 
         let start_x = bounds.min.x + i as f32 * band_width;
 
@@ -50,7 +119,7 @@ fn draw_bargraph(
                 y: bounds.max.y,
             },
         };
-        let color = color_table.lookup(*pan, intensity);
+        let color = color_table.lookup(pan, intensity);
 
         mesh.indices.extend_from_slice(&[
             vertices,
@@ -121,13 +190,15 @@ fn get_frequency_amplitude_pan_time(
     (bargraph_max_db, bargraph_min_db): (f32, f32),
     spectrogram_height: usize,
 ) -> Option<((f32, f32, f32), f32, Option<(f32, Duration)>)> {
+    let frequency_count = frequencies.len() as f32;
+
     if bargraph_bounds.contains(cursor) {
         let frequency = frequencies[map_value_f32(
             cursor.x,
             bargraph_bounds.min.x,
             bargraph_bounds.max.x,
             0.0,
-            frequencies.len() as f32,
+            frequency_count,
         )
         .floor() as usize];
         let amplitude = map_value_f32(
@@ -145,7 +216,7 @@ fn get_frequency_amplitude_pan_time(
             spectrogram_bounds.min.x,
             spectrogram_bounds.max.x,
             0.0,
-            frequencies.len() as f32,
+            frequency_count,
         )
         .floor() as usize;
         let y = map_value_f32(
@@ -194,6 +265,7 @@ struct RenderSettings {
     max_db: f32,
     bargraph_height: f32,
     spectrogram_duration: Duration,
+    bargraph_averaging: Duration,
     show_performance: bool,
 }
 
@@ -209,6 +281,7 @@ impl Default for RenderSettings {
             max_db: -12.0,
             bargraph_height: 0.4,
             spectrogram_duration: Duration::from_secs_f64(0.5),
+            bargraph_averaging: Duration::ZERO,
             show_performance: true,
         }
     }
@@ -424,10 +497,11 @@ pub fn create(
                 if settings.bargraph_height != 0.0 {
                     draw_bargraph(
                         &mut bargraph_mesh,
-                        &front,
+                        spectrogram,
                         bargraph_bounds,
                         color_table,
                         (settings.max_db, settings.min_db),
+                        settings.bargraph_averaging,
                     );
                 }
 
@@ -506,7 +580,7 @@ pub fn create(
                     let amplitude_text = if analysis_settings.normalize_amplitude {
                         format!(
                             "{:.0} phon",
-                            amplitude + analysis_settings.listening_volume as f32
+                            amplitude as f64 + analysis_settings.listening_volume
                         )
                     } else {
                         format!("{:+.0}dBFS", amplitude)
@@ -523,12 +597,20 @@ pub fn create(
                             pan
                         )
                     } else {
-                        format!(
-                            "{:.0}hz, {}\n{:.0}ms",
-                            frequency.1,
-                            amplitude_text,
-                            (1.0 / (frequency.2 - frequency.0)) * 1000.0
-                        )
+                        let resolution = (1.0 / (frequency.2 - frequency.0)) * 1000.0;
+                        let averaging = settings.bargraph_averaging.as_secs_f64() * 1000.0;
+
+                        if averaging > 0.0 {
+                            format!(
+                                "{:.0}hz, {}\n{:.0}ms res, {:.0} ms avg",
+                                frequency.1, amplitude_text, resolution, averaging
+                            )
+                        } else {
+                            format!(
+                                "{:.0}hz, {}\n{:.0}ms",
+                                frequency.1, amplitude_text, resolution
+                            )
+                        }
                     };
 
                     painter.text(
@@ -788,6 +870,22 @@ pub fn create(
                                 Duration::from_secs_f64(spectrogram_duration);
                         };
 
+                        let mut bargraph_averaging = settings.bargraph_averaging.as_secs_f64() * 1000.0;
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut bargraph_averaging, 0.0..=100.0)
+                                    .clamping(egui::SliderClamping::Never)
+                                    .suffix("ms")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Bargraph averaging"),
+                            )
+                            .changed()
+                        {
+                            settings.bargraph_averaging =
+                                Duration::from_secs_f64(bargraph_averaging / 1000.0);
+                        };
+
                         ui.add(
                             egui::Slider::new(&mut settings.bargraph_height, 0.0..=1.0)
                                 .text("Bargraph height"),
@@ -850,9 +948,9 @@ pub fn create(
                         };
 
                         let old_min_phon =
-                            (render_settings.min_db + settings.listening_volume as f32).max(0.0);
+                            (render_settings.min_db as f64 + settings.listening_volume).max(0.0);
                         let old_max_phon =
-                            (render_settings.max_db + settings.listening_volume as f32).min(100.0);
+                            (render_settings.max_db as f64 + settings.listening_volume).min(100.0);
 
                             if ui
                             .checkbox(
@@ -882,9 +980,9 @@ pub fn create(
                                 if settings.normalize_amplitude {
                                     update_and_clear(&settings);
                                     render_settings.min_db =
-                                        old_min_phon - settings.listening_volume as f32;
+                                        (old_min_phon - settings.listening_volume) as f32;
                                     render_settings.max_db =
-                                        old_max_phon - settings.listening_volume as f32;
+                                        (old_max_phon - settings.listening_volume) as f32;
                                 } else {
                                     update(&settings);
                                 }
