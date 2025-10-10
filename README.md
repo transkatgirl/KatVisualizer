@@ -34,6 +34,38 @@ The compiled VST3 or CLAP plugin can be in a DAW like any other metering plugin.
 
 Usage information for the standalone binary can be found by running it with the `--help` command (keep in mind that not all available CLI flags are relevant to this program). You will likely want to use the `--input-device` and `--output-device` CLI flags.
 
+### Performance
+
+The visualizer uses different threads for different tasks. The audio thread performs DSP on audio samples provided by the plugin host, and the render thread uses the resulting data to render a visualization.
+
+Only one thread can access the shared data at a time: When the render thread is generating a spectrogram, the audio thread cannot continue processing, and vice versa. However, the different threads try to do as much of their work as possible before locking the shared data and try to lock it for the minimum amount of time necessary.
+
+#### Interpreting performance counters
+
+If you're having performance or latency issues, enabling performance counters can help you troubleshoot the issue.
+
+- processing = Proportion of the available time budget spent processing audio.
+	- Affected by rasterize time
+	- Affected by the following settings:
+		- Update rate
+		- Resolution
+		- Use NC method
+- rasterize = Proportion of the processing time taken up by the render thread.
+	- Affected by the following settings:
+		- Spectrogram duration
+		- Bargraph averaging
+		- Bargraph height (setting this to 1 disables the spectrogram, setting this to 0 disables the bargraph)
+		- Update rate
+		- Resolution
+	- Affected by processing time
+- buffering = Time spent waiting for the render thread to get data from the audio thread.
+	- Affected by plugin buffer size (set by the host, or the `-p` flag in standalone mode)
+	- Affected by processing time
+- frame = Time between each frame.
+	- This is rarely the issue. Generally, the appearance of dropped frames is caused by high buffering time, not a variance in frame times.
+	- Affected by buffering time & rasterize time
+		- These only increase the frame time when they exceed what can be compensated for by the renderer.
+
 ## TODOs
 
 - [ ] Finish adding usage information
