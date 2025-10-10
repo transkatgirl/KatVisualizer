@@ -27,9 +27,9 @@ impl Default for BetterAnalyzerConfiguration {
             erb_frequency_scale: true,
             sample_rate: 48000,
             time_resolution: 37.0,
-            erb_time_resolution: false,
-            erb_time_resolution_clamp: (2.0, 42.0),
-            erb_bandwidth_divisor: 2.0,
+            erb_time_resolution: true,
+            erb_time_resolution_clamp: (20.0, 42.0),
+            erb_bandwidth_divisor: 1.0,
             nc_method: true,
         }
     }
