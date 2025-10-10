@@ -1045,7 +1045,7 @@ pub fn create(
 
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut settings.erb_bandwidth_divisor, 0.5..=2.0)
+                                    egui::Slider::new(&mut settings.erb_bandwidth_divisor, 0.5..=3.0)
                                         .text("ERB bandwidth divisor"),
                                 )
                                 .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, adjusting the time resolution calculated by this function may be useful to improve visualization readability. This setting allows you to change how this adjustment is performed.")
