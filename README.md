@@ -34,6 +34,13 @@ The compiled VST3 or CLAP plugin can be loaded into a DAW like any other meterin
 
 Usage information for the standalone binary can be found by running it with the `--help` command (keep in mind that not all available CLI flags are relevant to this program). You will likely want to use the `--input-device`, `--output-device`, and `--period-size` CLI flags.
 
+<details>
+<summary>MacOS specific</summary>
+
+If you'd like to run the program on the system audio, standalone mode likely won't work. Instead, load the plugin into [Element](https://github.com/Kushview/Element) and use the [BlackHole](https://github.com/ExistentialAudio/BlackHole) loopback device (along with creating a multi-output device in the built-in "Audio MIDI Setup" app) to pass audio to it.
+
+</details>
+
 Once the program is running, the window will display a graphical representation of the input audio, along with additional information in the top corners. The parameters used to render this graphical representation can be adjusted in the dragable settings window.
 
 ### Performance
