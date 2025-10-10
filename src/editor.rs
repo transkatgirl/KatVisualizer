@@ -267,6 +267,7 @@ struct RenderSettings {
     spectrogram_duration: Duration,
     bargraph_averaging: Duration,
     show_performance: bool,
+    show_hover: bool,
 }
 
 impl Default for RenderSettings {
@@ -283,6 +284,7 @@ impl Default for RenderSettings {
             spectrogram_duration: Duration::from_secs_f64(0.5),
             bargraph_averaging: Duration::ZERO,
             show_performance: true,
+            show_hover: true,
         }
     }
 }
@@ -514,16 +516,20 @@ pub fn create(
                     );
                 }
 
-                let under_pointer = if let Some(pointer) = egui_ctx.pointer_latest_pos() {
-                    get_frequency_amplitude_pan_time(
-                        pointer,
-                        spectrogram,
-                        &frequencies,
-                        bargraph_bounds,
-                        spectrogram_bounds,
-                        (settings.max_db, settings.min_db),
-                        spectrogram_height,
-                    )
+                let under_pointer = if settings.show_hover {
+                    if let Some(pointer) = egui_ctx.pointer_latest_pos() {
+                        get_frequency_amplitude_pan_time(
+                            pointer,
+                            spectrogram,
+                            &frequencies,
+                            bargraph_bounds,
+                            spectrogram_bounds,
+                            (settings.max_db, settings.min_db),
+                            spectrogram_height,
+                        )
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 };
@@ -897,6 +903,8 @@ pub fn create(
 
                         ui.checkbox(&mut settings.show_performance, "Show performance counters");
 
+                        ui.checkbox(&mut settings.show_hover, "Show hover information");
+
                         if ui.button("Reset Render Options").clicked() {
                             *settings = RenderSettings::default();
                             shared_state.color_table.write().build(
@@ -906,7 +914,6 @@ pub fn create(
                                 settings.maximum_lightness,
                                 settings.maximum_chroma,
                             );
-
                         }
                     });
 

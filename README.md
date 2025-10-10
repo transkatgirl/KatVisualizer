@@ -32,7 +32,7 @@ cargo build --release --features $channel_config
 
 The compiled VST3 or CLAP plugin can be loaded into a DAW like any other metering plugin.
 
-Usage information for the standalone binary can be found by running it with the `--help` command (keep in mind that not all available CLI flags are relevant to this program). You will likely want to use the `--input-device` and `--output-device` CLI flags.
+Usage information for the standalone binary can be found by running it with the `--help` command (keep in mind that not all available CLI flags are relevant to this program). You will likely want to use the `--input-device`, `--output-device`, and `--period-size` CLI flags.
 
 Once the program is running, the window will display a graphical representation of the input audio, along with additional information in the top corners. The parameters used to render this graphical representation can be adjusted in the dragable settings window.
 
@@ -61,7 +61,7 @@ If you're having performance or latency issues, enabling performance counters ca
 		- Resolution
 	- Affected by processing time
 - buffering = Time spent waiting for the render thread to get data from the audio thread.
-	- Affected by plugin buffer size (set by the host, or the `-p` flag in standalone mode)
+	- Affected by plugin buffer size (set by the host, or the `--period-size` flag in standalone mode)
 	- Affected by processing time
 - frame = Time between each frame.
 	- This is rarely the issue. Generally, the appearance of dropped frames is caused by high buffering time, not a variance in frame times.
@@ -70,7 +70,7 @@ If you're having performance or latency issues, enabling performance counters ca
 
 ## TODOs
 
-- [ ] Finish adding usage information
-- [ ] Configuration persistence
-- [ ] Adjustable color coding (by channel, frequency, or amplitude)
 - [ ] Horizontal mode
+- [ ] Adjustable color coding (by channel, frequency, or amplitude)
+- [ ] Add documentation for render settings
+- [ ] Configuration persistence
