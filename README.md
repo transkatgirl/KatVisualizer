@@ -69,7 +69,6 @@ If you're having performance or latency issues, enabling performance counters ca
 	- Affected by processing time
 - buffering = Time spent waiting for the render thread to get data from the audio thread.
 	- Affected by plugin buffer size (set by the host, or the `--period-size` flag in standalone mode)
-		- Note: Setting the buffer size very low may result in distorted visualization outputs. If you experience this, try disabling the program's "Use internal buffering" setting.
 	- Affected by processing time
 - frame = Time between each frame.
 	- This is rarely the issue. Generally, the appearance of dropped frames is caused by high buffering time, not a variance in frame times.

@@ -1026,7 +1026,7 @@ pub fn create(
                                 &mut settings.internal_buffering,
                                 "Use internal buffering",
                             )
-                            .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows.\nIf this is enabled, the plugin maintains its own buffer of samples, allowing the number of overlapping windows per second to be changed by the user. This adds a small amount of latency, which is reported to the plugin's host so that it can be compensated for.\nIf this is disabled, the number of overlapping windows per second is determined by the buffer size set by the host.\n\nIf you are experiencing wideband artifacts in the spectrogram and/or bargraph, it's worth trying to disable this.")
+                            .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows.\nIf this is enabled, the plugin maintains its own buffer of samples, allowing the number of overlapping windows per second to be changed by the user. This adds a small amount of latency, which is reported to the plugin's host so that it can be compensated for.\nIf this is disabled, the number of overlapping windows per second is determined by the buffer size set by the host.")
                             .changed()
                         {
                             update(&settings);
