@@ -3,7 +3,10 @@ name: Automated Builds
 # slightly adapted from:
 # https://github.com/magnetophon/lamb-rs/blob/main/.github/workflows/build.yml
 
-on: {}
+on:
+    push:
+        tags:
+            - "v*.*.*"
 
 defaults:
     run:
