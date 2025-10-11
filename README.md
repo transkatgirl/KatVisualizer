@@ -12,6 +12,8 @@ During rendering, color information is processed in the OkLCH color space.
 
 ## Building
 
+If you'd like to avoid building the program from source code, [binary releases](https://github.com/transkatgirl/KatVisualizer/releases) are available.
+
 Compiling this program requires the [Rust Programming Language](https://rust-lang.org/tools/install/).
 
 In order to build this program as a VST3 plugin, run the following command:
