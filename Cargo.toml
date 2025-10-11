@@ -36,8 +36,10 @@ ndarray = "0.16.1"
 parking_lot = "0.12.5"
 mimalloc = "0.1.48"
 
-[profile.release]
+[profile.dev]
 opt-level = 3
-lto       = true
-#codegen-units = 1
+
+[profile.release]
+lto   = "thin"
+strip = "symbols"
 panic = "abort"

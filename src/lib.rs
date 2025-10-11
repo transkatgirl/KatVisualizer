@@ -1,4 +1,6 @@
+#[cfg(not(debug_assertions))]
 use mimalloc::MiMalloc;
+
 use nih_plug::{prelude::*, util::StftHelper};
 use nih_plug_egui::EguiState;
 use parking_lot::{FairMutex, Mutex, RwLock};
@@ -9,6 +11,7 @@ use std::{
 };
 use threadpool::ThreadPool;
 
+#[cfg(not(debug_assertions))]
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 

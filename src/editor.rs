@@ -1,3 +1,6 @@
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::collapsible_else_if)]
+
 use color::{ColorSpaceTag, DynamicColor, Flags, Rgba8, Srgb};
 use ndarray::Array2;
 use nih_plug::prelude::*;
@@ -181,6 +184,7 @@ fn draw_spectrogram_image(
     }
 }
 
+#[allow(clippy::type_complexity)] // FIXME
 fn get_frequency_amplitude_pan_time(
     cursor: Pos2,
     spectrogram: &BetterSpectrogram,
