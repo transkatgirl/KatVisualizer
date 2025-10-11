@@ -667,7 +667,7 @@ pub fn create(
                             },
                             Align2::CENTER_CENTER,
                             format!(
-                                "{} in -> {} out, {:.2}kHz, {} buffer, mode {:?}",
+                                "{} in -> {} out, {:.1}kHz, {} buffer, mode {:?}",
                                 plugin_state
                                     .audio_io_layout
                                     .main_input_channels
