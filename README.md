@@ -12,7 +12,7 @@ During rendering, color information is processed in the OkLCH color space.
 
 ## Building
 
-If you'd like to avoid building the program from source code (recommended), [binary releases](https://github.com/transkatgirl/KatVisualizer/releases) are available.
+If you'd like to avoid building the program from source code, [binary releases](https://github.com/transkatgirl/KatVisualizer/releases) are available. However, compiling the program yourself is recommended, especially if you plan on using the program's standalone mode.
 
 Compiling this program requires the [Rust Programming Language](https://rust-lang.org/tools/install/).
 
