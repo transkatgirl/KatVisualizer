@@ -95,6 +95,16 @@ impl Plugin for MyPlugin {
             main_output_channels: NonZeroU32::new(2),
             ..AudioIOLayout::const_default()
         },
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(2),
+            main_output_channels: NonZeroU32::new(0),
+            ..AudioIOLayout::const_default()
+        },
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(1),
+            main_output_channels: NonZeroU32::new(0),
+            ..AudioIOLayout::const_default()
+        },
     ];
 
     #[cfg(feature = "force-mono")]
@@ -187,6 +197,13 @@ impl Plugin for MyPlugin {
             }
 
             analysis_chain.analyze(buffer, &self.analysis_output);
+        }
+
+        #[cfg(feature = "mute-output")]
+        for channel_samples in buffer.iter_samples() {
+            for sample in channel_samples {
+                *sample = 0.0;
+            }
         }
 
         ProcessStatus::Normal

@@ -23,7 +23,7 @@ cargo xtask bundle katvisualizer --release
 Alternatively, this program can run in a standalone mode which processes audio from the microphone. In order to build a standalone mode binary, run the following command:
 
 ```bash
-cargo build --release --features $channel_config
+cargo build --release --features $channel_config,mute-output
 ```
 
 (`$channel_config` must be set to one of the following: `force-mono, force-mono-to-stereo, force-stereo`. Due to a limitation of nih-plug, channel configurations cannot be changed in standalone mode at runtime.)
@@ -33,15 +33,6 @@ cargo build --release --features $channel_config
 The compiled plugin can be loaded into a DAW like any other metering plugin. It's recommended that you use a buffer size under 10ms long and avoid sample rates below 40kHz.
 
 Usage information for the standalone binary can be found by running it with the `--help` command (keep in mind that not all available CLI flags are relevant to this program). You will likely want to use the `--input-device`, `--output-device`, and `--period-size` CLI flags.
-
-<details>
-<summary>MacOS specific</summary>
-
-If you'd like to run the program on the system audio, standalone mode likely won't work. Instead, load the plugin into [Element](https://github.com/Kushview/Element) and use the [BlackHole](https://github.com/ExistentialAudio/BlackHole) loopback device (along with creating a multi-output device in the built-in "Audio MIDI Setup" app) to pass audio to it.
-
-When using this configuration, the resulting visualization should not be relied upon for accuracy due to subtle and inconsistent bugs within Element.
-
-</details>
 
 Once the program is running, the window will display a graphical representation of the input audio, along with additional information in the top corners. The parameters used to render this graphical representation can be adjusted in the dragable settings window.
 
