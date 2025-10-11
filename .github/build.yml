@@ -3,6 +3,11 @@ name: Automated Builds
 # slightly adapted from:
 # https://github.com/magnetophon/lamb-rs/blob/main/.github/workflows/build.yml
 
+on:
+    pull_request:
+    release:
+        types: [published]
+
 defaults:
     run:
         # This otherwise gets run under dash which does not support brace expansion
@@ -86,7 +91,7 @@ jobs:
             - name: Determine build archive name
               run: |
                   # Windows (usually) doesn't like colons in file names
-                  echo "ARCHIVE_NAME=lamb-$(date -u +"%Y-%m-%d-%H%m%S")-${{ matrix.name }}" >> "$GITHUB_ENV"
+                  echo "ARCHIVE_NAME=katvisualizer-$(date -u +"%Y-%m-%d-%H%m%S")-${{ matrix.name }}" >> "$GITHUB_ENV"
             - name: Move all packaged plugin into a directory
               run: |
                   # GitHub Action strips the top level directory, great, have another one
@@ -107,7 +112,7 @@ jobs:
               with:
                   type: "zip"
                   directory: ${{ env.ARCHIVE_NAME }}/${{ env.ARCHIVE_NAME }}
-                  filename: lamb-${{  github.ref_name }}-${{ matrix.name }}.zip
+                  filename: katvisualizer-${{  github.ref_name }}-${{ matrix.name }}.zip
 
             - name: Release
               uses: softprops/action-gh-release@v2
