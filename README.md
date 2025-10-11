@@ -30,7 +30,7 @@ cargo build --release --features $channel_config
 
 ## Usage
 
-The compiled plugin can be loaded into a DAW like any other metering plugin. It's recommended that you use a buffer size around 5ms long and avoid sample rates below 40kHz.
+The compiled plugin can be loaded into a DAW or [other VST host](https://github.com/Kushview/Element) like any other metering plugin. It's recommended that you use a buffer size around 5ms long and avoid sample rates below 40kHz.
 
 Usage information for the standalone binary can be found by running it with the `--help` command (keep in mind that not all available CLI flags are relevant to this program). You will likely want to use the `--input-device`, `--output-device`, and `--period-size` CLI flags.
 
@@ -69,6 +69,7 @@ If you're having performance or latency issues, enabling performance counters ca
 	- Affected by processing time
 - buffering = Time spent waiting for the render thread to get data from the audio thread.
 	- Affected by plugin buffer size (set by the host, or the `--period-size` flag in standalone mode)
+		- Note: In some plugin hosts, setting the buffer size too low can result in distorted visualization outputs
 	- Affected by processing time
 - frame = Time between each frame.
 	- This is rarely the issue. Generally, the appearance of dropped frames is caused by high buffering time, not a variance in frame times.
