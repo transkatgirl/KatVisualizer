@@ -240,7 +240,7 @@ impl Default for AnalysisChainConfig {
             listening_volume: 92.0,
             normalize_amplitude: true,
             internal_buffering: true,
-            update_rate_hz: 512.0,
+            update_rate_hz: 1024.0,
             resolution: 512,
             latency_offset: Duration::ZERO,
             start_frequency: BetterAnalyzerConfiguration::default().start_frequency,
