@@ -39,6 +39,8 @@ Usage information for the standalone binary can be found by running it with the 
 
 If you'd like to run the program on the system audio, standalone mode likely won't work. Instead, load the plugin into [Element](https://github.com/Kushview/Element) and use the [BlackHole](https://github.com/ExistentialAudio/BlackHole) loopback device (along with creating a multi-output device in the built-in "Audio MIDI Setup" app) to pass audio to it.
 
+Keep in mind that this configuration is prone to subtle and inconsistent bugs. When using this configuration, the resulting visualization should not be relied upon for accuracy.
+
 </details>
 
 Once the program is running, the window will display a graphical representation of the input audio, along with additional information in the top corners. The parameters used to render this graphical representation can be adjusted in the dragable settings window.
