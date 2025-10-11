@@ -45,16 +45,7 @@ pub struct BetterAnalyzer {
 }
 
 impl BetterAnalyzer {
-    pub fn new(mut config: BetterAnalyzerConfiguration) -> Self {
-        config.start_frequency = config.start_frequency.max(0.0);
-        assert!(config.end_frequency > config.start_frequency);
-        assert!(config.resolution > 0);
-        assert!(config.sample_rate > 0);
-        assert!(config.time_resolution <= 1000.0);
-        assert!(config.time_resolution > 0.0);
-        assert!(config.erb_time_resolution_clamp.0 >= 0.0);
-        assert!(config.erb_time_resolution_clamp.1 >= config.erb_time_resolution_clamp.0);
-
+    pub fn new(config: BetterAnalyzerConfiguration) -> Self {
         let frequency_scale = if config.erb_frequency_scale {
             FrequencyScale::Erb
         } else {

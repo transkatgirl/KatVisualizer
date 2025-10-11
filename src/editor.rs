@@ -975,7 +975,7 @@ pub fn create(
                             .on_hover_text("This setting allows you to manually increase the processing latency reported to the plugin's host.\n\nBy default (when this is set to 0ms), the latency incurred by internal buffering is already accounted for.")
                             .changed()
                         {
-                            settings.latency_offset = Duration::from_secs_f64(latency_offset / 1000.0);
+                            settings.latency_offset = Duration::from_secs_f64(latency_offset.max(0.0) / 1000.0);
                             update(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
@@ -1003,6 +1003,7 @@ pub fn create(
                             if ui
                                 .add(
                                     egui::Slider::new(&mut settings.listening_volume, 120.0..=20.0)
+                                        .clamping(egui::SliderClamping::Never)
                                         .suffix(" dB SPL")
                                         .step_by(1.0)
                                         .fixed_decimals(0)
@@ -1161,6 +1162,7 @@ pub fn create(
                             if ui
                                 .add(
                                     egui::Slider::new(&mut settings.erb_time_resolution_clamp.0, 0.0..=37.0)
+                                        .clamping(egui::SliderClamping::Never)
                                         .suffix("ms")
                                         .step_by(1.0)
                                         .fixed_decimals(0)
@@ -1169,6 +1171,11 @@ pub fn create(
                                 .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
                                 .changed()
                             {
+                                settings.erb_time_resolution_clamp.0 = settings.erb_time_resolution_clamp.0.clamp(0.0, 1000.0);
+                                if settings.erb_time_resolution_clamp.0 > settings.erb_time_resolution_clamp.1 {
+                                    settings.erb_time_resolution_clamp.1 = settings.erb_time_resolution_clamp.0;
+                                }
+
                                 update(&settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
@@ -1177,6 +1184,7 @@ pub fn create(
                             if ui
                                 .add(
                                     egui::Slider::new(&mut settings.erb_time_resolution_clamp.1, 37.0..=100.0)
+                                        .clamping(egui::SliderClamping::Never)
                                         .suffix("ms")
                                         .step_by(1.0)
                                         .fixed_decimals(0)
@@ -1185,6 +1193,11 @@ pub fn create(
                                 .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
                                 .changed()
                             {
+                                settings.erb_time_resolution_clamp.1 = settings.erb_time_resolution_clamp.1.clamp(0.0, 1000.0);
+                                if settings.erb_time_resolution_clamp.0 > settings.erb_time_resolution_clamp.1 {
+                                    settings.erb_time_resolution_clamp.0 = settings.erb_time_resolution_clamp.1;
+                                }
+
                                 update(&settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
@@ -1193,11 +1206,16 @@ pub fn create(
                             if ui
                                 .add(
                                     egui::Slider::new(&mut settings.erb_bandwidth_divisor, 0.5..=6.0)
+                                        .clamping(egui::SliderClamping::Never)
                                         .text("ERB bandwidth divisor"),
                                 )
                                 .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, adjusting the time resolution calculated by this function may be useful to improve visualization readability. This setting allows you to change how this adjustment is performed.")
                                 .changed()
                             {
+                                if settings.erb_bandwidth_divisor < 0.01 {
+                                    settings.erb_bandwidth_divisor = 0.01;
+                                }
+
                                 update(&settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
@@ -1215,6 +1233,8 @@ pub fn create(
                                 .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.\n\nThe default time resolution value is based on the upper bound of ERB widths.")
                                 .changed()
                             {
+                                settings.time_resolution = settings.time_resolution.clamp(0.0, 1000.0);
+
                                 update(&settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
