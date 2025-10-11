@@ -20,7 +20,7 @@ use std::{
 
 use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS, MyPlugin,
-    PluginParams, SPECTROGRAM_SLICES,
+    PluginParams, PluginStateInfo, SPECTROGRAM_SLICES,
     analyzer::{BetterSpectrogram, map_value_f32},
 };
 
@@ -271,6 +271,7 @@ struct RenderSettings {
     spectrogram_duration: Duration,
     bargraph_averaging: Duration,
     show_performance: bool,
+    show_format: bool,
     show_hover: bool,
 }
 
@@ -288,6 +289,7 @@ impl Default for RenderSettings {
             spectrogram_duration: Duration::from_secs_f64(0.67),
             bargraph_averaging: Duration::ZERO,
             show_performance: true,
+            show_format: false,
             show_hover: true,
         }
     }
@@ -385,6 +387,7 @@ pub fn create(
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
     analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
+    plugin_state: Arc<RwLock<Option<PluginStateInfo>>>,
     _async_executor: AsyncExecutor<MyPlugin>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
@@ -633,6 +636,63 @@ pub fn create(
                         },
                         Color32::from_rgb(224, 224, 224),
                     );
+                }
+
+                if settings.show_format {
+                    if let Some(ref plugin_state) = *plugin_state.read() {
+                        let max_buffer_size_s = plugin_state.buffer_config.max_buffer_size as f64
+                            / plugin_state.buffer_config.sample_rate as f64;
+
+                        let buffer_text = if let Some(min_size) =
+                            plugin_state.buffer_config.min_buffer_size
+                        {
+                            format!(
+                                "{:.1}ms to {:.1}ms",
+                                (min_size as f64 / plugin_state.buffer_config.sample_rate as f64)
+                                    * 1000.0,
+                                max_buffer_size_s * 1000.0
+                            )
+                        } else {
+                            format!("{:.1}ms", max_buffer_size_s * 1000.0)
+                        };
+                        let should_warn = plugin_state.buffer_config.sample_rate
+                            < (frequencies.last().unwrap().2 * 2.0)
+                            || max_buffer_size_s > 0.010
+                            || plugin_state.buffer_config.process_mode != ProcessMode::Realtime;
+
+                        painter.text(
+                            Pos2 {
+                                x: max_x / 2.0,
+                                y: 16.0,
+                            },
+                            Align2::CENTER_CENTER,
+                            format!(
+                                "{} in -> {} out, {:.2}kHz, {} buffer, mode {:?}",
+                                plugin_state
+                                    .audio_io_layout
+                                    .main_input_channels
+                                    .map(u32::from)
+                                    .unwrap_or(0),
+                                plugin_state
+                                    .audio_io_layout
+                                    .main_output_channels
+                                    .map(u32::from)
+                                    .unwrap_or(0),
+                                plugin_state.buffer_config.sample_rate / 1000.0,
+                                buffer_text,
+                                plugin_state.buffer_config.process_mode
+                            ),
+                            FontId {
+                                size: 12.0,
+                                family: egui::FontFamily::Monospace,
+                            },
+                            if should_warn {
+                                Color32::YELLOW
+                            } else {
+                                Color32::from_rgb(224, 224, 224)
+                            },
+                        );
+                    }
                 }
 
                 let now = Instant::now();
@@ -905,9 +965,11 @@ pub fn create(
                                 .text("Bargraph height"),
                         );
 
+                        ui.checkbox(&mut settings.show_hover, "Show hover information");
+
                         ui.checkbox(&mut settings.show_performance, "Show performance counters");
 
-                        ui.checkbox(&mut settings.show_hover, "Show hover information");
+                        ui.checkbox(&mut settings.show_format, "Show audio format information");
 
                         if ui.button("Reset Render Options").clicked() {
                             *settings = RenderSettings::default();

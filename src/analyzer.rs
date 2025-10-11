@@ -10,7 +10,7 @@ pub struct BetterAnalyzerConfiguration {
     pub end_frequency: f64,
     pub erb_frequency_scale: bool,
 
-    pub sample_rate: usize,
+    pub sample_rate: f32,
     pub time_resolution: f64,
     pub erb_time_resolution: bool,
     pub erb_time_resolution_clamp: (f64, f64),
@@ -25,7 +25,7 @@ impl Default for BetterAnalyzerConfiguration {
             start_frequency: 20.0,
             end_frequency: 20000.0,
             erb_frequency_scale: true,
-            sample_rate: 48000,
+            sample_rate: 48000.0,
             time_resolution: 37.0,
             erb_time_resolution: true,
             erb_time_resolution_clamp: (0.0, 37.0),
@@ -78,7 +78,7 @@ impl BetterAnalyzer {
             1000.0,
             1.0,
             1000.0,
-            config.sample_rate,
+            config.sample_rate as f64,
             config.nc_method,
         );
 
@@ -500,11 +500,10 @@ impl VQsDFT {
         time_res: f64,
         bandwidth: f64,
         max_time_res: f64,
-        sample_rate: usize,
+        sample_rate: f64,
         use_nc: bool,
     ) -> Self {
-        let sample_rate_f64 = sample_rate as f64;
-        let buffer_size = (sample_rate_f64 * max_time_res / 1000.0).round() as usize;
+        let buffer_size = (sample_rate * max_time_res / 1000.0).round() as usize;
         let buffer_size_f64 = buffer_size as f64;
 
         let (min_idx, max_idx) = if use_nc {
@@ -536,7 +535,7 @@ impl VQsDFT {
 
                     let period = (f64::min(
                         buffer_size_f64,
-                        sample_rate_f64
+                        sample_rate
                             / (bandwidth * (x.high - x.low).abs() + 1.0 / (time_res / 1000.0)),
                     ))
                     .trunc();
@@ -544,7 +543,7 @@ impl VQsDFT {
                     for i in min_idx..max_idx {
                         let i = i as f64;
 
-                        let k = (x.center * period) / sample_rate_f64 + i + k_offset;
+                        let k = (x.center * period) / sample_rate + i + k_offset;
                         let fid = -2.0 * PI * k;
                         let twid = (2.0 * PI * k) / period;
                         let reson = 2.0 * f64::cos(twid);

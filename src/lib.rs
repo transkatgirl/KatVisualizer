@@ -26,12 +26,19 @@ pub(crate) struct AnalysisMetrics {
     finished: Instant,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PluginStateInfo {
+    audio_io_layout: AudioIOLayout,
+    buffer_config: BufferConfig,
+}
+
 pub struct MyPlugin {
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     latency_samples: u32,
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
     analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
+    state_info: Arc<RwLock<Option<PluginStateInfo>>>,
 }
 
 #[derive(Params)]
@@ -57,6 +64,7 @@ impl Default for MyPlugin {
                 },
             ))),
             analysis_frequencies: Arc::new(RwLock::new(Vec::with_capacity(MAX_FREQUENCY_BINS))),
+            state_info: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -146,6 +154,7 @@ impl Plugin for MyPlugin {
             self.analysis_chain.clone(),
             self.analysis_output.clone(),
             self.analysis_frequencies.clone(),
+            self.state_info.clone(),
             async_executor,
         )
     }
@@ -165,7 +174,7 @@ impl Plugin for MyPlugin {
 
         let new_chain = AnalysisChain::new(
             &analysis_config,
-            buffer_config.sample_rate as usize,
+            buffer_config.sample_rate,
             audio_io_layout,
             self.analysis_frequencies.clone(),
         );
@@ -181,6 +190,11 @@ impl Plugin for MyPlugin {
                 finished: Instant::now(),
             },
         );
+
+        *self.state_info.write() = Some(PluginStateInfo {
+            audio_io_layout: *audio_io_layout,
+            buffer_config: *buffer_config,
+        });
 
         true
     }
@@ -266,7 +280,7 @@ pub(crate) struct AnalysisChain {
     listening_volume: Option<f64>,
     pub(crate) latency_samples: u32,
     additional_latency: Duration,
-    sample_rate: usize,
+    sample_rate: f32,
     chunk_size: usize,
     chunk_duration: Duration,
     single_input: bool,
@@ -277,7 +291,7 @@ pub(crate) struct AnalysisChain {
 impl AnalysisChain {
     fn new(
         config: &AnalysisChainConfig,
-        sample_rate: usize,
+        sample_rate: f32,
         layout: &AudioIOLayout,
         frequency_list_container: Arc<RwLock<Vec<(f32, f32, f32)>>>,
     ) -> Self {
@@ -294,7 +308,7 @@ impl AnalysisChain {
             nc_method: config.nc_method,
         });
 
-        let mut chunker = StftHelper::new(2, sample_rate, 0);
+        let mut chunker = StftHelper::new(2, sample_rate.ceil() as usize, 0);
         let chunk_size = (sample_rate as f64 / config.update_rate_hz).round() as usize;
         chunker.set_block_size(chunk_size);
 
