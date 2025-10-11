@@ -3,10 +3,7 @@ name: Automated Builds
 # slightly adapted from:
 # https://github.com/magnetophon/lamb-rs/blob/main/.github/workflows/build.yml
 
-on:
-    pull_request:
-    release:
-        types: [published]
+on: {}
 
 defaults:
     run:
