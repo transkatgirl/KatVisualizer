@@ -30,7 +30,7 @@ cargo build --release --features $channel_config
 
 ## Usage
 
-The compiled plugin can be loaded into a DAW (or [other VST3 host](https://github.com/Kushview/Element)) like any other metering plugin. It's recommended that you use a buffer size under 10ms long and avoid sample rates below 40kHz.
+The compiled plugin can be loaded into a DAW like any other metering plugin. It's recommended that you use a buffer size under 10ms long and avoid sample rates below 40kHz.
 
 Usage information for the standalone binary can be found by running it with the `--help` command (keep in mind that not all available CLI flags are relevant to this program). You will likely want to use the `--input-device`, `--output-device`, and `--period-size` CLI flags.
 
