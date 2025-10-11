@@ -968,7 +968,7 @@ pub fn create(
                                     .fixed_decimals(0)
                                     .text("Latency offset"),
                             )
-                            .on_hover_text("This setting allows you to manually increase the processing latency reported to the plugin's host.\n\nBy default (when this is set to 0ms), the latency incurred by the audio processing pipeline is already accounted for.")
+                            .on_hover_text("This setting allows you to manually increase the processing latency reported to the plugin's host.\n\nBy default (when this is set to 0ms), the latency incurred by internal buffering is already accounted for.")
                             .changed()
                         {
                             settings.latency_offset = Duration::from_secs_f64(latency_offset / 1000.0);
@@ -1022,24 +1022,39 @@ pub fn create(
                         }
 
                         if ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut settings.update_rate_hz,
-                                    128.0..=SPECTROGRAM_SLICES as f64,
-                                )
-                                .logarithmic(true)
-                                .suffix("hz")
-                                .step_by(128.0)
-                                .fixed_decimals(0)
-                                .text("Update rate"),
+                            .checkbox(
+                                &mut settings.internal_buffering,
+                                "Use internal buffering",
                             )
-                            .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows. This setting allows you to adjust the number of overlapping windows per second, effectively setting the spectrogram's vertical resolution (and the associated amount of CPU usage required).\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution.)")
+                            .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows.\nIf this is enabled, the plugin maintains its own buffer of samples, allowing the number of overlapping windows per second to be changed by the user. This adds a small amount of latency, which is reported to the plugin's host so that it can be compensated for.\nIf this is disabled, the number of overlapping windows per second is determined by the buffer size set by the host.\n\nIf you are experiencing wideband artifacts in the spectrogram and/or bargraph, it's worth trying to disable this.")
                             .changed()
                         {
-                            update_and_clear(&settings);
+                            update(&settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
-                        };
+                        }
+
+                        if settings.internal_buffering {
+                            if ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut settings.update_rate_hz,
+                                        128.0..=SPECTROGRAM_SLICES as f64,
+                                    )
+                                    .logarithmic(true)
+                                    .suffix("hz")
+                                    .step_by(128.0)
+                                    .fixed_decimals(0)
+                                    .text("Update rate"),
+                                )
+                                .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows. This setting allows you to adjust the number of overlapping windows per second, effectively setting the spectrogram's vertical resolution (and the associated amount of CPU usage required).\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution.)")
+                                .changed()
+                            {
+                                update_and_clear(&settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            };
+                        }
 
                         if ui
                             .add(

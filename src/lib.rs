@@ -198,6 +198,7 @@ pub(crate) struct AnalysisChainConfig {
     gain: f64,
     listening_volume: f64,
     normalize_amplitude: bool,
+    internal_buffering: bool,
     update_rate_hz: f64,
     latency_offset: Duration,
 
@@ -218,6 +219,7 @@ impl Default for AnalysisChainConfig {
             gain: 0.0,
             listening_volume: 92.0,
             normalize_amplitude: true,
+            internal_buffering: true,
             update_rate_hz: 512.0,
             resolution: 512,
             latency_offset: Duration::ZERO,
@@ -239,6 +241,7 @@ pub(crate) struct AnalysisChain {
     left_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
     right_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
     gain: f64,
+    internal_buffering: bool,
     update_rate: f64,
     listening_volume: Option<f64>,
     pub(crate) latency_samples: u32,
@@ -288,8 +291,12 @@ impl AnalysisChain {
 
         Self {
             sample_rate,
-            latency_samples: chunker.latency_samples()
-                + (config.latency_offset.as_secs_f64() * sample_rate as f64) as u32,
+            internal_buffering: config.internal_buffering,
+            latency_samples: if config.internal_buffering {
+                chunker.latency_samples()
+            } else {
+                0
+            } + (config.latency_offset.as_secs_f64() * sample_rate as f64) as u32,
             additional_latency: config.latency_offset,
             chunker,
             frequencies: frequency_list_container,
@@ -315,28 +322,101 @@ impl AnalysisChain {
     ) {
         let mut finished = Instant::now();
 
-        self.chunker
-            .process_analyze_only(buffer, 1, |channel_idx, buffer| {
-                if channel_idx == 1 && self.single_input {
-                    return;
-                }
-                let analyzer = if channel_idx == 0 {
-                    self.left_analyzer.clone()
-                } else {
-                    self.right_analyzer.clone()
-                };
+        if self.internal_buffering {
+            self.chunker
+                .process_analyze_only(buffer, 1, |channel_idx, buffer| {
+                    if channel_idx == 1 && self.single_input {
+                        return;
+                    }
 
-                if self.single_input {
-                    let mut lock = analyzer.lock();
-                    let (ref _buffer, ref mut analyzer) = *lock;
+                    if self.single_input {
+                        let mut lock = self.left_analyzer.lock();
+                        let (ref _buffer, ref mut analyzer) = *lock;
 
-                    analyzer.analyze(
-                        buffer.iter().map(|s| *s as f64),
-                        self.gain,
-                        self.listening_volume,
-                    );
-                } else {
-                    analyzer.lock().0.copy_from_slice(buffer);
+                        analyzer.analyze(
+                            buffer.iter().map(|s| *s as f64),
+                            self.gain,
+                            self.listening_volume,
+                        );
+                    } else {
+                        let analyzer = if channel_idx == 0 {
+                            self.left_analyzer.clone()
+                        } else {
+                            self.right_analyzer.clone()
+                        };
+
+                        analyzer.lock().0.copy_from_slice(buffer);
+                        let gain = self.gain;
+                        let listening_volume = self.listening_volume;
+
+                        self.pool.execute(move || {
+                            let mut lock = analyzer.lock();
+                            let (ref mut buffer, ref mut analyzer) = *lock;
+
+                            analyzer.analyze(
+                                buffer.iter().map(|s| *s as f64),
+                                gain,
+                                listening_volume,
+                            );
+                        });
+                    }
+
+                    if channel_idx == 1 || (channel_idx == 0 && self.single_input) {
+                        let (ref mut spectrogram, ref mut metrics) = *output.lock();
+
+                        self.pool.join();
+                        let left_lock = self.left_analyzer.lock();
+                        let right_lock = self.right_analyzer.lock();
+                        let left_output = left_lock.1.last_analysis();
+                        let right_output = right_lock.1.last_analysis();
+
+                        spectrogram.update_fn(|analysis_output| {
+                            if self.single_input {
+                                analysis_output.update_mono(left_output, self.chunk_duration);
+                            } else {
+                                analysis_output.update_stereo(
+                                    left_output,
+                                    right_output,
+                                    self.chunk_duration,
+                                );
+                            }
+                        });
+
+                        let now = Instant::now();
+                        metrics.processing = now.duration_since(finished);
+                        metrics.finished = now;
+
+                        finished = now;
+                    }
+                });
+        } else {
+            if self.single_input {
+                let mut lock = self.left_analyzer.lock();
+                let (ref _buffer, ref mut analyzer) = *lock;
+
+                analyzer.analyze(
+                    buffer.as_slice()[0].iter().map(|s| *s as f64),
+                    self.gain,
+                    self.listening_volume,
+                );
+            } else {
+                for (channel_idx, buffer) in buffer.as_slice().iter().enumerate() {
+                    let analyzer = if channel_idx == 0 {
+                        self.left_analyzer.clone()
+                    } else {
+                        self.right_analyzer.clone()
+                    };
+
+                    {
+                        let mut analyzer = analyzer.lock();
+                        if buffer.len() == analyzer.0.len() {
+                            analyzer.0.copy_from_slice(buffer);
+                        } else {
+                            analyzer.0.clear();
+                            analyzer.0.extend_from_slice(buffer);
+                        }
+                    }
+
                     let gain = self.gain;
                     let listening_volume = self.listening_volume;
 
@@ -347,35 +427,31 @@ impl AnalysisChain {
                         analyzer.analyze(buffer.iter().map(|s| *s as f64), gain, listening_volume);
                     });
                 }
+            }
 
-                if channel_idx == 1 || (channel_idx == 0 && self.single_input) {
-                    let (ref mut spectrogram, ref mut metrics) = *output.lock();
+            let chunk_duration =
+                Duration::from_secs_f64(buffer.samples() as f64 / self.sample_rate as f64);
 
-                    self.pool.join();
-                    let left_lock = self.left_analyzer.lock();
-                    let right_lock = self.right_analyzer.lock();
-                    let left_output = left_lock.1.last_analysis();
-                    let right_output = right_lock.1.last_analysis();
+            let (ref mut spectrogram, ref mut metrics) = *output.lock();
 
-                    spectrogram.update_fn(|analysis_output| {
-                        if self.single_input {
-                            analysis_output.update_mono(left_output, self.chunk_duration);
-                        } else {
-                            analysis_output.update_stereo(
-                                left_output,
-                                right_output,
-                                self.chunk_duration,
-                            );
-                        }
-                    });
+            self.pool.join();
+            let left_lock = self.left_analyzer.lock();
+            let right_lock = self.right_analyzer.lock();
+            let left_output = left_lock.1.last_analysis();
+            let right_output = right_lock.1.last_analysis();
 
-                    let now = Instant::now();
-                    metrics.processing = now.duration_since(finished);
-                    metrics.finished = now;
-
-                    finished = now;
+            spectrogram.update_fn(|analysis_output| {
+                if self.single_input {
+                    analysis_output.update_mono(left_output, chunk_duration);
+                } else {
+                    analysis_output.update_stereo(left_output, right_output, chunk_duration);
                 }
             });
+
+            let now = Instant::now();
+            metrics.processing = now.duration_since(finished);
+            metrics.finished = now;
+        }
     }
     pub(crate) fn config(&self) -> AnalysisChainConfig {
         let analyzer = self.left_analyzer.lock();
@@ -387,6 +463,7 @@ impl AnalysisChain {
                 .listening_volume
                 .unwrap_or(AnalysisChainConfig::default().listening_volume),
             normalize_amplitude: self.listening_volume.is_some(),
+            internal_buffering: self.internal_buffering,
             update_rate_hz: self.update_rate,
             latency_offset: self.additional_latency,
             resolution: analyzer_config.resolution,
@@ -410,20 +487,27 @@ impl AnalysisChain {
 
         let old_left_analyzer = self.left_analyzer.lock();
         let old_analyzer_config = old_left_analyzer.1.config();
-        let sample_rate = old_analyzer_config.sample_rate;
 
         if self.update_rate != config.update_rate_hz {
-            self.chunk_size = (sample_rate as f64 / config.update_rate_hz).round() as usize;
+            self.chunk_size = (self.sample_rate as f64 / config.update_rate_hz).round() as usize;
             self.chunker.set_block_size(self.chunk_size);
             self.additional_latency = config.latency_offset;
-            self.latency_samples = self.chunker.latency_samples()
-                + (self.additional_latency.as_secs_f64() * self.sample_rate as f64) as u32;
+            self.latency_samples = if config.internal_buffering {
+                self.chunker.latency_samples()
+            } else {
+                0
+            } + (self.additional_latency.as_secs_f64()
+                * self.sample_rate as f64) as u32;
             self.chunk_duration =
-                Duration::from_secs_f64(self.chunk_size as f64 / sample_rate as f64);
+                Duration::from_secs_f64(self.chunk_size as f64 / self.sample_rate as f64);
         } else if self.additional_latency != config.latency_offset {
             self.additional_latency = config.latency_offset;
-            self.latency_samples = self.chunker.latency_samples()
-                + (self.additional_latency.as_secs_f64() * self.sample_rate as f64) as u32;
+            self.latency_samples = if config.internal_buffering {
+                self.chunker.latency_samples()
+            } else {
+                0
+            } + (self.additional_latency.as_secs_f64()
+                * self.sample_rate as f64) as u32;
         }
 
         if old_analyzer_config.resolution != config.resolution
@@ -441,7 +525,7 @@ impl AnalysisChain {
                 start_frequency: config.start_frequency,
                 end_frequency: config.end_frequency,
                 erb_frequency_scale: config.erb_frequency_scale,
-                sample_rate,
+                sample_rate: self.sample_rate,
                 erb_time_resolution: config.erb_time_resolution,
                 erb_time_resolution_clamp: config.erb_time_resolution_clamp,
                 erb_bandwidth_divisor: config.erb_bandwidth_divisor,
@@ -462,13 +546,16 @@ impl AnalysisChain {
             self.left_analyzer =
                 Arc::new(Mutex::new((vec![0.0; self.chunk_size], analyzer.clone())));
             self.right_analyzer = Arc::new(Mutex::new((vec![0.0; self.chunk_size], analyzer)));
-        } else if self.update_rate != config.update_rate_hz {
+        } else if self.update_rate != config.update_rate_hz
+            || self.internal_buffering != config.internal_buffering
+        {
             drop(old_left_analyzer);
 
             self.left_analyzer.lock().0 = vec![0.0; self.chunk_size];
             self.right_analyzer.lock().0 = vec![0.0; self.chunk_size];
         }
 
+        self.internal_buffering = config.internal_buffering;
         self.update_rate = config.update_rate_hz;
     }
 }
