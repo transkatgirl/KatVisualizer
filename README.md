@@ -34,6 +34,8 @@ cargo build --release --features $channel_config,mute-output
 
 The compiled plugin can be loaded into a DAW like any other metering plugin. It's recommended that you use a buffer size under 10ms long and avoid sample rates below 40kHz.
 
+(If you don't already have a host for the plugin, [Element](https://github.com/Kushview/Element) seems to be the least-bad open source option. However, it doesn't support bluetooth latency compensation and you may run into weird edge cases from time to time.)
+
 Usage information for the standalone binary can be found by running it with the `--help` command (keep in mind that not all available CLI flags are relevant to this program). You will likely want to use the `--input-device`, `--output-device`, and `--period-size` CLI flags.
 
 Once the program is running, the window will display a graphical representation of the input audio, along with additional information in the top corners. The parameters used to render this graphical representation can be adjusted in the dragable settings window.
