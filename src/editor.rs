@@ -8,7 +8,7 @@ use nih_plug_egui::{
     create_egui_editor,
     egui::{
         self, Align2, Color32, ColorImage, FontId, ImageData, Mesh, Pos2, Rect, Shape, TextureId,
-        TextureOptions, ThemePreference,
+        TextureOptions, ThemePreference, Vec2,
         epaint::{ImageDelta, Vertex, WHITE_UV},
     },
 };
@@ -430,7 +430,7 @@ pub fn create(
 
             *spectrogram_texture = Some(manager.alloc(
                 "spectrogram".to_string(),
-                ImageData::Color(Arc::new(ColorImage::new([1, 1], Color32::TRANSPARENT))),
+                ImageData::Color(Arc::new(ColorImage::filled([1, 1], Color32::TRANSPARENT))),
                 TextureOptions {
                     magnification: egui::TextureFilter::Nearest,
                     minification: egui::TextureFilter::Linear,
@@ -496,6 +496,10 @@ pub fn create(
 
                 let mut spectrogram_image = ColorImage {
                     size: [spectrogram_width, spectrogram_height],
+                    source_size: Vec2 {
+                        x: spectrogram_width as f32,
+                        y: spectrogram_height as f32,
+                    },
                     pixels: spectrogram_image_pixels,
                 };
 
@@ -702,8 +706,7 @@ pub fn create(
                         processing_duration.as_secs_f64() + rasterize_processing_duration;
                     let rasterize_proportion = rasterize_secs / frame_secs;
                     let processing_proportion = adjusted_processing_duration / chunk_secs;
-                    let buffering_proportion =
-                        buffering_duration.as_secs_f64() / (1.0 / PERFORMANCE_METER_TARGET_FPS);
+                    let buffering_proportion = buffering_duration.as_secs_f64() / frame_secs;
 
                     if buffering_duration < Duration::from_millis(500) {
                         painter.text(

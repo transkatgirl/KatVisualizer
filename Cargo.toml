@@ -1,6 +1,6 @@
 [package]
 name    = "katvisualizer"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 
 [workspace]
@@ -22,11 +22,11 @@ force-mono-to-stereo = [
 mute-output = [  ]
 
 [dependencies]
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95", features = [
+nih_plug = { git = "https://github.com/transkatgirl/nih-plug.git", rev = "1f132feff0b03df8b5078ffaa1087201c9545d3f", features = [
 	"assert_process_allocs",
 	"standalone",
 ] }
-nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95" }
+nih_plug_egui = { git = "https://github.com/transkatgirl/nih-plug.git", rev = "1f132feff0b03df8b5078ffaa1087201c9545d3f" }
 serde = { version = "1.0", features = [
 	"derive",
 ] }
