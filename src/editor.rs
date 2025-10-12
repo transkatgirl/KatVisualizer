@@ -640,21 +640,12 @@ pub fn create(
 
                 if settings.show_format {
                     if let Some(ref plugin_state) = *plugin_state.read() {
+                        let min_buffer_size_s =
+                            plugin_state.buffer_config.min_buffer_size.unwrap_or(0) as f64
+                                / plugin_state.buffer_config.sample_rate as f64;
                         let max_buffer_size_s = plugin_state.buffer_config.max_buffer_size as f64
                             / plugin_state.buffer_config.sample_rate as f64;
 
-                        let buffer_text = if let Some(min_size) =
-                            plugin_state.buffer_config.min_buffer_size
-                        {
-                            format!(
-                                "{:.1}ms to {:.1}ms",
-                                (min_size as f64 / plugin_state.buffer_config.sample_rate as f64)
-                                    * 1000.0,
-                                max_buffer_size_s * 1000.0
-                            )
-                        } else {
-                            format!("{:.1}ms", max_buffer_size_s * 1000.0)
-                        };
                         let should_warn = plugin_state.buffer_config.sample_rate
                             < (frequencies.last().unwrap().2 * 2.0)
                             || max_buffer_size_s > 0.010
@@ -667,7 +658,7 @@ pub fn create(
                             },
                             Align2::CENTER_CENTER,
                             format!(
-                                "{} in -> {} out, {:.1}kHz, {} buffer, mode {:?}",
+                                "{} in -> {} out, {:.1}kHz, {:.0}ms to {:.0}ms buffer, mode {:?}",
                                 plugin_state
                                     .audio_io_layout
                                     .main_input_channels
@@ -679,7 +670,8 @@ pub fn create(
                                     .map(u32::from)
                                     .unwrap_or(0),
                                 plugin_state.buffer_config.sample_rate / 1000.0,
-                                buffer_text,
+                                min_buffer_size_s * 1000.0,
+                                max_buffer_size_s * 1000.0,
                                 plugin_state.buffer_config.process_mode
                             ),
                             FontId {
