@@ -818,12 +818,13 @@ pub fn create(
                 })
                 .default_open(false)
                 .show(egui_ctx, |ui| {
-                    let mut settings = shared_state.settings.write();
+                    let mut render_settings = shared_state.settings.write();
+                    let mut analysis_settings = shared_state.cached_analysis_settings.lock();
 
                     ui.collapsing("Render Options", |ui| {
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.left_hue, 0.0..=360.0)
+                                egui::Slider::new(&mut render_settings.left_hue, 0.0..=360.0)
                                     .suffix("°")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
@@ -832,17 +833,17 @@ pub fn create(
                             .changed()
                         {
                             shared_state.color_table.write().build(
-                                settings.left_hue,
-                                settings.right_hue,
-                                settings.minimum_lightness,
-                                settings.maximum_lightness,
-                                settings.maximum_chroma,
+                                render_settings.left_hue,
+                                render_settings.right_hue,
+                                render_settings.minimum_lightness,
+                                render_settings.maximum_lightness,
+                                render_settings.maximum_chroma,
                             );
                         };
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.right_hue, 0.0..=360.0)
+                                egui::Slider::new(&mut render_settings.right_hue, 0.0..=360.0)
                                     .suffix("°")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
@@ -851,81 +852,110 @@ pub fn create(
                             .changed()
                         {
                             shared_state.color_table.write().build(
-                                settings.left_hue,
-                                settings.right_hue,
-                                settings.minimum_lightness,
-                                settings.maximum_lightness,
-                                settings.maximum_chroma,
+                                render_settings.left_hue,
+                                render_settings.right_hue,
+                                render_settings.minimum_lightness,
+                                render_settings.maximum_lightness,
+                                render_settings.maximum_chroma,
                             );
                         };
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.minimum_lightness, 0.0..=0.3)
+                                egui::Slider::new(&mut render_settings.minimum_lightness, 0.0..=0.3)
                                     .text("Minimum OkLCH lightness value"),
                             )
                             .changed()
                         {
                             shared_state.color_table.write().build(
-                                settings.left_hue,
-                                settings.right_hue,
-                                settings.minimum_lightness,
-                                settings.maximum_lightness,
-                                settings.maximum_chroma,
+                                render_settings.left_hue,
+                                render_settings.right_hue,
+                                render_settings.minimum_lightness,
+                                render_settings.maximum_lightness,
+                                render_settings.maximum_chroma,
                             );
                         };
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.maximum_lightness, 0.5..=1.0)
+                                egui::Slider::new(&mut render_settings.maximum_lightness, 0.5..=1.0)
                                     .text("Maximum OkLCH lightness value"),
                             )
                             .changed()
                         {
                             shared_state.color_table.write().build(
-                                settings.left_hue,
-                                settings.right_hue,
-                                settings.minimum_lightness,
-                                settings.maximum_lightness,
-                                settings.maximum_chroma,
+                                render_settings.left_hue,
+                                render_settings.right_hue,
+                                render_settings.minimum_lightness,
+                                render_settings.maximum_lightness,
+                                render_settings.maximum_chroma,
                             );
                         };
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.maximum_chroma, 0.0..=0.2)
+                                egui::Slider::new(&mut render_settings.maximum_chroma, 0.0..=0.2)
                                     .text("Maximum OkLCH chroma value"),
                             )
                             .changed()
                         {
                             shared_state.color_table.write().build(
-                                settings.left_hue,
-                                settings.right_hue,
-                                settings.minimum_lightness,
-                                settings.maximum_lightness,
-                                settings.maximum_chroma,
+                                render_settings.left_hue,
+                                render_settings.right_hue,
+                                render_settings.minimum_lightness,
+                                render_settings.maximum_lightness,
+                                render_settings.maximum_chroma,
                             );
                         };
 
-                        ui.add(
-                            egui::Slider::new(&mut settings.max_db, 0.0..=-100.0)
-                                .clamping(egui::SliderClamping::Never)
-                                .suffix("dB")
-                                .step_by(1.0)
-                                .fixed_decimals(0)
-                                .text("Maximum amplitude"),
-                        );
+                        if analysis_settings.normalize_amplitude {
+                            let mut min_phon =
+                                (render_settings.min_db as f64 + analysis_settings.listening_volume).max(0.0);
+                            let mut max_phon =
+                                (render_settings.max_db as f64 + analysis_settings.listening_volume).min(100.0);
 
-                        ui.add(
-                            egui::Slider::new(&mut settings.min_db, 0.0..=-100.0)
-                                .clamping(egui::SliderClamping::Never)
-                                .suffix("dB")
-                                .step_by(1.0)
-                                .fixed_decimals(0)
-                                .text("Minimum amplitude"),
-                        );
+                            if ui.add(
+                                egui::Slider::new(&mut max_phon, 0.0..=100.0)
+                                    .suffix(" phon")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Maximum amplitude"),
+                            ).changed() {
+                                render_settings.max_db =
+                                    (max_phon - analysis_settings.listening_volume) as f32;
+                            }
 
-                        let mut spectrogram_duration = settings.spectrogram_duration.as_secs_f64();
+                            if ui.add(
+                                egui::Slider::new(&mut min_phon, 0.0..=100.0)
+                                    .suffix(" phon")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Minimum amplitude"),
+                            ).changed() {
+                                render_settings.min_db =
+                                    (min_phon - analysis_settings.listening_volume) as f32;
+                            }
+                        } else {
+                            ui.add(
+                                egui::Slider::new(&mut render_settings.max_db, 0.0..=-100.0)
+                                    .clamping(egui::SliderClamping::Never)
+                                    .suffix("dB")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Maximum amplitude"),
+                            );
+
+                            ui.add(
+                                egui::Slider::new(&mut render_settings.min_db, 0.0..=-100.0)
+                                    .clamping(egui::SliderClamping::Never)
+                                    .suffix("dB")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Minimum amplitude"),
+                            );
+                        }
+
+                        let mut spectrogram_duration = render_settings.spectrogram_duration.as_secs_f64();
                         if ui
                             .add(
                                 egui::Slider::new(&mut spectrogram_duration, 0.05..=2.0)
@@ -935,11 +965,11 @@ pub fn create(
                             )
                             .changed()
                         {
-                            settings.spectrogram_duration =
+                            render_settings.spectrogram_duration =
                                 Duration::from_secs_f64(spectrogram_duration);
                         };
 
-                        let mut bargraph_averaging = settings.bargraph_averaging.as_secs_f64() * 1000.0;
+                        let mut bargraph_averaging = render_settings.bargraph_averaging.as_secs_f64() * 1000.0;
                         if ui
                             .add(
                                 egui::Slider::new(&mut bargraph_averaging, 0.0..=100.0)
@@ -951,37 +981,38 @@ pub fn create(
                             )
                             .changed()
                         {
-                            settings.bargraph_averaging =
+                            render_settings.bargraph_averaging =
                                 Duration::from_secs_f64(bargraph_averaging / 1000.0);
                         };
 
                         ui.add(
-                            egui::Slider::new(&mut settings.bargraph_height, 0.0..=1.0)
+                            egui::Slider::new(&mut render_settings.bargraph_height, 0.0..=1.0)
                                 .text("Bargraph height"),
                         );
 
-                        ui.checkbox(&mut settings.show_hover, "Show hover information");
+                        ui.checkbox(&mut render_settings.show_hover, "Show hover information");
 
-                        ui.checkbox(&mut settings.show_performance, "Show performance counters");
+                        ui.checkbox(&mut render_settings.show_performance, "Show performance counters");
 
-                        ui.checkbox(&mut settings.show_format, "Show audio format information");
+                        ui.checkbox(&mut render_settings.show_format, "Show audio format information");
 
                         if ui.button("Reset Render Options").clicked() {
-                            *settings = RenderSettings::default();
+                            *render_settings = RenderSettings::default();
+                            render_settings.max_db =
+                                    (80.0 - analysis_settings.listening_volume) as f32;
+                            render_settings.min_db =
+                                    (20.0 - analysis_settings.listening_volume) as f32;
                             shared_state.color_table.write().build(
-                                settings.left_hue,
-                                settings.right_hue,
-                                settings.minimum_lightness,
-                                settings.maximum_lightness,
-                                settings.maximum_chroma,
+                                render_settings.left_hue,
+                                render_settings.right_hue,
+                                render_settings.minimum_lightness,
+                                render_settings.maximum_lightness,
+                                render_settings.maximum_chroma,
                             );
                         }
                     });
 
                     ui.collapsing("Analysis Options", |ui| {
-                        let mut render_settings = settings;
-                        let mut settings = shared_state.cached_analysis_settings.lock();
-
                         let update = |settings| {
                             let mut lock = analysis_chain.lock();
                             let analysis_chain = lock.as_mut().unwrap();
@@ -1004,7 +1035,7 @@ pub fn create(
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.gain, 40.0..=-20.0)
+                                egui::Slider::new(&mut analysis_settings.gain, 40.0..=-20.0)
                                     .clamping(egui::SliderClamping::Never)
                                     .suffix("dB")
                                     .step_by(1.0)
@@ -1014,12 +1045,12 @@ pub fn create(
                             .on_hover_text("This setting adjusts the amplitude of the incoming signal before it's processed (but does not affect the plugin's output channels; audio is always passed through unmodified).\n\nAll internal audio processing is done using 64-bit floating point, so this can be adjusted freely without concern for clipping.")
                             .changed()
                         {
-                            update(&settings);
+                            update(&analysis_settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
 
-                        let mut latency_offset = settings.latency_offset.as_secs_f64() * 1000.0;
+                        let mut latency_offset = analysis_settings.latency_offset.as_secs_f64() * 1000.0;
                         if ui
                             .add(
                                 egui::Slider::new(&mut latency_offset, 0.0..=500.0)
@@ -1032,34 +1063,34 @@ pub fn create(
                             .on_hover_text("This setting allows you to manually increase the processing latency reported to the plugin's host.\n\nBy default (when this is set to 0ms), the latency incurred by internal buffering is already accounted for.")
                             .changed()
                         {
-                            settings.latency_offset = Duration::from_secs_f64(latency_offset.max(0.0) / 1000.0);
-                            update(&settings);
+                            analysis_settings.latency_offset = Duration::from_secs_f64(latency_offset.max(0.0) / 1000.0);
+                            update(&analysis_settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
 
                         let old_min_phon =
-                            (render_settings.min_db as f64 + settings.listening_volume).max(0.0);
+                            (render_settings.min_db as f64 + analysis_settings.listening_volume).max(0.0);
                         let old_max_phon =
-                            (render_settings.max_db as f64 + settings.listening_volume).min(100.0);
+                            (render_settings.max_db as f64 + analysis_settings.listening_volume).min(100.0);
 
                             if ui
-                            .checkbox(
-                                &mut settings.normalize_amplitude,
-                                "Perform amplitude normalization",
-                            )
-                            .on_hover_text("If this is enabled, amplitude values are normalized using the ISO 226:2023 equal-loudness contours, which map the amplitudes of frequency bins into phons, a psychoacoustic unit of loudness measurement.\nIf this is disabled, amplitude values are not normalized.")
-                            .changed()
-                        {
-                            update(&settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        }
+                                .checkbox(
+                                    &mut analysis_settings.normalize_amplitude,
+                                    "Perform amplitude normalization",
+                                )
+                                .on_hover_text("If this is enabled, amplitude values are normalized using the ISO 226:2023 equal-loudness contours, which map the amplitudes of frequency bins into phons, a psychoacoustic unit of loudness measurement.\nIf this is disabled, amplitude values are not normalized.")
+                                .changed()
+                            {
+                                update(&analysis_settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            }
 
-                        if settings.normalize_amplitude {
+                        if analysis_settings.normalize_amplitude {
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut settings.listening_volume, 120.0..=20.0)
+                                    egui::Slider::new(&mut analysis_settings.listening_volume, 120.0..=20.0)
                                         .clamping(egui::SliderClamping::Never)
                                         .suffix(" dB SPL")
                                         .step_by(1.0)
@@ -1069,14 +1100,14 @@ pub fn create(
                                 .on_hover_text("When normalizing amplitude values using an equal-loudness contour, a reference value is necessary to convert dBFS into dB SPL.\nIn order to improve the accuracy of amplitude normalization and receive accurate phon values, this value should be set to the dB SPL value corresponding to 0 dBFS on your system.")
                                 .changed()
                             {
-                                if settings.normalize_amplitude {
-                                    update_and_clear(&settings);
+                                if analysis_settings.normalize_amplitude {
+                                    update_and_clear(&analysis_settings);
                                     render_settings.min_db =
-                                        (old_min_phon - settings.listening_volume) as f32;
+                                        (old_min_phon - analysis_settings.listening_volume) as f32;
                                     render_settings.max_db =
-                                        (old_max_phon - settings.listening_volume) as f32;
+                                        (old_max_phon - analysis_settings.listening_volume) as f32;
                                 } else {
-                                    update(&settings);
+                                    update(&analysis_settings);
                                 }
                                 egui_ctx.request_discard("Changed setting");
                                 return;
@@ -1085,22 +1116,22 @@ pub fn create(
 
                         if ui
                             .checkbox(
-                                &mut settings.internal_buffering,
+                                &mut analysis_settings.internal_buffering,
                                 "Use internal buffering",
                             )
                             .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows.\nIf this is enabled, the plugin maintains its own buffer of samples, allowing the number of overlapping windows per second to be changed by the user. This adds a small amount of latency, which is reported to the plugin's host so that it can be compensated for.\nIf this is disabled, the number of overlapping windows per second is determined by the buffer size set by the host.")
                             .changed()
                         {
-                            update(&settings);
+                            update(&analysis_settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
 
-                        if settings.internal_buffering {
+                        if analysis_settings.internal_buffering {
                             if ui
                                 .add(
                                     egui::Slider::new(
-                                        &mut settings.update_rate_hz,
+                                        &mut analysis_settings.update_rate_hz,
                                         128.0..=SPECTROGRAM_SLICES as f64,
                                     )
                                     .logarithmic(true)
@@ -1112,7 +1143,7 @@ pub fn create(
                                 .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows. This setting allows you to adjust the number of overlapping windows per second, effectively setting the spectrogram's vertical resolution (and the associated amount of CPU usage required).\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution.)")
                                 .changed()
                             {
-                                update_and_clear(&settings);
+                                update_and_clear(&analysis_settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
                             };
@@ -1121,7 +1152,7 @@ pub fn create(
                         if ui
                             .add(
                                 egui::Slider::new(
-                                    &mut settings.resolution,
+                                    &mut analysis_settings.resolution,
                                     128..=MAX_FREQUENCY_BINS,
                                 )
                                 .suffix(" bins")
@@ -1132,7 +1163,7 @@ pub fn create(
                             .on_hover_text("In order to convert data into frequency domain, the selected frequency range needs to be split into a set number of frequency bins. This setting allows you to adjust the number of bins used, effectively setting the horizontal resolution of the spectrogram and bargraph (and the associated amount of CPU usage required).\n\nThis setting does not increase the width of the transform's filters beyond the time resolution setting.")
                             .changed()
                         {
-                            update_and_clear(&settings);
+                            update_and_clear(&analysis_settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         };
@@ -1146,20 +1177,20 @@ pub fn create(
 
                             if ui
                                 .add(
-                                    egui::DragValue::new(&mut settings.start_frequency)
+                                    egui::DragValue::new(&mut analysis_settings.start_frequency)
                                         .suffix("hz")
                                         .fixed_decimals(0),
                                 )
                                 .changed()
                             {
-                                if settings.start_frequency < 0.0 {
-                                    settings.start_frequency = 0.0;
+                                if analysis_settings.start_frequency < 0.0 {
+                                    analysis_settings.start_frequency = 0.0;
                                 }
-                                if settings.end_frequency < 0.0 {
-                                    settings.end_frequency = 0.0;
+                                if analysis_settings.end_frequency < 0.0 {
+                                    analysis_settings.end_frequency = 0.0;
                                 }
-                                if settings.end_frequency > settings.start_frequency {
-                                    update_and_clear(&settings);
+                                if analysis_settings.end_frequency > analysis_settings.start_frequency {
+                                    update_and_clear(&analysis_settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
                                 }
@@ -1167,21 +1198,21 @@ pub fn create(
 
                             if ui
                                 .add(
-                                    egui::DragValue::new(&mut settings.end_frequency)
+                                    egui::DragValue::new(&mut analysis_settings.end_frequency)
                                         .speed(20.0)
                                         .suffix("hz")
                                         .fixed_decimals(0),
                                 )
                                 .changed()
                             {
-                                if settings.start_frequency < 0.0 {
-                                    settings.start_frequency = 0.0;
+                                if analysis_settings.start_frequency < 0.0 {
+                                    analysis_settings.start_frequency = 0.0;
                                 }
-                                if settings.end_frequency < 0.0 {
-                                    settings.end_frequency = 0.0;
+                                if analysis_settings.end_frequency < 0.0 {
+                                    analysis_settings.end_frequency = 0.0;
                                 }
-                                if settings.end_frequency > settings.start_frequency {
-                                    update_and_clear(&settings);
+                                if analysis_settings.end_frequency > analysis_settings.start_frequency {
+                                    update_and_clear(&analysis_settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
                                 }
@@ -1191,34 +1222,34 @@ pub fn create(
 
                         if ui
                             .checkbox(
-                                &mut settings.erb_frequency_scale,
+                                &mut analysis_settings.erb_frequency_scale,
                                 "Use ERB frequency scale",
                             )
                             .on_hover_text("If this is enabled, frequencies will be displayed using the Equivalent Rectangular Bandwidth scale, a psychoacoustic measure of pitch perception.\nIf this is disabled, frequencies will be displayed on a base 2 logarithmic scale, which is used by most musical scales.")
                             .changed()
                         {
-                            update_and_clear(&settings);
+                            update_and_clear(&analysis_settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
 
                         if ui
                             .checkbox(
-                                &mut settings.erb_time_resolution,
+                                &mut analysis_settings.erb_time_resolution,
                                 "Use adjusted ERB time resolution",
                             )
                             .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nIf this setting is enabled, the appropriate time resolution will be determined using an adjusted version of the ERB scale.\nIf this setting is disabled, time resolution is determined by a configuration option.")
                             .changed()
                         {
-                            update(&settings);
+                            update(&analysis_settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
 
-                        if settings.erb_time_resolution {
+                        if analysis_settings.erb_time_resolution {
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut settings.erb_time_resolution_clamp.0, 0.0..=37.0)
+                                    egui::Slider::new(&mut analysis_settings.erb_time_resolution_clamp.0, 0.0..=37.0)
                                         .clamping(egui::SliderClamping::Never)
                                         .suffix("ms")
                                         .step_by(1.0)
@@ -1228,19 +1259,19 @@ pub fn create(
                                 .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
                                 .changed()
                             {
-                                settings.erb_time_resolution_clamp.0 = settings.erb_time_resolution_clamp.0.clamp(0.0, 1000.0);
-                                if settings.erb_time_resolution_clamp.0 > settings.erb_time_resolution_clamp.1 {
-                                    settings.erb_time_resolution_clamp.1 = settings.erb_time_resolution_clamp.0;
+                                analysis_settings.erb_time_resolution_clamp.0 = analysis_settings.erb_time_resolution_clamp.0.clamp(0.0, 1000.0);
+                                if analysis_settings.erb_time_resolution_clamp.0 > analysis_settings.erb_time_resolution_clamp.1 {
+                                    analysis_settings.erb_time_resolution_clamp.1 = analysis_settings.erb_time_resolution_clamp.0;
                                 }
 
-                                update(&settings);
+                                update(&analysis_settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
                             };
 
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut settings.erb_time_resolution_clamp.1, 37.0..=100.0)
+                                    egui::Slider::new(&mut analysis_settings.erb_time_resolution_clamp.1, 37.0..=100.0)
                                         .clamping(egui::SliderClamping::Never)
                                         .suffix("ms")
                                         .step_by(1.0)
@@ -1250,37 +1281,37 @@ pub fn create(
                                 .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
                                 .changed()
                             {
-                                settings.erb_time_resolution_clamp.1 = settings.erb_time_resolution_clamp.1.clamp(0.0, 1000.0);
-                                if settings.erb_time_resolution_clamp.0 > settings.erb_time_resolution_clamp.1 {
-                                    settings.erb_time_resolution_clamp.0 = settings.erb_time_resolution_clamp.1;
+                                analysis_settings.erb_time_resolution_clamp.1 = analysis_settings.erb_time_resolution_clamp.1.clamp(0.0, 1000.0);
+                                if analysis_settings.erb_time_resolution_clamp.0 > analysis_settings.erb_time_resolution_clamp.1 {
+                                    analysis_settings.erb_time_resolution_clamp.0 = analysis_settings.erb_time_resolution_clamp.1;
                                 }
 
-                                update(&settings);
+                                update(&analysis_settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
                             };
 
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut settings.erb_bandwidth_divisor, 0.5..=6.0)
+                                    egui::Slider::new(&mut analysis_settings.erb_bandwidth_divisor, 0.5..=6.0)
                                         .clamping(egui::SliderClamping::Never)
                                         .text("ERB bandwidth divisor"),
                                 )
                                 .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, adjusting the time resolution calculated by this function may be useful to improve visualization readability. This setting allows you to change how this adjustment is performed.")
                                 .changed()
                             {
-                                if settings.erb_bandwidth_divisor < 0.01 {
-                                    settings.erb_bandwidth_divisor = 0.01;
+                                if analysis_settings.erb_bandwidth_divisor < 0.01 {
+                                    analysis_settings.erb_bandwidth_divisor = 0.01;
                                 }
 
-                                update(&settings);
+                                update(&analysis_settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
                             };
                         } else {
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut settings.time_resolution, 10.0..=200.0)
+                                    egui::Slider::new(&mut analysis_settings.time_resolution, 10.0..=200.0)
                                         .clamping(egui::SliderClamping::Never)
                                         .suffix("ms")
                                         .step_by(1.0)
@@ -1290,9 +1321,9 @@ pub fn create(
                                 .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.\n\nThe default time resolution value is based on the upper bound of ERB widths.")
                                 .changed()
                             {
-                                settings.time_resolution = settings.time_resolution.clamp(0.0, 1000.0);
+                                analysis_settings.time_resolution = analysis_settings.time_resolution.clamp(0.0, 1000.0);
 
-                                update(&settings);
+                                update(&analysis_settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
                             };
@@ -1300,20 +1331,24 @@ pub fn create(
 
                         if ui
                             .checkbox(
-                                &mut settings.nc_method,
+                                &mut analysis_settings.nc_method,
                                 "Use NC method",
                             )
                             .on_hover_text("If this is enabled, windowing is performed using the NC method, a form of spectral reassignment using phase information which usually outperforms typical window functions.\nIf this is disabled, windowing is performed using the Hann window function.")
                             .changed()
                         {
-                            update(&settings);
+                            update(&analysis_settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
 
                         if ui.button("Reset Analysis Options").clicked() {
-                            *settings = AnalysisChainConfig::default();
-                            update_and_clear(&settings);
+                            *analysis_settings = AnalysisChainConfig::default();
+                            render_settings.max_db =
+                                    (80.0 - analysis_settings.listening_volume) as f32;
+                            render_settings.min_db =
+                                    (20.0 - analysis_settings.listening_volume) as f32;
+                            update_and_clear(&analysis_settings);
                         }
                     });
                 });
