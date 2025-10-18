@@ -241,8 +241,8 @@ pub(crate) struct AnalysisChainConfig {
     end_frequency: f64,
     erb_frequency_scale: bool,
     erb_time_resolution: bool,
-    erb_time_resolution_clamp: (f64, f64),
     erb_bandwidth_divisor: f64,
+    time_resolution_clamp: (f64, f64),
     q_time_resolution: f64,
     nc_method: bool,
 }
@@ -261,9 +261,8 @@ impl Default for AnalysisChainConfig {
             end_frequency: BetterAnalyzerConfiguration::default().end_frequency,
             erb_frequency_scale: BetterAnalyzerConfiguration::default().erb_frequency_scale,
             erb_time_resolution: BetterAnalyzerConfiguration::default().erb_time_resolution,
-            erb_time_resolution_clamp: BetterAnalyzerConfiguration::default()
-                .erb_time_resolution_clamp,
             erb_bandwidth_divisor: BetterAnalyzerConfiguration::default().erb_bandwidth_divisor,
+            time_resolution_clamp: BetterAnalyzerConfiguration::default().time_resolution_clamp,
             q_time_resolution: BetterAnalyzerConfiguration::default().q_time_resolution,
             nc_method: BetterAnalyzerConfiguration::default().nc_method,
         }
@@ -302,8 +301,8 @@ impl AnalysisChain {
             erb_frequency_scale: config.erb_frequency_scale,
             sample_rate,
             erb_time_resolution: config.erb_time_resolution,
-            erb_time_resolution_clamp: config.erb_time_resolution_clamp,
             erb_bandwidth_divisor: config.erb_bandwidth_divisor,
+            time_resolution_clamp: config.time_resolution_clamp,
             q_time_resolution: config.q_time_resolution,
             nc_method: config.nc_method,
         });
@@ -505,8 +504,8 @@ impl AnalysisChain {
             end_frequency: analyzer_config.end_frequency,
             erb_frequency_scale: analyzer_config.erb_frequency_scale,
             erb_time_resolution: analyzer_config.erb_time_resolution,
-            erb_time_resolution_clamp: analyzer_config.erb_time_resolution_clamp,
             erb_bandwidth_divisor: analyzer_config.erb_bandwidth_divisor,
+            time_resolution_clamp: analyzer_config.time_resolution_clamp,
             q_time_resolution: analyzer_config.q_time_resolution,
             nc_method: analyzer_config.nc_method,
         }
@@ -549,7 +548,7 @@ impl AnalysisChain {
             || old_analyzer_config.end_frequency != config.end_frequency
             || old_analyzer_config.erb_frequency_scale != config.erb_frequency_scale
             || old_analyzer_config.erb_time_resolution != config.erb_time_resolution
-            || old_analyzer_config.erb_time_resolution_clamp != config.erb_time_resolution_clamp
+            || old_analyzer_config.time_resolution_clamp != config.time_resolution_clamp
             || old_analyzer_config.erb_bandwidth_divisor != config.erb_bandwidth_divisor
             || old_analyzer_config.q_time_resolution != config.q_time_resolution
             || old_analyzer_config.nc_method != config.nc_method
@@ -561,8 +560,8 @@ impl AnalysisChain {
                 erb_frequency_scale: config.erb_frequency_scale,
                 sample_rate: self.sample_rate,
                 erb_time_resolution: config.erb_time_resolution,
-                erb_time_resolution_clamp: config.erb_time_resolution_clamp,
                 erb_bandwidth_divisor: config.erb_bandwidth_divisor,
+                time_resolution_clamp: config.time_resolution_clamp,
                 q_time_resolution: config.q_time_resolution,
                 nc_method: config.nc_method,
             });

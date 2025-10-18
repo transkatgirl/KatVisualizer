@@ -1238,7 +1238,7 @@ pub fn create(
                                 &mut analysis_settings.erb_time_resolution,
                                 "Use ERB time resolution",
                             )
-                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nIf this setting is enabled, the appropriate time resolution will be determined using an adjusted version of the ERB scale.\nIf this setting is disabled, time resolution is determined by a configuration option.")
+                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nIf this setting is enabled, the appropriate time resolution will be determined using an adjusted version of the ERB scale.\nIf this setting is disabled, time resolution is determined based on the configured Q factor.")
                             .changed()
                         {
                             update(&analysis_settings);
@@ -1247,50 +1247,6 @@ pub fn create(
                         }
 
                         if analysis_settings.erb_time_resolution {
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut analysis_settings.erb_time_resolution_clamp.0, 0.0..=37.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix("ms")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("ERB minimum time resolution"),
-                                )
-                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
-                                .changed()
-                            {
-                                analysis_settings.erb_time_resolution_clamp.0 = analysis_settings.erb_time_resolution_clamp.0.clamp(0.0, 1000.0);
-                                if analysis_settings.erb_time_resolution_clamp.0 > analysis_settings.erb_time_resolution_clamp.1 {
-                                    analysis_settings.erb_time_resolution_clamp.1 = analysis_settings.erb_time_resolution_clamp.0;
-                                }
-
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            };
-
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut analysis_settings.erb_time_resolution_clamp.1, 37.0..=100.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix("ms")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("ERB maximum time resolution"),
-                                )
-                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
-                                .changed()
-                            {
-                                analysis_settings.erb_time_resolution_clamp.1 = analysis_settings.erb_time_resolution_clamp.1.clamp(0.0, 1000.0);
-                                if analysis_settings.erb_time_resolution_clamp.0 > analysis_settings.erb_time_resolution_clamp.1 {
-                                    analysis_settings.erb_time_resolution_clamp.0 = analysis_settings.erb_time_resolution_clamp.1;
-                                }
-
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            };
-
                             if ui
                                 .add(
                                     egui::Slider::new(&mut analysis_settings.erb_bandwidth_divisor, 0.5..=6.0)
@@ -1328,6 +1284,50 @@ pub fn create(
                                 return;
                             };
                         }
+
+                        if ui
+                                .add(
+                                    egui::Slider::new(&mut analysis_settings.time_resolution_clamp.0, 0.0..=200.0)
+                                        .clamping(egui::SliderClamping::Never)
+                                        .suffix("ms")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("Minimum time resolution"),
+                                )
+                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen determining this tradeoff, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
+                                .changed()
+                            {
+                                analysis_settings.time_resolution_clamp.0 = analysis_settings.time_resolution_clamp.0.clamp(0.0, 1000.0);
+                                if analysis_settings.time_resolution_clamp.0 > analysis_settings.time_resolution_clamp.1 {
+                                    analysis_settings.time_resolution_clamp.1 = analysis_settings.time_resolution_clamp.0;
+                                }
+
+                                update(&analysis_settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            };
+
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut analysis_settings.time_resolution_clamp.1, 0.0..=200.0)
+                                        .clamping(egui::SliderClamping::Never)
+                                        .suffix("ms")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("Maximum time resolution"),
+                                )
+                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen determining this tradeoff, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
+                                .changed()
+                            {
+                                analysis_settings.time_resolution_clamp.1 = analysis_settings.time_resolution_clamp.1.clamp(0.0, 1000.0);
+                                if analysis_settings.time_resolution_clamp.0 > analysis_settings.time_resolution_clamp.1 {
+                                    analysis_settings.time_resolution_clamp.0 = analysis_settings.time_resolution_clamp.1;
+                                }
+
+                                update(&analysis_settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            };
 
                         if ui
                             .checkbox(
