@@ -243,7 +243,7 @@ pub(crate) struct AnalysisChainConfig {
     erb_time_resolution: bool,
     erb_time_resolution_clamp: (f64, f64),
     erb_bandwidth_divisor: f64,
-    time_resolution: f64,
+    q_time_resolution: f64,
     nc_method: bool,
 }
 
@@ -264,7 +264,7 @@ impl Default for AnalysisChainConfig {
             erb_time_resolution_clamp: BetterAnalyzerConfiguration::default()
                 .erb_time_resolution_clamp,
             erb_bandwidth_divisor: BetterAnalyzerConfiguration::default().erb_bandwidth_divisor,
-            time_resolution: BetterAnalyzerConfiguration::default().time_resolution,
+            q_time_resolution: BetterAnalyzerConfiguration::default().q_time_resolution,
             nc_method: BetterAnalyzerConfiguration::default().nc_method,
         }
     }
@@ -304,7 +304,7 @@ impl AnalysisChain {
             erb_time_resolution: config.erb_time_resolution,
             erb_time_resolution_clamp: config.erb_time_resolution_clamp,
             erb_bandwidth_divisor: config.erb_bandwidth_divisor,
-            time_resolution: config.time_resolution,
+            q_time_resolution: config.q_time_resolution,
             nc_method: config.nc_method,
         });
 
@@ -507,7 +507,7 @@ impl AnalysisChain {
             erb_time_resolution: analyzer_config.erb_time_resolution,
             erb_time_resolution_clamp: analyzer_config.erb_time_resolution_clamp,
             erb_bandwidth_divisor: analyzer_config.erb_bandwidth_divisor,
-            time_resolution: analyzer_config.time_resolution,
+            q_time_resolution: analyzer_config.q_time_resolution,
             nc_method: analyzer_config.nc_method,
         }
     }
@@ -551,7 +551,7 @@ impl AnalysisChain {
             || old_analyzer_config.erb_time_resolution != config.erb_time_resolution
             || old_analyzer_config.erb_time_resolution_clamp != config.erb_time_resolution_clamp
             || old_analyzer_config.erb_bandwidth_divisor != config.erb_bandwidth_divisor
-            || old_analyzer_config.time_resolution != config.time_resolution
+            || old_analyzer_config.q_time_resolution != config.q_time_resolution
             || old_analyzer_config.nc_method != config.nc_method
         {
             let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
@@ -563,7 +563,7 @@ impl AnalysisChain {
                 erb_time_resolution: config.erb_time_resolution,
                 erb_time_resolution_clamp: config.erb_time_resolution_clamp,
                 erb_bandwidth_divisor: config.erb_bandwidth_divisor,
-                time_resolution: config.time_resolution,
+                q_time_resolution: config.q_time_resolution,
                 nc_method: config.nc_method,
             });
             drop(old_left_analyzer);

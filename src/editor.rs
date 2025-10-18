@@ -1236,7 +1236,7 @@ pub fn create(
                         if ui
                             .checkbox(
                                 &mut analysis_settings.erb_time_resolution,
-                                "Use adjusted ERB time resolution",
+                                "Use ERB time resolution",
                             )
                             .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nIf this setting is enabled, the appropriate time resolution will be determined using an adjusted version of the ERB scale.\nIf this setting is disabled, time resolution is determined by a configuration option.")
                             .changed()
@@ -1311,17 +1311,17 @@ pub fn create(
                         } else {
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut analysis_settings.time_resolution, 10.0..=200.0)
+                                    egui::Slider::new(&mut analysis_settings.q_time_resolution, 2.0..=128.0)
+                                        .logarithmic(true)
                                         .clamping(egui::SliderClamping::Never)
-                                        .suffix("ms")
-                                        .step_by(1.0)
+                                        .suffix(" Q")
                                         .fixed_decimals(0)
                                         .text("Time resolution"),
                                 )
-                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.\n\nThe default time resolution value is based on the upper bound of ERB widths.")
+                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.")
                                 .changed()
                             {
-                                analysis_settings.time_resolution = analysis_settings.time_resolution.clamp(0.0, 1000.0);
+                                analysis_settings.q_time_resolution = analysis_settings.q_time_resolution.max(0.1);
 
                                 update(&analysis_settings);
                                 egui_ctx.request_discard("Changed setting");
