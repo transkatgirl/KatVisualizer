@@ -1040,7 +1040,7 @@ pub fn create(
                                     .suffix("dB")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
-                                    .text("Input gain"),
+                                    .text("Analysis gain"),
                             )
                             .on_hover_text("This setting adjusts the amplitude of the incoming signal before it's processed (but does not affect the plugin's output channels; audio is always passed through unmodified).\n\nAll internal audio processing is done using 64-bit floating point, so this can be adjusted freely without concern for clipping.")
                             .changed()
