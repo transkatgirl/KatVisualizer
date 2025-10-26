@@ -2,6 +2,7 @@
 #![allow(clippy::collapsible_else_if)]
 
 use color::{ColorSpaceTag, DynamicColor, Flags, Rgba8, Srgb};
+use core::f32;
 use ndarray::Array2;
 use nih_plug::prelude::*;
 use nih_plug_egui::{
@@ -25,33 +26,52 @@ use crate::{
     analyzer::{BetterSpectrogram, map_value_f32},
 };
 
-fn calculate_amplitude_range(
-    percentiles: (f32, f32),
+fn calculate_amplitude_percentile(
+    percentile: f32,
     scratchpad: &mut Vec<f32>,
     spectrogram: &BetterSpectrogram,
     length: Duration,
-) -> (f32, f32) {
+) -> f32 {
     scratchpad.clear();
     let mut elapsed = Duration::ZERO;
 
-    for row in &spectrogram.data {
-        elapsed += row.duration;
-        if elapsed > length {
-            break;
+    if percentile == 1.0 {
+        let mut maximum = -f32::INFINITY;
+
+        for row in &spectrogram.data {
+            elapsed += row.duration;
+            if elapsed > length {
+                break;
+            }
+
+            let row_maximum = row
+                .data
+                .iter()
+                .map(|(_, volume)| *volume)
+                .max_by(f32::total_cmp)
+                .unwrap_or(-f32::INFINITY);
+            if row_maximum > maximum {
+                maximum = row_maximum;
+            }
         }
 
-        scratchpad.extend(row.data.iter().map(|(_, volume)| volume));
+        maximum
+    } else {
+        for row in &spectrogram.data {
+            elapsed += row.duration;
+            if elapsed > length {
+                break;
+            }
+
+            scratchpad.extend(row.data.iter().map(|(_, volume)| volume));
+        }
+        scratchpad.voracious_sort();
+
+        let items = scratchpad.len() as f32;
+        let index = (percentile * items).round().clamp(0.0, items - 1.0) as usize;
+
+        scratchpad[index]
     }
-    scratchpad.voracious_sort();
-
-    let items = scratchpad.len() as f32;
-    let lower_index = (percentiles.0 * items).round().clamp(0.0, items - 1.0) as usize;
-    let upper_index = (percentiles.1 * items).round().clamp(0.0, items - 1.0) as usize;
-
-    let lower = scratchpad[lower_index];
-    let upper = scratchpad[upper_index];
-
-    (lower, upper)
 }
 
 fn draw_bargraph(
@@ -308,12 +328,11 @@ struct RenderSettings {
     maximum_lightness: f32,
     maximum_chroma: f32,
     automatic_gain: bool,
-    automatic_gain_duration: Duration,
+    agc_duration: Duration,
+    agc_percentile: f32,
+    agc_range: f32,
     min_db: f32,
     max_db: f32,
-    lower_gain_percentile: f32,
-    upper_gain_percentile: f32,
-    maximum_gain_range: f32,
     bargraph_height: f32,
     spectrogram_duration: Duration,
     bargraph_averaging: Duration,
@@ -331,12 +350,11 @@ impl Default for RenderSettings {
             maximum_lightness: 0.82,
             maximum_chroma: 0.09,
             automatic_gain: false,
-            automatic_gain_duration: Duration::from_secs_f64(1.0),
+            agc_duration: Duration::from_secs_f64(1.0),
+            agc_percentile: 1.0,
+            agc_range: 40.0,
             min_db: -72.0,
             max_db: -12.0,
-            lower_gain_percentile: 0.15,
-            upper_gain_percentile: 0.999,
-            maximum_gain_range: 40.0,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f64(0.67),
             bargraph_averaging: Duration::from_secs_f64(0.004),
@@ -564,18 +582,14 @@ pub fn create(
                 let chunk_duration = front.duration;
 
                 if settings.automatic_gain {
-                    (min_db, max_db) = calculate_amplitude_range(
-                        (
-                            settings.lower_gain_percentile,
-                            settings.upper_gain_percentile,
-                        ),
+                    max_db = calculate_amplitude_percentile(
+                        settings.agc_percentile,
                         &mut agc_scratchpad,
                         spectrogram,
-                        settings.automatic_gain_duration,
+                        settings.agc_duration,
                     );
-                    if max_db - min_db > settings.maximum_gain_range {
-                        min_db = max_db - settings.maximum_gain_range;
-                    }
+
+                    min_db = max_db - settings.agc_range;
                 }
 
                 if settings.bargraph_height != 0.0 {
@@ -982,7 +996,7 @@ pub fn create(
                         ui.checkbox(&mut render_settings.automatic_gain, "Automatic amplitude ranging");
 
                         if render_settings.automatic_gain {
-                            let mut agc_duration = render_settings.automatic_gain_duration.as_secs_f64();
+                            let mut agc_duration = render_settings.agc_duration.as_secs_f64();
                             if ui
                                 .add(
                                     egui::Slider::new(&mut agc_duration, 0.2..=4.0)
@@ -992,38 +1006,28 @@ pub fn create(
                                 )
                                 .changed()
                             {
-                                render_settings.automatic_gain_duration =
+                                render_settings.agc_duration =
                                     Duration::from_secs_f64(agc_duration);
                             };
 
-                            let mut min_percentile = render_settings.lower_gain_percentile * 100.0;
-                            let mut max_percentile = render_settings.upper_gain_percentile * 100.0;
+                            let mut agc_percentile = render_settings.agc_percentile * 100.0;
 
                             if ui.add(
-                                egui::Slider::new(&mut max_percentile, 0.0..=100.0)
+                                egui::Slider::new(&mut agc_percentile, 0.0..=100.0)
                                     .fixed_decimals(1)
                                     .text("Maximum amplitude percentile"),
                             ).changed() {
-                                render_settings.upper_gain_percentile =
-                                    max_percentile / 100.0;
-                            }
-
-                            if ui.add(
-                                egui::Slider::new(&mut min_percentile, 0.0..=100.0)
-                                    .fixed_decimals(1)
-                                    .text("Minimum amplitude percentile"),
-                            ).changed() {
-                                render_settings.lower_gain_percentile =
-                                    min_percentile / 100.0;
+                                render_settings.agc_percentile =
+                                    agc_percentile / 100.0;
                             }
 
                             ui.add(
-                                egui::Slider::new(&mut render_settings.maximum_gain_range, 10.0..=100.0)
+                                egui::Slider::new(&mut render_settings.agc_range, 10.0..=100.0)
                                     .clamping(egui::SliderClamping::Never)
                                     .suffix("dB")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
-                                    .text("Maximum amplitude range"),
+                                    .text("Amplitude range"),
                             );
                         } else {
                             if analysis_settings.normalize_amplitude {
