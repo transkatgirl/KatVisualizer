@@ -313,6 +313,7 @@ struct RenderSettings {
     max_db: f32,
     lower_gain_percentile: f32,
     upper_gain_percentile: f32,
+    maximum_gain_range: f32,
     bargraph_height: f32,
     spectrogram_duration: Duration,
     bargraph_averaging: Duration,
@@ -333,8 +334,9 @@ impl Default for RenderSettings {
             automatic_gain_duration: Duration::from_secs_f64(1.0),
             min_db: -72.0,
             max_db: -12.0,
-            lower_gain_percentile: 0.2,
+            lower_gain_percentile: 0.15,
             upper_gain_percentile: 0.999,
+            maximum_gain_range: 40.0,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f64(0.67),
             bargraph_averaging: Duration::from_secs_f64(0.004),
@@ -571,6 +573,9 @@ pub fn create(
                         spectrogram,
                         settings.automatic_gain_duration,
                     );
+                    if max_db - min_db > settings.maximum_gain_range {
+                        min_db = max_db - settings.maximum_gain_range;
+                    }
                 }
 
                 if settings.bargraph_height != 0.0 {
@@ -1012,7 +1017,14 @@ pub fn create(
                                     min_percentile / 100.0;
                             }
 
-
+                            ui.add(
+                                egui::Slider::new(&mut render_settings.maximum_gain_range, 10.0..=100.0)
+                                    .clamping(egui::SliderClamping::Never)
+                                    .suffix("dB")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Maximum amplitude range"),
+                            );
                         } else {
                             if analysis_settings.normalize_amplitude {
                                 let mut min_phon =
