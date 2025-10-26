@@ -1193,6 +1193,7 @@ dependencies = [
  "parking_lot",
  "serde",
  "threadpool",
+ "voracious_radix_sort",
 ]
 
 [[package]]
@@ -2608,6 +2609,12 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "voracious_radix_sort"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "446e7ffcb6c27a71d05af7e51ef2ee5b71c48424b122a832f2439651e1914899"
 
 [[package]]
 name = "vst3-com"

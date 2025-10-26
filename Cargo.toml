@@ -35,6 +35,7 @@ threadpool = "1.8.1"
 ndarray = "0.16.1"
 parking_lot = "0.12.5"
 mimalloc = "0.1.48"
+voracious_radix_sort = "1.2.0"
 
 [profile.dev]
 opt-level = 3

@@ -17,12 +17,42 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use voracious_radix_sort::RadixSort;
 
 use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS, MyPlugin,
     PluginParams, PluginStateInfo, SPECTROGRAM_SLICES,
     analyzer::{BetterSpectrogram, map_value_f32},
 };
+
+fn calculate_amplitude_range(
+    percentiles: (f32, f32),
+    scratchpad: &mut Vec<f32>,
+    spectrogram: &BetterSpectrogram,
+    length: Duration,
+) -> (f32, f32) {
+    scratchpad.clear();
+    let mut elapsed = Duration::ZERO;
+
+    for row in &spectrogram.data {
+        elapsed += row.duration;
+        if elapsed > length {
+            break;
+        }
+
+        scratchpad.extend(row.data.iter().map(|(_, volume)| volume));
+    }
+    scratchpad.voracious_sort();
+
+    let items = scratchpad.len() as f32;
+    let lower_index = (percentiles.0 * items).round().clamp(0.0, items - 1.0) as usize;
+    let upper_index = (percentiles.1 * items).round().clamp(0.0, items - 1.0) as usize;
+
+    let lower = scratchpad[lower_index];
+    let upper = scratchpad[upper_index];
+
+    (lower, upper)
+}
 
 fn draw_bargraph(
     mesh: &mut Mesh,
@@ -184,8 +214,14 @@ fn draw_spectrogram_image(
     }
 }
 
-#[allow(clippy::type_complexity)] // FIXME
-fn get_frequency_amplitude_pan_time(
+struct UnderCursor {
+    pub frequency: (f32, f32, f32),
+    pub amplitude: f32,
+    pub pan: Option<f32>,
+    pub time: Option<Duration>,
+}
+
+fn get_under_cursor(
     cursor: Pos2,
     spectrogram: &BetterSpectrogram,
     frequencies: &[(f32, f32, f32)],
@@ -193,7 +229,7 @@ fn get_frequency_amplitude_pan_time(
     spectrogram_bounds: Rect,
     (bargraph_max_db, bargraph_min_db): (f32, f32),
     spectrogram_height: usize,
-) -> Option<((f32, f32, f32), f32, Option<(f32, Duration)>)> {
+) -> Option<UnderCursor> {
     let frequency_count = frequencies.len() as f32;
 
     if bargraph_bounds.contains(cursor) {
@@ -213,7 +249,12 @@ fn get_frequency_amplitude_pan_time(
             bargraph_max_db,
         );
 
-        Some((frequency, amplitude, None))
+        Some(UnderCursor {
+            frequency,
+            amplitude,
+            pan: None,
+            time: None,
+        })
     } else if spectrogram_bounds.contains(cursor) {
         let x = map_value_f32(
             cursor.x,
@@ -245,11 +286,12 @@ fn get_frequency_amplitude_pan_time(
         };
 
         if let Some((pan, amplitude)) = item {
-            Some((
+            Some(UnderCursor {
                 frequency,
                 amplitude,
-                Some((pan, duration.mul_f64(y as f64))),
-            ))
+                pan: Some(pan),
+                time: Some(duration.mul_f64(y as f64)),
+            })
         } else {
             None
         }
@@ -265,8 +307,12 @@ struct RenderSettings {
     minimum_lightness: f32,
     maximum_lightness: f32,
     maximum_chroma: f32,
+    automatic_gain: bool,
+    automatic_gain_duration: Duration,
     min_db: f32,
     max_db: f32,
+    lower_gain_percentile: f32,
+    upper_gain_percentile: f32,
     bargraph_height: f32,
     spectrogram_duration: Duration,
     bargraph_averaging: Duration,
@@ -283,8 +329,12 @@ impl Default for RenderSettings {
             minimum_lightness: 0.13,
             maximum_lightness: 0.82,
             maximum_chroma: 0.09,
+            automatic_gain: false,
+            automatic_gain_duration: Duration::from_secs_f64(1.0),
             min_db: -72.0,
             max_db: -12.0,
+            lower_gain_percentile: 0.2,
+            upper_gain_percentile: 0.999,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f64(0.67),
             bargraph_averaging: Duration::from_secs_f64(0.004),
@@ -464,6 +514,8 @@ pub fn create(
                 let color_table = &shared_state.color_table.read();
                 let spectrogram_texture = shared_state.spectrogram_texture.read().unwrap();
                 let frequencies = analysis_frequencies.read();
+                let mut agc_scratchpad =
+                    Vec::with_capacity(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES);
 
                 let bargraph_bounds = Rect {
                     min: Pos2 { x: 0.0, y: 0.0 },
@@ -479,6 +531,8 @@ pub fn create(
                     },
                     max: Pos2 { x: max_x, y: max_y },
                 };
+                let mut min_db = settings.min_db;
+                let mut max_db = settings.max_db;
 
                 let start = Instant::now();
 
@@ -507,13 +561,25 @@ pub fn create(
                 let processing_duration = metrics.processing;
                 let chunk_duration = front.duration;
 
+                if settings.automatic_gain {
+                    (min_db, max_db) = calculate_amplitude_range(
+                        (
+                            settings.lower_gain_percentile,
+                            settings.upper_gain_percentile,
+                        ),
+                        &mut agc_scratchpad,
+                        spectrogram,
+                        settings.automatic_gain_duration,
+                    );
+                }
+
                 if settings.bargraph_height != 0.0 {
                     draw_bargraph(
                         &mut bargraph_mesh,
                         spectrogram,
                         bargraph_bounds,
                         color_table,
-                        (settings.max_db, settings.min_db),
+                        (max_db, min_db),
                         settings.bargraph_averaging,
                     );
                 }
@@ -523,19 +589,19 @@ pub fn create(
                         &mut spectrogram_image,
                         spectrogram,
                         color_table,
-                        (settings.max_db, settings.min_db),
+                        (max_db, min_db),
                     );
                 }
 
                 let under_pointer = if settings.show_hover {
                     if let Some(pointer) = egui_ctx.pointer_latest_pos() {
-                        get_frequency_amplitude_pan_time(
+                        get_under_cursor(
                             pointer,
                             spectrogram,
                             &frequencies,
                             bargraph_bounds,
                             spectrogram_bounds,
-                            (settings.max_db, settings.min_db),
+                            (max_db, min_db),
                             spectrogram_height,
                         )
                     } else {
@@ -591,41 +657,41 @@ pub fn create(
                     })),
                 ]);
 
-                if let Some((frequency, amplitude, additional)) = under_pointer {
+                if let Some(under) = under_pointer {
                     let analysis_settings = shared_state.cached_analysis_settings.lock();
 
                     let amplitude_text = if analysis_settings.normalize_amplitude {
                         format!(
                             "{:.0} phon",
-                            amplitude as f64 + analysis_settings.listening_volume
+                            under.amplitude as f64 + analysis_settings.listening_volume
                         )
                     } else {
-                        format!("{:+.0}dBFS", amplitude)
+                        format!("{:+.0}dBFS", under.amplitude)
                     };
 
                     drop(analysis_settings);
 
-                    let text = if let Some((pan, elapsed)) = additional {
+                    let text = if let (Some(pan), Some(elapsed)) = (under.pan, under.time) {
                         format!(
                             "{:.0}hz, -{:.3}s\n{}, {:+.2} pan",
-                            frequency.1,
+                            under.frequency.1,
                             elapsed.as_secs_f64(),
                             amplitude_text,
                             pan
                         )
                     } else {
-                        let resolution = (1.0 / (frequency.2 - frequency.0)) * 1000.0;
+                        let resolution = (1.0 / (under.frequency.2 - under.frequency.0)) * 1000.0;
                         let averaging = settings.bargraph_averaging.as_secs_f64() * 1000.0;
 
                         if averaging > 0.0 {
                             format!(
                                 "{:.0}hz, {}\n{:.0}ms res, {:.0} ms avg",
-                                frequency.1, amplitude_text, resolution, averaging
+                                under.frequency.1, amplitude_text, resolution, averaging
                             )
                         } else {
                             format!(
                                 "{:.0}hz, {}\n{:.0}ms",
-                                frequency.1, amplitude_text, resolution
+                                under.frequency.1, amplitude_text, resolution
                             )
                         }
                     };

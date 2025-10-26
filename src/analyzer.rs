@@ -1,4 +1,3 @@
-use core::f64;
 use std::{collections::VecDeque, f64::consts::PI, time::Duration};
 
 use serde::{Deserialize, Serialize};
@@ -198,7 +197,6 @@ impl BetterAnalysis {
     }
 }
 
-#[derive(Clone)]
 pub struct BetterSpectrogram {
     pub data: VecDeque<BetterAnalysis>,
 }
