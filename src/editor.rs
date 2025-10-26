@@ -974,51 +974,92 @@ pub fn create(
                             );
                         };
 
-                        if analysis_settings.normalize_amplitude {
-                            let mut min_phon =
-                                (render_settings.min_db as f64 + analysis_settings.listening_volume).max(0.0);
-                            let mut max_phon =
-                                (render_settings.max_db as f64 + analysis_settings.listening_volume).min(100.0);
+                        ui.checkbox(&mut render_settings.automatic_gain, "Automatic amplitude ranging");
+
+                        if render_settings.automatic_gain {
+                            let mut agc_duration = render_settings.automatic_gain_duration.as_secs_f64();
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut agc_duration, 0.2..=4.0)
+                                        .clamping(egui::SliderClamping::Never)
+                                        .suffix("s")
+                                        .text("Amplitude ranging duration"),
+                                )
+                                .changed()
+                            {
+                                render_settings.automatic_gain_duration =
+                                    Duration::from_secs_f64(agc_duration);
+                            };
+
+                            let mut min_percentile = render_settings.lower_gain_percentile * 100.0;
+                            let mut max_percentile = render_settings.upper_gain_percentile * 100.0;
 
                             if ui.add(
-                                egui::Slider::new(&mut max_phon, 0.0..=100.0)
-                                    .suffix(" phon")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Maximum amplitude"),
+                                egui::Slider::new(&mut max_percentile, 0.0..=100.0)
+                                    .fixed_decimals(1)
+                                    .text("Maximum amplitude percentile"),
                             ).changed() {
-                                render_settings.max_db =
-                                    (max_phon - analysis_settings.listening_volume) as f32;
+                                render_settings.upper_gain_percentile =
+                                    max_percentile / 100.0;
                             }
 
                             if ui.add(
-                                egui::Slider::new(&mut min_phon, 0.0..=100.0)
-                                    .suffix(" phon")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Minimum amplitude"),
+                                egui::Slider::new(&mut min_percentile, 0.0..=100.0)
+                                    .fixed_decimals(1)
+                                    .text("Minimum amplitude percentile"),
                             ).changed() {
-                                render_settings.min_db =
-                                    (min_phon - analysis_settings.listening_volume) as f32;
+                                render_settings.lower_gain_percentile =
+                                    min_percentile / 100.0;
                             }
+
+
                         } else {
-                            ui.add(
-                                egui::Slider::new(&mut render_settings.max_db, 0.0..=-100.0)
-                                    .clamping(egui::SliderClamping::Never)
-                                    .suffix("dB")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Maximum amplitude"),
-                            );
+                            if analysis_settings.normalize_amplitude {
+                                let mut min_phon =
+                                    (render_settings.min_db as f64 + analysis_settings.listening_volume).max(0.0);
+                                let mut max_phon =
+                                    (render_settings.max_db as f64 + analysis_settings.listening_volume).min(100.0);
 
-                            ui.add(
-                                egui::Slider::new(&mut render_settings.min_db, 0.0..=-100.0)
-                                    .clamping(egui::SliderClamping::Never)
-                                    .suffix("dB")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Minimum amplitude"),
-                            );
+                                if ui.add(
+                                    egui::Slider::new(&mut max_phon, 0.0..=100.0)
+                                        .suffix(" phon")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("Maximum amplitude"),
+                                ).changed() {
+                                    render_settings.max_db =
+                                        (max_phon - analysis_settings.listening_volume) as f32;
+                                }
+
+                                if ui.add(
+                                    egui::Slider::new(&mut min_phon, 0.0..=100.0)
+                                        .suffix(" phon")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("Minimum amplitude"),
+                                ).changed() {
+                                    render_settings.min_db =
+                                        (min_phon - analysis_settings.listening_volume) as f32;
+                                }
+                            } else {
+                                ui.add(
+                                    egui::Slider::new(&mut render_settings.max_db, 0.0..=-100.0)
+                                        .clamping(egui::SliderClamping::Never)
+                                        .suffix("dB")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("Maximum amplitude"),
+                                );
+
+                                ui.add(
+                                    egui::Slider::new(&mut render_settings.min_db, 0.0..=-100.0)
+                                        .clamping(egui::SliderClamping::Never)
+                                        .suffix("dB")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("Minimum amplitude"),
+                                );
+                            }
                         }
 
                         let mut spectrogram_duration = render_settings.spectrogram_duration.as_secs_f64();
