@@ -327,7 +327,7 @@ impl Default for RenderSettings {
             maximum_lightness: 0.82,
             maximum_chroma: 0.09,
             automatic_gain: false,
-            agc_duration: Duration::from_secs_f64(2.0),
+            agc_duration: Duration::from_secs_f64(4.0),
             agc_percentile: 0.99,
             agc_range: 40.0,
             min_db: -72.0,
@@ -975,7 +975,7 @@ pub fn create(
                             let mut agc_duration = render_settings.agc_duration.as_secs_f64();
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut agc_duration, 0.2..=4.0)
+                                    egui::Slider::new(&mut agc_duration, 0.2..=8.0)
                                         .clamping(egui::SliderClamping::Never)
                                         .suffix("s")
                                         .text("Amplitude ranging duration"),
