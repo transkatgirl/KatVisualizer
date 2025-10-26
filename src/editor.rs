@@ -26,7 +26,7 @@ use crate::{
     analyzer::{BetterSpectrogram, map_value_f32},
 };
 
-fn calculate_amplitude_percentile(
+fn calculate_maximum_amplitude_percentile(
     percentile: f32,
     scratchpad: &mut Vec<f32>,
     spectrogram: &BetterSpectrogram,
@@ -35,43 +35,20 @@ fn calculate_amplitude_percentile(
     scratchpad.clear();
     let mut elapsed = Duration::ZERO;
 
-    if percentile == 1.0 {
-        let mut maximum = -f32::INFINITY;
-
-        for row in &spectrogram.data {
-            elapsed += row.duration;
-            if elapsed > length {
-                break;
-            }
-
-            let row_maximum = row
-                .data
-                .iter()
-                .map(|(_, volume)| *volume)
-                .max_by(f32::total_cmp)
-                .unwrap_or(-f32::INFINITY);
-            if row_maximum > maximum {
-                maximum = row_maximum;
-            }
+    for row in &spectrogram.data {
+        elapsed += row.duration;
+        if elapsed > length {
+            break;
         }
 
-        maximum
-    } else {
-        for row in &spectrogram.data {
-            elapsed += row.duration;
-            if elapsed > length {
-                break;
-            }
-
-            scratchpad.extend(row.data.iter().map(|(_, volume)| volume));
-        }
-        scratchpad.voracious_sort();
-
-        let items = scratchpad.len() as f32;
-        let index = (percentile * items).round().clamp(0.0, items - 1.0) as usize;
-
-        scratchpad[index]
+        scratchpad.push(row.maximum_amplitude);
     }
+    scratchpad.voracious_sort();
+
+    let items = scratchpad.len() as f32;
+    let index = (percentile * items).round().clamp(0.0, items - 1.0) as usize;
+
+    scratchpad[index]
 }
 
 fn draw_bargraph(
@@ -350,8 +327,8 @@ impl Default for RenderSettings {
             maximum_lightness: 0.82,
             maximum_chroma: 0.09,
             automatic_gain: false,
-            agc_duration: Duration::from_secs_f64(1.0),
-            agc_percentile: 1.0,
+            agc_duration: Duration::from_secs_f64(2.0),
+            agc_percentile: 0.99,
             agc_range: 40.0,
             min_db: -72.0,
             max_db: -12.0,
@@ -534,8 +511,7 @@ pub fn create(
                 let color_table = &shared_state.color_table.read();
                 let spectrogram_texture = shared_state.spectrogram_texture.read().unwrap();
                 let frequencies = analysis_frequencies.read();
-                let mut agc_scratchpad =
-                    Vec::with_capacity(MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES);
+                let mut agc_scratchpad = Vec::with_capacity(SPECTROGRAM_SLICES);
 
                 let bargraph_bounds = Rect {
                     min: Pos2 { x: 0.0, y: 0.0 },
@@ -582,7 +558,7 @@ pub fn create(
                 let chunk_duration = front.duration;
 
                 if settings.automatic_gain {
-                    max_db = calculate_amplitude_percentile(
+                    max_db = calculate_maximum_amplitude_percentile(
                         settings.agc_percentile,
                         &mut agc_scratchpad,
                         spectrogram,
@@ -1014,7 +990,7 @@ pub fn create(
 
                             if ui.add(
                                 egui::Slider::new(&mut agc_percentile, 0.0..=100.0)
-                                    .fixed_decimals(1)
+                                    .fixed_decimals(0)
                                     .text("Maximum amplitude percentile"),
                             ).changed() {
                                 render_settings.agc_percentile =

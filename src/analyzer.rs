@@ -144,6 +144,7 @@ impl BetterAnalyzer {
 pub struct BetterAnalysis {
     pub duration: Duration,
     pub data: Vec<(f32, f32)>,
+    pub maximum_amplitude: f32,
 }
 
 impl BetterAnalysis {
@@ -151,16 +152,23 @@ impl BetterAnalysis {
         Self {
             duration: Duration::ZERO,
             data: Vec::with_capacity(capacity),
+            maximum_amplitude: f32::NEG_INFINITY,
         }
     }
     pub fn update_stereo(&mut self, left: &[f64], right: &[f64], duration: Duration) {
         let new_length = left.len().min(right.len());
 
+        self.maximum_amplitude = f32::NEG_INFINITY;
+
         if self.data.len() == new_length {
             for (index, (left, right)) in left.iter().zip(right.iter()).enumerate() {
                 let (pan, volume) = calculate_pan_and_volume(*left, *right);
+                let volume = volume as f32;
 
-                self.data[index] = ((pan * 2.0) as f32, volume as f32);
+                self.data[index] = ((pan * 2.0) as f32, volume);
+                if volume > self.maximum_amplitude {
+                    self.maximum_amplitude = volume;
+                }
             }
         } else {
             assert!(self.data.capacity() >= new_length);
@@ -169,8 +177,12 @@ impl BetterAnalysis {
 
             for (left, right) in left.iter().zip(right.iter()) {
                 let (pan, volume) = calculate_pan_and_volume(*left, *right);
+                let volume = volume as f32;
 
-                self.data.push(((pan * 2.0) as f32, volume as f32));
+                self.data.push(((pan * 2.0) as f32, volume));
+                if volume > self.maximum_amplitude {
+                    self.maximum_amplitude = volume;
+                }
             }
         }
 
@@ -179,9 +191,16 @@ impl BetterAnalysis {
     pub fn update_mono(&mut self, data: &[f64], duration: Duration) {
         let new_length = data.len();
 
+        self.maximum_amplitude = f32::NEG_INFINITY;
+
         if self.data.len() == new_length {
             for (index, volume) in data.iter().enumerate() {
-                self.data[index] = (0.0, *volume as f32);
+                let volume = *volume as f32;
+                self.data[index] = (0.0, volume);
+
+                if volume > self.maximum_amplitude {
+                    self.maximum_amplitude = volume;
+                }
             }
         } else {
             assert!(self.data.capacity() >= new_length);
@@ -189,7 +208,12 @@ impl BetterAnalysis {
             self.data.clear();
 
             for volume in data {
-                self.data.push((0.0, *volume as f32));
+                let volume = *volume as f32;
+                self.data.push((0.0, volume));
+
+                if volume > self.maximum_amplitude {
+                    self.maximum_amplitude = volume;
+                }
             }
         }
 
@@ -207,7 +231,8 @@ impl BetterSpectrogram {
             data: VecDeque::from(vec![
                 BetterAnalysis {
                     duration: Duration::from_secs(1),
-                    data: vec![(0.0, -f32::INFINITY); slice_capacity],
+                    data: vec![(0.0, f32::NEG_INFINITY); slice_capacity],
+                    maximum_amplitude: f32::NEG_INFINITY,
                 };
                 length
             ]),
@@ -220,6 +245,8 @@ impl BetterSpectrogram {
             } else {
                 buffer.data.clone_from(&analysis.data);
             }
+            buffer.duration = analysis.duration;
+            buffer.maximum_amplitude = analysis.maximum_amplitude;
         });
     }
     pub fn update_fn<F>(&mut self, callback: F)
