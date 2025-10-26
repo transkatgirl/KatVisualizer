@@ -308,6 +308,7 @@ struct RenderSettings {
     agc_duration: Duration,
     agc_percentile: f32,
     agc_range: f32,
+    agc_minimum: f32,
     min_db: f32,
     max_db: f32,
     bargraph_height: f32,
@@ -327,9 +328,10 @@ impl Default for RenderSettings {
             maximum_lightness: 0.82,
             maximum_chroma: 0.09,
             automatic_gain: false,
-            agc_duration: Duration::from_secs_f64(4.0),
+            agc_duration: Duration::from_secs_f64(3.0),
             agc_percentile: 0.99,
-            agc_range: 40.0,
+            agc_range: 45.0,
+            agc_minimum: -92.0,
             min_db: -72.0,
             max_db: -12.0,
             bargraph_height: 0.33,
@@ -565,7 +567,7 @@ pub fn create(
                         settings.agc_duration,
                     );
 
-                    min_db = max_db - settings.agc_range;
+                    min_db = (max_db - settings.agc_range).max(settings.agc_minimum);
                 }
 
                 if settings.bargraph_height != 0.0 {
@@ -1101,6 +1103,8 @@ pub fn create(
                                     (80.0 - analysis_settings.listening_volume) as f32;
                             render_settings.min_db =
                                     (20.0 - analysis_settings.listening_volume) as f32;
+                            render_settings.agc_minimum =
+                                    (0.0 - analysis_settings.listening_volume) as f32;
                             shared_state.color_table.write().build(
                                 render_settings.left_hue,
                                 render_settings.right_hue,
@@ -1168,25 +1172,26 @@ pub fn create(
                             return;
                         };
 
-                        let old_min_phon =
-                            (render_settings.min_db as f64 + analysis_settings.listening_volume).max(0.0);
-                        let old_max_phon =
-                            (render_settings.max_db as f64 + analysis_settings.listening_volume).min(100.0);
 
-                            if ui
-                                .checkbox(
-                                    &mut analysis_settings.normalize_amplitude,
-                                    "Perform amplitude normalization",
-                                )
-                                .on_hover_text("If this is enabled, amplitude values are normalized using the ISO 226:2023 equal-loudness contours, which map the amplitudes of frequency bins into phons, a psychoacoustic unit of loudness measurement.\nIf this is disabled, amplitude values are not normalized.")
-                                .changed()
-                            {
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            }
+                        if ui
+                            .checkbox(
+                                &mut analysis_settings.normalize_amplitude,
+                                "Perform amplitude normalization",
+                            )
+                            .on_hover_text("If this is enabled, amplitude values are normalized using the ISO 226:2023 equal-loudness contours, which map the amplitudes of frequency bins into phons, a psychoacoustic unit of loudness measurement.\nIf this is disabled, amplitude values are not normalized.")
+                            .changed()
+                        {
+                            update(&analysis_settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        }
 
                         if analysis_settings.normalize_amplitude {
+                            let old_min_phon =
+                                (render_settings.min_db as f64 + analysis_settings.listening_volume).max(0.0);
+                            let old_max_phon =
+                                (render_settings.max_db as f64 + analysis_settings.listening_volume).min(100.0);
+
                             if ui
                                 .add(
                                     egui::Slider::new(&mut analysis_settings.listening_volume, 120.0..=20.0)
@@ -1205,6 +1210,8 @@ pub fn create(
                                         (old_min_phon - analysis_settings.listening_volume) as f32;
                                     render_settings.max_db =
                                         (old_max_phon - analysis_settings.listening_volume) as f32;
+                                    render_settings.agc_minimum =
+                                        (0.0 - analysis_settings.listening_volume) as f32;
                                 } else {
                                     update(&analysis_settings);
                                 }
@@ -1444,9 +1451,11 @@ pub fn create(
                         if ui.button("Reset Analysis Options").clicked() {
                             *analysis_settings = AnalysisChainConfig::default();
                             render_settings.max_db =
-                                    (80.0 - analysis_settings.listening_volume) as f32;
+                                (80.0 - analysis_settings.listening_volume) as f32;
                             render_settings.min_db =
-                                    (20.0 - analysis_settings.listening_volume) as f32;
+                                (20.0 - analysis_settings.listening_volume) as f32;
+                            render_settings.agc_minimum =
+                                (0.0 - analysis_settings.listening_volume) as f32;
                             update_and_clear(&analysis_settings);
                         }
                     });
