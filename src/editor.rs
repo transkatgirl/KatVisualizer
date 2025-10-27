@@ -348,7 +348,7 @@ impl Default for RenderSettings {
             agc_peak_percentile: 0.99,
             agc_above_target: 25.0,
             agc_below_target: 15.0,
-            agc_max_range: 50.0,
+            agc_max_range: 60.0,
             agc_minimum: -92.0,
             min_db: -72.0,
             max_db: -12.0,
