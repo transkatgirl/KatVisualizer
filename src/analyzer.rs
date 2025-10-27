@@ -159,7 +159,7 @@ impl BetterAnalysis {
                     let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
 
                     let volume = normalizer
-                        .spl_to_phon(amplitude_to_dbfs(volume) + gain + listening_volume)
+                        .spl_to_phon(volume + gain + listening_volume)
                         //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                         .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                         - listening_volume;
@@ -208,7 +208,7 @@ impl BetterAnalysis {
                     let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
 
                     let volume = normalizer
-                        .spl_to_phon(amplitude_to_dbfs(volume) + gain + listening_volume)
+                        .spl_to_phon(volume + gain + listening_volume)
                         //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                         .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                         - listening_volume;
