@@ -985,6 +985,8 @@ pub fn create(
                         ui.checkbox(&mut render_settings.automatic_gain, "Automatic amplitude ranging");
 
                         if render_settings.automatic_gain {
+                            let percentile_duration = render_settings.agc_duration.as_secs_f64() * (1.0 - render_settings.agc_peak_percentile as f64);
+
                             let mut agc_duration = render_settings.agc_duration.as_secs_f64();
                             if ui
                                 .add(
@@ -995,15 +997,17 @@ pub fn create(
                                 )
                                 .changed()
                             {
-                                render_settings.agc_duration =
-                                    Duration::from_secs_f64(agc_duration);
+                                if agc_duration > 0.0 {
+                                    render_settings.agc_duration =
+                                        Duration::from_secs_f64(agc_duration);
+                                    render_settings.agc_peak_percentile = (1.0 - (percentile_duration / agc_duration)) as f32;
+                                }
                             };
 
                             let mut agc_peak_percentile = render_settings.agc_peak_percentile * 100.0;
 
                             if ui.add(
                                 egui::Slider::new(&mut agc_peak_percentile, 0.0..=100.0)
-                                    .fixed_decimals(0)
                                     .text("Peak percentile"),
                             ).changed() {
                                 render_settings.agc_peak_percentile =
