@@ -58,10 +58,10 @@ fn calculate_agc_min_max(
     let target = (target_sum / rows as f64) as f32;
 
     (
-        (target - settings.agc_below_target)
-            .max(peak - settings.agc_max_range)
+        (target - settings.agc_below_mean)
+            .max(peak - settings.agc_max_peak_range)
             .max(settings.agc_minimum),
-        (target + settings.agc_above_target).max(peak),
+        (target + settings.agc_above_mean).max(peak),
     )
 }
 
@@ -321,9 +321,9 @@ struct RenderSettings {
     automatic_gain: bool,
     agc_duration: Duration,
     agc_peak_percentile: f32,
-    agc_above_target: f32,
-    agc_below_target: f32,
-    agc_max_range: f32,
+    agc_max_peak_range: f32,
+    agc_above_mean: f32,
+    agc_below_mean: f32,
     agc_minimum: f32,
     min_db: f32,
     max_db: f32,
@@ -346,9 +346,9 @@ impl Default for RenderSettings {
             automatic_gain: false,
             agc_duration: Duration::from_secs_f64(3.0),
             agc_peak_percentile: 0.99,
-            agc_above_target: 25.0,
-            agc_below_target: 15.0,
-            agc_max_range: 60.0,
+            agc_max_peak_range: 60.0,
+            agc_above_mean: 25.0,
+            agc_below_mean: 15.0,
             agc_minimum: -92.0,
             min_db: -72.0,
             max_db: -12.0,
@@ -1012,30 +1012,30 @@ pub fn create(
                             }
 
                             ui.add(
-                                egui::Slider::new(&mut render_settings.agc_above_target, 0.0..=100.0)
+                                egui::Slider::new(&mut render_settings.agc_max_peak_range, 0.0..=100.0)
                                     .clamping(egui::SliderClamping::Never)
                                     .suffix("dB")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
-                                    .text("Minimum range above target"),
+                                    .text("Maximum range below peak"),
                             );
 
                             ui.add(
-                                egui::Slider::new(&mut render_settings.agc_below_target, 0.0..=100.0)
+                                egui::Slider::new(&mut render_settings.agc_above_mean, 0.0..=100.0)
                                     .clamping(egui::SliderClamping::Never)
                                     .suffix("dB")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
-                                    .text("Range below target"),
+                                    .text("Minimum range above mean"),
                             );
 
                             ui.add(
-                                egui::Slider::new(&mut render_settings.agc_max_range, 0.0..=100.0)
+                                egui::Slider::new(&mut render_settings.agc_below_mean, 0.0..=100.0)
                                     .clamping(egui::SliderClamping::Never)
                                     .suffix("dB")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
-                                    .text("Maximum dynamic range"),
+                                    .text("Range below mean"),
                             );
                         } else {
                             if analysis_settings.normalize_amplitude {
