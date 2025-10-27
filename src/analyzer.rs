@@ -390,13 +390,15 @@ pub fn calculate_pan_and_volume_from_amplitude(
     left_amplitude: f64,
     right_amplitude: f64,
 ) -> (f64, f64) {
-    let mut ratio = left_amplitude / right_amplitude;
-
-    if ratio.is_nan() {
-        ratio = 1.0;
-    }
+    let ratio = left_amplitude / right_amplitude;
 
     let pan = if ratio == 1.0 {
+        0.0
+    } else if left_amplitude == 0.0 && right_amplitude > 0.0 {
+        0.5
+    } else if right_amplitude == 0.0 && left_amplitude > 0.0 {
+        -0.5
+    } else if ratio.is_nan() {
         0.0
     } else {
         (f64::atan(
