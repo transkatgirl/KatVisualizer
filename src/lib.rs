@@ -251,7 +251,7 @@ impl Default for AnalysisChainConfig {
     fn default() -> Self {
         Self {
             gain: 0.0,
-            listening_volume: 92.0,
+            listening_volume: 85.0,
             normalize_amplitude: true,
             internal_buffering: true,
             update_rate_hz: 1024.0,

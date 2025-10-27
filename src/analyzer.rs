@@ -292,7 +292,10 @@ pub fn calculate_pan_and_volume(left_db: f64, right_db: f64) -> (f64, f64) {
             / 45.0
     };
 
-    (pan, amplitude_to_dbfs(left_amplitude + right_amplitude))
+    (
+        pan,
+        amplitude_to_dbfs((left_amplitude + right_amplitude) / 2.0),
+    )
 }
 
 // ----- Below formulas are taken from ISO 226:2023 -----
