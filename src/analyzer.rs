@@ -106,37 +106,8 @@ impl BetterAnalyzer {
     pub fn clear_buffers(&mut self) {
         self.transform.reset();
     }
-    pub fn analyze(
-        &mut self,
-        samples: impl Iterator<Item = f64>,
-        gain: f64,
-        normalization_volume: Option<f64>,
-    ) -> &[f64] {
+    pub fn analyze(&mut self, samples: impl Iterator<Item = f64>) {
         self.transform.analyze(samples);
-
-        if let Some(listening_volume) = normalization_volume {
-            for (output, normalizer) in self
-                .transform
-                .spectrum_data
-                .iter_mut()
-                .zip(self.normalizers.iter())
-            {
-                *output = normalizer
-                    .spl_to_phon(amplitude_to_dbfs(*output) + gain + listening_volume)
-                    //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                    .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                    - listening_volume
-            }
-        } else {
-            for output in self.transform.spectrum_data.iter_mut() {
-                *output = amplitude_to_dbfs(*output) + gain
-            }
-        }
-
-        &self.transform.spectrum_data
-    }
-    pub fn last_analysis(&self) -> &[f64] {
-        &self.transform.spectrum_data
     }
 }
 
@@ -157,21 +128,68 @@ impl BetterAnalysis {
             max: f32::NEG_INFINITY,
         }
     }
-    pub fn update_stereo(&mut self, left: &[f64], right: &[f64], duration: Duration) {
-        let new_length = left.len().min(right.len());
+    pub fn update_stereo(
+        &mut self,
+        left: &BetterAnalyzer,
+        right: &BetterAnalyzer,
+        gain: f64,
+        normalization_volume: Option<f64>,
+        duration: Duration,
+    ) {
+        assert_eq!(
+            left.transform.spectrum_data.len(),
+            right.transform.spectrum_data.len()
+        );
+
+        let new_length = left.transform.spectrum_data.len();
 
         let mut sum = 0.0;
         self.max = f32::NEG_INFINITY;
 
         if self.data.len() == new_length {
-            for (index, (left, right)) in left.iter().zip(right.iter()).enumerate() {
-                let (pan, volume) = calculate_pan_and_volume(*left, *right);
-                sum += dbfs_to_amplitude(volume);
-                let volume = volume as f32;
+            if let Some(listening_volume) = normalization_volume {
+                for (index, ((left, right), normalizer)) in left
+                    .transform
+                    .spectrum_data
+                    .iter()
+                    .zip(right.transform.spectrum_data.iter())
+                    .zip(left.normalizers.iter())
+                    .enumerate()
+                {
+                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
 
-                self.data[index] = ((pan * 2.0) as f32, volume);
-                if volume > self.max {
-                    self.max = volume;
+                    let volume = normalizer
+                        .spl_to_phon(amplitude_to_dbfs(volume) + gain + listening_volume)
+                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                        .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                        - listening_volume;
+
+                    sum += dbfs_to_amplitude(volume);
+                    let volume = volume as f32;
+
+                    self.data[index] = ((pan * 2.0) as f32, volume);
+                    if volume > self.max {
+                        self.max = volume;
+                    }
+                }
+            } else {
+                for (index, (left, right)) in left
+                    .transform
+                    .spectrum_data
+                    .iter()
+                    .zip(right.transform.spectrum_data.iter())
+                    .enumerate()
+                {
+                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
+                    let volume = volume + gain;
+
+                    sum += dbfs_to_amplitude(volume);
+                    let volume = volume as f32;
+
+                    self.data[index] = ((pan * 2.0) as f32, volume);
+                    if volume > self.max {
+                        self.max = volume;
+                    }
                 }
             }
         } else {
@@ -179,14 +197,47 @@ impl BetterAnalysis {
 
             self.data.clear();
 
-            for (left, right) in left.iter().zip(right.iter()) {
-                let (pan, volume) = calculate_pan_and_volume(*left, *right);
-                sum += dbfs_to_amplitude(volume);
-                let volume = volume as f32;
+            if let Some(listening_volume) = normalization_volume {
+                for ((left, right), normalizer) in left
+                    .transform
+                    .spectrum_data
+                    .iter()
+                    .zip(right.transform.spectrum_data.iter())
+                    .zip(left.normalizers.iter())
+                {
+                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
 
-                self.data.push(((pan * 2.0) as f32, volume));
-                if volume > self.max {
-                    self.max = volume;
+                    let volume = normalizer
+                        .spl_to_phon(amplitude_to_dbfs(volume) + gain + listening_volume)
+                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                        .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                        - listening_volume;
+
+                    sum += dbfs_to_amplitude(volume);
+                    let volume = volume as f32;
+
+                    self.data.push(((pan * 2.0) as f32, volume));
+                    if volume > self.max {
+                        self.max = volume;
+                    }
+                }
+            } else {
+                for (left, right) in left
+                    .transform
+                    .spectrum_data
+                    .iter()
+                    .zip(right.transform.spectrum_data.iter())
+                {
+                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
+                    let volume = volume + gain;
+
+                    sum += dbfs_to_amplitude(volume);
+                    let volume = volume as f32;
+
+                    self.data.push(((pan * 2.0) as f32, volume));
+                    if volume > self.max {
+                        self.max = volume;
+                    }
                 }
             }
         }
@@ -195,22 +246,52 @@ impl BetterAnalysis {
 
         self.duration = duration;
     }
-    pub fn update_mono(&mut self, data: &[f64], duration: Duration) {
-        let new_length = data.len();
+    pub fn update_mono(
+        &mut self,
+        center: &BetterAnalyzer,
+        gain: f64,
+        normalization_volume: Option<f64>,
+        duration: Duration,
+    ) {
+        let new_length = center.transform.spectrum_data.len();
 
         let mut sum = 0.0;
         self.max = f32::NEG_INFINITY;
 
         if self.data.len() == new_length {
-            for (index, volume) in data.iter().enumerate() {
-                let volume = {
-                    let compensated_amplitude = dbfs_to_amplitude(*volume) * 2.0;
-                    sum += compensated_amplitude;
-                    amplitude_to_dbfs(compensated_amplitude) as f32
-                };
-                self.data[index] = (0.0, volume);
-                if volume > self.max {
-                    self.max = volume;
+            if let Some(listening_volume) = normalization_volume {
+                for (index, (amplitude, normalizer)) in center
+                    .transform
+                    .spectrum_data
+                    .iter()
+                    .zip(center.normalizers.iter())
+                    .enumerate()
+                {
+                    let volume = normalizer
+                        .spl_to_phon(amplitude_to_dbfs(*amplitude * 2.0) + gain + listening_volume)
+                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                        .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                        - listening_volume;
+
+                    sum += dbfs_to_amplitude(volume);
+                    let volume = volume as f32;
+
+                    self.data[index] = (0.0, volume);
+                    if volume > self.max {
+                        self.max = volume;
+                    }
+                }
+            } else {
+                for (index, amplitude) in center.transform.spectrum_data.iter().enumerate() {
+                    let volume = amplitude_to_dbfs(*amplitude * 2.0) + gain;
+
+                    sum += dbfs_to_amplitude(volume);
+                    let volume = volume as f32;
+
+                    self.data[index] = (0.0, volume);
+                    if volume > self.max {
+                        self.max = volume;
+                    }
                 }
             }
         } else {
@@ -218,15 +299,38 @@ impl BetterAnalysis {
 
             self.data.clear();
 
-            for volume in data {
-                let volume = {
-                    let compensated_amplitude = dbfs_to_amplitude(*volume) * 2.0;
-                    sum += compensated_amplitude;
-                    amplitude_to_dbfs(compensated_amplitude) as f32
-                };
-                self.data.push((0.0, volume));
-                if volume > self.max {
-                    self.max = volume;
+            if let Some(listening_volume) = normalization_volume {
+                for (amplitude, normalizer) in center
+                    .transform
+                    .spectrum_data
+                    .iter()
+                    .zip(center.normalizers.iter())
+                {
+                    let volume = normalizer
+                        .spl_to_phon(amplitude_to_dbfs(*amplitude * 2.0) + gain + listening_volume)
+                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                        .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                        - listening_volume;
+
+                    sum += dbfs_to_amplitude(volume);
+                    let volume = volume as f32;
+
+                    self.data.push((0.0, volume));
+                    if volume > self.max {
+                        self.max = volume;
+                    }
+                }
+            } else {
+                for amplitude in center.transform.spectrum_data.iter() {
+                    let volume = amplitude_to_dbfs(*amplitude * 2.0) + gain;
+
+                    sum += dbfs_to_amplitude(volume);
+                    let volume = volume as f32;
+
+                    self.data.push((0.0, volume));
+                    if volume > self.max {
+                        self.max = volume;
+                    }
                 }
             }
         }
@@ -282,10 +386,10 @@ impl BetterSpectrogram {
 
 // ----- Below formula is based on https://stackoverflow.com/a/35614871 -----
 
-pub fn calculate_pan_and_volume(left_db: f64, right_db: f64) -> (f64, f64) {
-    let left_amplitude = dbfs_to_amplitude(left_db);
-    let right_amplitude = dbfs_to_amplitude(right_db);
-
+pub fn calculate_pan_and_volume_from_amplitude(
+    left_amplitude: f64,
+    right_amplitude: f64,
+) -> (f64, f64) {
     let ratio = left_amplitude / right_amplitude;
 
     let pan = if ratio == 1.0 {

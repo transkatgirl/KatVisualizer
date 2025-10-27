@@ -251,7 +251,7 @@ impl Default for AnalysisChainConfig {
     fn default() -> Self {
         Self {
             gain: 0.0,
-            listening_volume: 85.0,
+            listening_volume: 86.0,
             normalize_amplitude: true,
             internal_buffering: true,
             update_rate_hz: 1024.0,
@@ -366,11 +366,7 @@ impl AnalysisChain {
                         let mut lock = self.left_analyzer.lock();
                         let (ref _buffer, ref mut analyzer) = *lock;
 
-                        analyzer.analyze(
-                            buffer.iter().map(|s| *s as f64),
-                            self.gain,
-                            self.listening_volume,
-                        );
+                        analyzer.analyze(buffer.iter().map(|s| *s as f64));
                     } else {
                         let analyzer = if channel_idx == 0 {
                             self.left_analyzer.clone()
@@ -379,18 +375,12 @@ impl AnalysisChain {
                         };
 
                         analyzer.lock().0.copy_from_slice(buffer);
-                        let gain = self.gain;
-                        let listening_volume = self.listening_volume;
 
                         self.pool.execute(move || {
                             let mut lock = analyzer.lock();
                             let (ref mut buffer, ref mut analyzer) = *lock;
 
-                            analyzer.analyze(
-                                buffer.iter().map(|s| *s as f64),
-                                gain,
-                                listening_volume,
-                            );
+                            analyzer.analyze(buffer.iter().map(|s| *s as f64));
                         });
                     }
 
@@ -400,16 +390,23 @@ impl AnalysisChain {
                         self.pool.join();
                         let left_lock = self.left_analyzer.lock();
                         let right_lock = self.right_analyzer.lock();
-                        let left_output = left_lock.1.last_analysis();
-                        let right_output = right_lock.1.last_analysis();
+                        let left_analyzer = &left_lock.1;
+                        let right_analyzer = &right_lock.1;
 
                         spectrogram.update_fn(|analysis_output| {
                             if self.single_input {
-                                analysis_output.update_mono(left_output, self.chunk_duration);
+                                analysis_output.update_mono(
+                                    left_analyzer,
+                                    self.gain,
+                                    self.listening_volume,
+                                    self.chunk_duration,
+                                );
                             } else {
                                 analysis_output.update_stereo(
-                                    left_output,
-                                    right_output,
+                                    left_analyzer,
+                                    right_analyzer,
+                                    self.gain,
+                                    self.listening_volume,
                                     self.chunk_duration,
                                 );
                             }
@@ -427,11 +424,7 @@ impl AnalysisChain {
                 let mut lock = self.left_analyzer.lock();
                 let (ref _buffer, ref mut analyzer) = *lock;
 
-                analyzer.analyze(
-                    buffer.as_slice()[0].iter().map(|s| *s as f64),
-                    self.gain,
-                    self.listening_volume,
-                );
+                analyzer.analyze(buffer.as_slice()[0].iter().map(|s| *s as f64));
             } else {
                 for (channel_idx, buffer) in buffer.as_slice().iter().enumerate() {
                     let analyzer = if channel_idx == 0 {
@@ -450,14 +443,11 @@ impl AnalysisChain {
                         }
                     }
 
-                    let gain = self.gain;
-                    let listening_volume = self.listening_volume;
-
                     self.pool.execute(move || {
                         let mut lock = analyzer.lock();
                         let (ref mut buffer, ref mut analyzer) = *lock;
 
-                        analyzer.analyze(buffer.iter().map(|s| *s as f64), gain, listening_volume);
+                        analyzer.analyze(buffer.iter().map(|s| *s as f64));
                     });
                 }
             }
@@ -470,14 +460,25 @@ impl AnalysisChain {
             self.pool.join();
             let left_lock = self.left_analyzer.lock();
             let right_lock = self.right_analyzer.lock();
-            let left_output = left_lock.1.last_analysis();
-            let right_output = right_lock.1.last_analysis();
+            let left_analyzer = &left_lock.1;
+            let right_analyzer = &right_lock.1;
 
             spectrogram.update_fn(|analysis_output| {
                 if self.single_input {
-                    analysis_output.update_mono(left_output, chunk_duration);
+                    analysis_output.update_mono(
+                        left_analyzer,
+                        self.gain,
+                        self.listening_volume,
+                        chunk_duration,
+                    );
                 } else {
-                    analysis_output.update_stereo(left_output, right_output, chunk_duration);
+                    analysis_output.update_stereo(
+                        left_analyzer,
+                        right_analyzer,
+                        self.gain,
+                        self.listening_volume,
+                        chunk_duration,
+                    );
                 }
             });
 
