@@ -203,8 +203,11 @@ impl BetterAnalysis {
 
         if self.data.len() == new_length {
             for (index, volume) in data.iter().enumerate() {
-                sum += dbfs_to_amplitude(*volume);
-                let volume = *volume as f32;
+                let volume = {
+                    let compensated_amplitude = dbfs_to_amplitude(*volume) * 2.0;
+                    sum += compensated_amplitude;
+                    amplitude_to_dbfs(compensated_amplitude) as f32
+                };
                 self.data[index] = (0.0, volume);
                 if volume > self.max {
                     self.max = volume;
@@ -216,8 +219,11 @@ impl BetterAnalysis {
             self.data.clear();
 
             for volume in data {
-                sum += dbfs_to_amplitude(*volume);
-                let volume = *volume as f32;
+                let volume = {
+                    let compensated_amplitude = dbfs_to_amplitude(*volume) * 2.0;
+                    sum += compensated_amplitude;
+                    amplitude_to_dbfs(compensated_amplitude) as f32
+                };
                 self.data.push((0.0, volume));
                 if volume > self.max {
                     self.max = volume;
@@ -292,10 +298,7 @@ pub fn calculate_pan_and_volume(left_db: f64, right_db: f64) -> (f64, f64) {
             / 45.0
     };
 
-    (
-        pan,
-        amplitude_to_dbfs((left_amplitude + right_amplitude) / 2.0),
-    )
+    (pan, amplitude_to_dbfs(left_amplitude + right_amplitude))
 }
 
 // ----- Below formulas are taken from ISO 226:2023 -----
