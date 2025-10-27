@@ -34,24 +34,37 @@ fn calculate_agc_min_max(
     scratchpad.clear();
     let mut elapsed = Duration::ZERO;
 
+    let mut target_sum = 0.0;
+
     for row in &spectrogram.data {
         elapsed += row.duration;
         if elapsed > settings.agc_duration {
             break;
         }
 
+        let sorted_items = row.sorted.len() as f32;
+        let target_index = (settings.agc_target_percentile * sorted_items)
+            .round()
+            .clamp(0.0, sorted_items - 1.0) as usize;
+        target_sum += row.sorted[target_index] as f64;
+
         scratchpad.push(*row.sorted.last().unwrap());
     }
     scratchpad.voracious_sort();
 
-    let items = scratchpad.len() as f32;
-    let index = (settings.agc_percentile * items)
+    let rows = scratchpad.len() as f32;
+
+    let peak_index = (settings.agc_peak_percentile * rows)
         .round()
-        .clamp(0.0, items - 1.0) as usize;
+        .clamp(0.0, rows - 1.0) as usize;
+    let peak = scratchpad[peak_index];
+    let target = (target_sum / rows as f64) as f32;
 
     (
-        (scratchpad[index] - settings.agc_range).max(settings.agc_minimum),
-        scratchpad[index],
+        (target - settings.agc_below_target)
+            .max(peak - settings.agc_max_range)
+            .max(settings.agc_minimum),
+        (target + settings.agc_above_target).max(peak),
     )
 }
 
@@ -310,8 +323,11 @@ struct RenderSettings {
     maximum_chroma: f32,
     automatic_gain: bool,
     agc_duration: Duration,
-    agc_percentile: f32,
-    agc_range: f32,
+    agc_peak_percentile: f32,
+    agc_target_percentile: f32,
+    agc_above_target: f32,
+    agc_below_target: f32,
+    agc_max_range: f32,
     agc_minimum: f32,
     min_db: f32,
     max_db: f32,
@@ -333,8 +349,11 @@ impl Default for RenderSettings {
             maximum_chroma: 0.09,
             automatic_gain: false,
             agc_duration: Duration::from_secs_f64(3.0),
-            agc_percentile: 0.99,
-            agc_range: 45.0,
+            agc_peak_percentile: 0.99,
+            agc_target_percentile: 0.5,
+            agc_above_target: 30.0,
+            agc_below_target: 20.0,
+            agc_max_range: 50.0,
             agc_minimum: -92.0,
             min_db: -72.0,
             max_db: -12.0,
@@ -986,24 +1005,53 @@ pub fn create(
                                     Duration::from_secs_f64(agc_duration);
                             };
 
-                            let mut agc_percentile = render_settings.agc_percentile * 100.0;
+                            let mut agc_peak_percentile = render_settings.agc_peak_percentile * 100.0;
 
                             if ui.add(
-                                egui::Slider::new(&mut agc_percentile, 0.0..=100.0)
+                                egui::Slider::new(&mut agc_peak_percentile, 0.0..=100.0)
                                     .fixed_decimals(0)
-                                    .text("Maximum amplitude percentile"),
+                                    .text("Peak percentile"),
                             ).changed() {
-                                render_settings.agc_percentile =
-                                    agc_percentile / 100.0;
+                                render_settings.agc_peak_percentile =
+                                    agc_peak_percentile / 100.0;
+                            }
+
+                            let mut agc_target_percentile = render_settings.agc_target_percentile * 100.0;
+
+                            if ui.add(
+                                egui::Slider::new(&mut agc_target_percentile, 0.0..=100.0)
+                                    .fixed_decimals(0)
+                                    .text("Target percentile"),
+                            ).changed() {
+                                render_settings.agc_target_percentile =
+                                    agc_target_percentile / 100.0;
                             }
 
                             ui.add(
-                                egui::Slider::new(&mut render_settings.agc_range, 10.0..=100.0)
+                                egui::Slider::new(&mut render_settings.agc_above_target, 0.0..=100.0)
                                     .clamping(egui::SliderClamping::Never)
                                     .suffix("dB")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
-                                    .text("Amplitude range"),
+                                    .text("Minimum range above target"),
+                            );
+
+                            ui.add(
+                                egui::Slider::new(&mut render_settings.agc_below_target, 0.0..=100.0)
+                                    .clamping(egui::SliderClamping::Never)
+                                    .suffix("dB")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Range below target"),
+                            );
+
+                            ui.add(
+                                egui::Slider::new(&mut render_settings.agc_max_range, 0.0..=100.0)
+                                    .clamping(egui::SliderClamping::Never)
+                                    .suffix("dB")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Maximum dynamic range"),
                             );
                         } else {
                             if analysis_settings.normalize_amplitude {
