@@ -26,8 +26,6 @@ use crate::{
     analyzer::{BetterSpectrogram, map_value_f32},
 };
 
-// TODO: do something similar to BS.1770?
-
 fn calculate_agc_min_max(
     settings: &RenderSettings,
     scratchpad: &mut Vec<f32>,
@@ -44,13 +42,10 @@ fn calculate_agc_min_max(
             break;
         }
 
-        let sorted_items = row.sorted.len() as f32;
-        let target_index = (settings.agc_target_percentile * sorted_items)
-            .round()
-            .clamp(0.0, sorted_items - 1.0) as usize;
-        target_sum += row.sorted[target_index] as f64;
-
-        scratchpad.push(*row.sorted.last().unwrap());
+        if row.mean.is_finite() {
+            target_sum += row.mean as f64;
+            scratchpad.push(row.max);
+        }
     }
     scratchpad.voracious_sort();
 
@@ -326,7 +321,6 @@ struct RenderSettings {
     automatic_gain: bool,
     agc_duration: Duration,
     agc_peak_percentile: f32,
-    agc_target_percentile: f32,
     agc_above_target: f32,
     agc_below_target: f32,
     agc_max_range: f32,
@@ -352,9 +346,8 @@ impl Default for RenderSettings {
             automatic_gain: false,
             agc_duration: Duration::from_secs_f64(3.0),
             agc_peak_percentile: 0.99,
-            agc_target_percentile: 0.5,
             agc_above_target: 30.0,
-            agc_below_target: 20.0,
+            agc_below_target: 10.0,
             agc_max_range: 50.0,
             agc_minimum: -92.0,
             min_db: -72.0,
@@ -1016,17 +1009,6 @@ pub fn create(
                             ).changed() {
                                 render_settings.agc_peak_percentile =
                                     agc_peak_percentile / 100.0;
-                            }
-
-                            let mut agc_target_percentile = render_settings.agc_target_percentile * 100.0;
-
-                            if ui.add(
-                                egui::Slider::new(&mut agc_target_percentile, 0.0..=100.0)
-                                    .fixed_decimals(0)
-                                    .text("Target percentile"),
-                            ).changed() {
-                                render_settings.agc_target_percentile =
-                                    agc_target_percentile / 100.0;
                             }
 
                             ui.add(
