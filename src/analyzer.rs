@@ -390,7 +390,11 @@ pub fn calculate_pan_and_volume_from_amplitude(
     left_amplitude: f64,
     right_amplitude: f64,
 ) -> (f64, f64) {
-    let ratio = left_amplitude / right_amplitude;
+    let mut ratio = left_amplitude / right_amplitude;
+
+    if ratio.is_nan() {
+        ratio = 1.0;
+    }
 
     let pan = if ratio == 1.0 {
         0.0
