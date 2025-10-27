@@ -2,7 +2,6 @@
 #![allow(clippy::collapsible_else_if)]
 
 use color::{ColorSpaceTag, DynamicColor, Flags, Rgba8, Srgb};
-use core::f32;
 use ndarray::Array2;
 use nih_plug::prelude::*;
 use nih_plug_egui::{
