@@ -26,29 +26,33 @@ use crate::{
     analyzer::{BetterSpectrogram, map_value_f32},
 };
 
-fn calculate_maximum_amplitude_percentile(
-    percentile: f32,
+fn calculate_agc_min_max(
+    settings: &RenderSettings,
     scratchpad: &mut Vec<f32>,
     spectrogram: &BetterSpectrogram,
-    length: Duration,
-) -> f32 {
+) -> (f32, f32) {
     scratchpad.clear();
     let mut elapsed = Duration::ZERO;
 
     for row in &spectrogram.data {
         elapsed += row.duration;
-        if elapsed > length {
+        if elapsed > settings.agc_duration {
             break;
         }
 
-        scratchpad.push(row.maximum_amplitude);
+        scratchpad.push(*row.sorted.last().unwrap());
     }
     scratchpad.voracious_sort();
 
     let items = scratchpad.len() as f32;
-    let index = (percentile * items).round().clamp(0.0, items - 1.0) as usize;
+    let index = (settings.agc_percentile * items)
+        .round()
+        .clamp(0.0, items - 1.0) as usize;
 
-    scratchpad[index]
+    (
+        (scratchpad[index] - settings.agc_range).max(settings.agc_minimum),
+        scratchpad[index],
+    )
 }
 
 fn draw_bargraph(
@@ -560,14 +564,8 @@ pub fn create(
                 let chunk_duration = front.duration;
 
                 if settings.automatic_gain {
-                    max_db = calculate_maximum_amplitude_percentile(
-                        settings.agc_percentile,
-                        &mut agc_scratchpad,
-                        spectrogram,
-                        settings.agc_duration,
-                    );
-
-                    min_db = (max_db - settings.agc_range).max(settings.agc_minimum);
+                    (min_db, max_db) =
+                        calculate_agc_min_max(&settings, &mut agc_scratchpad, spectrogram);
                 }
 
                 if settings.bargraph_height != 0.0 {
@@ -1103,8 +1101,13 @@ pub fn create(
                                     (80.0 - analysis_settings.listening_volume) as f32;
                             render_settings.min_db =
                                     (20.0 - analysis_settings.listening_volume) as f32;
-                            render_settings.agc_minimum =
+                            if analysis_settings.normalize_amplitude {
+                                render_settings.agc_minimum =
                                     (0.0 - analysis_settings.listening_volume) as f32;
+                            } else {
+                                render_settings.agc_minimum =
+                                    f32::NEG_INFINITY;
+                            }
                             shared_state.color_table.write().build(
                                 render_settings.left_hue,
                                 render_settings.right_hue,
@@ -1182,6 +1185,13 @@ pub fn create(
                             .changed()
                         {
                             update(&analysis_settings);
+                            if analysis_settings.normalize_amplitude {
+                                render_settings.agc_minimum =
+                                    (0.0 - analysis_settings.listening_volume) as f32;
+                            } else {
+                                render_settings.agc_minimum =
+                                    f32::NEG_INFINITY;
+                            }
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
@@ -1204,17 +1214,15 @@ pub fn create(
                                 .on_hover_text("When normalizing amplitude values using an equal-loudness contour, a reference value is necessary to convert dBFS into dB SPL.\nIn order to improve the accuracy of amplitude normalization and receive accurate phon values, this value should be set to the dB SPL value corresponding to 0 dBFS on your system.")
                                 .changed()
                             {
-                                if analysis_settings.normalize_amplitude {
-                                    update_and_clear(&analysis_settings);
-                                    render_settings.min_db =
-                                        (old_min_phon - analysis_settings.listening_volume) as f32;
-                                    render_settings.max_db =
-                                        (old_max_phon - analysis_settings.listening_volume) as f32;
-                                    render_settings.agc_minimum =
-                                        (0.0 - analysis_settings.listening_volume) as f32;
-                                } else {
-                                    update(&analysis_settings);
-                                }
+                                update_and_clear(&analysis_settings);
+                                render_settings.min_db =
+                                    (old_min_phon - analysis_settings.listening_volume) as f32;
+                                render_settings.max_db =
+                                    (old_max_phon - analysis_settings.listening_volume) as f32;
+                                render_settings.agc_minimum =
+                                    (0.0 - analysis_settings.listening_volume) as f32;
+
+                                update(&analysis_settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
                             };

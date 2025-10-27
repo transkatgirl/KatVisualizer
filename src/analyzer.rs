@@ -1,6 +1,7 @@
 use std::{collections::VecDeque, f64::consts::PI, time::Duration};
 
 use serde::{Deserialize, Serialize};
+use voracious_radix_sort::RadixSort;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BetterAnalyzerConfiguration {
@@ -144,7 +145,7 @@ impl BetterAnalyzer {
 pub struct BetterAnalysis {
     pub duration: Duration,
     pub data: Vec<(f32, f32)>,
-    pub maximum_amplitude: f32,
+    pub sorted: Vec<f32>,
 }
 
 impl BetterAnalysis {
@@ -152,13 +153,11 @@ impl BetterAnalysis {
         Self {
             duration: Duration::ZERO,
             data: Vec::with_capacity(capacity),
-            maximum_amplitude: f32::NEG_INFINITY,
+            sorted: Vec::with_capacity(capacity),
         }
     }
     pub fn update_stereo(&mut self, left: &[f64], right: &[f64], duration: Duration) {
         let new_length = left.len().min(right.len());
-
-        self.maximum_amplitude = f32::NEG_INFINITY;
 
         if self.data.len() == new_length {
             for (index, (left, right)) in left.iter().zip(right.iter()).enumerate() {
@@ -166,56 +165,50 @@ impl BetterAnalysis {
                 let volume = volume as f32;
 
                 self.data[index] = ((pan * 2.0) as f32, volume);
-                if volume > self.maximum_amplitude {
-                    self.maximum_amplitude = volume;
-                }
+                self.sorted[index] = volume;
             }
         } else {
             assert!(self.data.capacity() >= new_length);
 
             self.data.clear();
+            self.sorted.clear();
 
             for (left, right) in left.iter().zip(right.iter()) {
                 let (pan, volume) = calculate_pan_and_volume(*left, *right);
                 let volume = volume as f32;
 
                 self.data.push(((pan * 2.0) as f32, volume));
-                if volume > self.maximum_amplitude {
-                    self.maximum_amplitude = volume;
-                }
+                self.sorted.push(volume);
             }
         }
+
+        self.sorted.voracious_sort();
 
         self.duration = duration;
     }
     pub fn update_mono(&mut self, data: &[f64], duration: Duration) {
         let new_length = data.len();
 
-        self.maximum_amplitude = f32::NEG_INFINITY;
-
         if self.data.len() == new_length {
             for (index, volume) in data.iter().enumerate() {
                 let volume = *volume as f32;
                 self.data[index] = (0.0, volume);
-
-                if volume > self.maximum_amplitude {
-                    self.maximum_amplitude = volume;
-                }
+                self.sorted[index] = volume;
             }
         } else {
             assert!(self.data.capacity() >= new_length);
 
             self.data.clear();
+            self.sorted.clear();
 
             for volume in data {
                 let volume = *volume as f32;
                 self.data.push((0.0, volume));
-
-                if volume > self.maximum_amplitude {
-                    self.maximum_amplitude = volume;
-                }
+                self.sorted.push(volume);
             }
         }
+
+        self.sorted.voracious_sort();
 
         self.duration = duration;
     }
@@ -232,7 +225,7 @@ impl BetterSpectrogram {
                 BetterAnalysis {
                     duration: Duration::from_secs(1),
                     data: vec![(0.0, f32::NEG_INFINITY); slice_capacity],
-                    maximum_amplitude: f32::NEG_INFINITY,
+                    sorted: vec![f32::NEG_INFINITY; slice_capacity],
                 };
                 length
             ]),
@@ -242,11 +235,12 @@ impl BetterSpectrogram {
         self.update_fn(|buffer| {
             if buffer.data.len() == analysis.data.len() {
                 buffer.data.copy_from_slice(&analysis.data);
+                buffer.sorted.copy_from_slice(&analysis.sorted);
             } else {
                 buffer.data.clone_from(&analysis.data);
+                buffer.sorted.clone_from(&analysis.sorted);
             }
             buffer.duration = analysis.duration;
-            buffer.maximum_amplitude = analysis.maximum_amplitude;
         });
     }
     pub fn update_fn<F>(&mut self, callback: F)
