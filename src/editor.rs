@@ -1254,7 +1254,6 @@ pub fn create(
                                 render_settings.agc_minimum =
                                     (0.0 - analysis_settings.listening_volume) as f32;
 
-                                update(&analysis_settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
                             };
