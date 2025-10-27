@@ -26,6 +26,8 @@ use crate::{
     analyzer::{BetterSpectrogram, map_value_f32},
 };
 
+// TODO: do something similar to BS.1770?
+
 fn calculate_agc_min_max(
     settings: &RenderSettings,
     scratchpad: &mut Vec<f32>,
