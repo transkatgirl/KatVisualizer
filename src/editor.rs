@@ -1038,7 +1038,7 @@ pub fn create(
                                     .suffix("dB")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
-                                    .text("Range below mean"),
+                                    .text("Maximum range below mean"),
                             );
                         } else {
                             if analysis_settings.normalize_amplitude {
