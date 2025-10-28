@@ -259,8 +259,6 @@ impl Plugin for MyPlugin {
                 value: 0.0,
             });
             self.midi_poly_on = false;
-            self.midi_notes_on = false;
-            self.midi_notes = [false; 128];
             self.midi_volume_changed = false;
             self.midi_needs_reset = false;
         }
@@ -273,6 +271,8 @@ impl Plugin for MyPlugin {
                 cc: POLY_MODE_ON,
                 value: 0.0,
             });
+            self.midi_notes_on = false;
+            self.midi_notes = [false; 128];
             self.midi_poly_on = true;
         }
 
@@ -305,7 +305,7 @@ impl Plugin for MyPlugin {
                         });
 
                         if self.midi_notes[note] {
-                            context.send_event(NoteEvent::NoteOff {
+                            /*context.send_event(NoteEvent::NoteOff {
                                 timing: buffer.timing,
                                 voice_id: None,
                                 channel: 0,
@@ -318,14 +318,14 @@ impl Plugin for MyPlugin {
                                 channel: 0,
                                 note: note as u8,
                                 velocity: pressures[note],
-                            });
-                            /*context.send_event(NoteEvent::PolyPressure {
+                            });*/
+                            context.send_event(NoteEvent::PolyPressure {
                                 timing: buffer.timing,
                                 voice_id: None,
                                 channel: 0,
                                 note: note as u8,
                                 pressure: pressures[note],
-                            });*/
+                            });
                         } else {
                             context.send_event(NoteEvent::NoteOn {
                                 timing: buffer.timing,
@@ -709,8 +709,9 @@ impl AnalysisChain {
             #[cfg(feature = "midi")]
             if self.output_midi {
                 let frequencies = self.frequencies.read();
-                let mut note_scratchpad: [(f32, f32, f32); 128] = [(0.0, 0.0, 0.0); 128];
-                for ((lower, center, upper), (pan, volume)) in spectrogram.data[0]
+                let mut note_scratchpad: [(f32, f32, f32); 128] =
+                    [(0.0, 0.0, f32::NEG_INFINITY); 128];
+                for ((lower, _, upper), (pan, volume)) in spectrogram.data[0]
                     .data
                     .iter()
                     .enumerate()
