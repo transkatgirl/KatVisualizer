@@ -20,7 +20,9 @@ use threadpool::ThreadPool;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-use crate::analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram};
+use crate::analyzer::{
+    BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram, map_value_f32,
+};
 
 pub mod analyzer;
 mod editor;
@@ -745,14 +747,12 @@ impl AnalysisChain {
 
                     for (i, (items, pan_sum, volume_sum)) in note_scratchpad.into_iter().enumerate()
                     {
-                        use crate::analyzer::map_value_f32;
-
-                        let volume = volume_sum / items;
-
                         if items == 0.0 {
                             notes[i] = (0.0, f32::NEG_INFINITY);
                             pressures[i] = 0.0;
                         } else {
+                            let volume = volume_sum / items;
+
                             notes[i] = (pan_sum / items, volume);
                             pressures[i] = map_value_f32(
                                 volume,
