@@ -262,6 +262,7 @@ impl Plugin for MyPlugin {
             self.midi_notes_on = false;
             self.midi_notes = [false; 128];
             self.midi_volume_changed = false;
+            self.midi_needs_reset = false;
         }
 
         #[cfg(feature = "midi")]
@@ -709,13 +710,32 @@ impl AnalysisChain {
             if self.output_midi {
                 let frequencies = self.frequencies.read();
                 let mut note_scratchpad: [(f32, f32, f32); 128] = [(0.0, 0.0, 0.0); 128];
-                for ((_, frequency, _), (pan, volume)) in spectrogram.data[0]
+                for ((lower, center, upper), (pan, volume)) in spectrogram.data[0]
                     .data
                     .iter()
                     .enumerate()
                     .map(|(i, d)| (frequencies[i], d))
                 {
-                    let note = freq_to_midi_note(frequency).round().max(0.0) as usize;
+                    /*if lower.is_finite() && upper.is_finite() {
+                        let lower_note = freq_to_midi_note(lower).round().max(0.0) as usize;
+                        let upper_note = freq_to_midi_note(upper).round().max(0.0) as usize;
+
+                        if lower_note > 127 {
+                            break;
+                        }
+
+                        #[allow(clippy::needless_range_loop)]
+                        for note in lower_note..=upper_note {
+                            if note > 127 {
+                                break;
+                            }
+
+                            note_scratchpad[note].0 += 1.0;
+                            note_scratchpad[note].1 += pan;
+                            note_scratchpad[note].2 += volume;
+                        }
+                    } else if center.is_nan() {*/
+                    let note = freq_to_midi_note(center).round().max(0.0) as usize;
 
                     if note > 127 {
                         break;
@@ -724,6 +744,7 @@ impl AnalysisChain {
                     note_scratchpad[note].0 += 1.0;
                     note_scratchpad[note].1 += pan;
                     note_scratchpad[note].2 += volume;
+                    //}
                 }
 
                 if !self.midi_use_volume {
