@@ -709,8 +709,7 @@ impl AnalysisChain {
             #[cfg(feature = "midi")]
             if self.output_midi {
                 let frequencies = self.frequencies.read();
-                let mut note_scratchpad: [(f32, f32, f32); 128] =
-                    [(0.0, 0.0, f32::NEG_INFINITY); 128];
+                let mut note_scratchpad: [(f32, f32, f32); 128] = [(0.0, 0.0, 0.0); 128];
                 for ((lower, _, upper), (pan, volume)) in spectrogram.data[0]
                     .data
                     .iter()
@@ -772,7 +771,11 @@ impl AnalysisChain {
 
                     for (i, (items, pan_sum, volume_sum)) in note_scratchpad.into_iter().enumerate()
                     {
-                        notes[i] = (pan_sum / items, volume_sum / items);
+                        if items == 0.0 {
+                            notes[i] = (0.0, f32::NEG_INFINITY);
+                        } else {
+                            notes[i] = (pan_sum / items, volume_sum / items);
+                        }
                     }
 
                     midi_output.push(AnalysisBufferMidi {
