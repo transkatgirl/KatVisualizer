@@ -15,11 +15,13 @@ crate-type = [
 ]
 
 [features]
+default = [ "midi" ]
 force-mono = [  ]
 force-stereo = [  ]
 force-mono-to-stereo = [
 ]
 mute-output = [  ]
+midi = [  ]
 
 [dependencies]
 nih_plug = { git = "https://github.com/transkatgirl/nih-plug.git", rev = "1f132feff0b03df8b5078ffaa1087201c9545d3f", features = [

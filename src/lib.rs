@@ -1,7 +1,12 @@
 #[cfg(not(debug_assertions))]
 use mimalloc::MiMalloc;
 
-use nih_plug::{prelude::*, util::StftHelper};
+use nih_plug::{
+    midi::control_change::{ALL_NOTES_OFF, POLY_MODE_ON, RESET_ALL_CONTROLLERS},
+    prelude::*,
+    util::StftHelper,
+    util::{db_to_gain, freq_to_midi_note},
+};
 use nih_plug_egui::EguiState;
 use parking_lot::{FairMutex, Mutex, RwLock};
 use std::{
@@ -37,6 +42,12 @@ pub struct MyPlugin {
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     latency_samples: u32,
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
+    midi_poly_on: bool,
+    midi_notes_on: bool,
+    midi_notes: [bool; 128],
+    midi_volume_changed: bool,
+    midi_needs_reset: bool,
+    analysis_midi_output: Vec<AnalysisBufferMidi>,
     analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
     state_info: Arc<RwLock<Option<PluginStateInfo>>>,
 }
@@ -63,6 +74,12 @@ impl Default for MyPlugin {
                     finished: Instant::now(),
                 },
             ))),
+            midi_poly_on: false,
+            midi_notes_on: false,
+            midi_notes: [false; 128],
+            midi_volume_changed: false,
+            midi_needs_reset: false,
+            analysis_midi_output: Vec::with_capacity(SPECTROGRAM_SLICES * MAX_FREQUENCY_BINS * 2),
             analysis_frequencies: Arc::new(RwLock::new(Vec::with_capacity(MAX_FREQUENCY_BINS))),
             state_info: Arc::new(RwLock::new(None)),
         }
@@ -141,6 +158,13 @@ impl Plugin for MyPlugin {
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
     const HARD_REALTIME_ONLY: bool = true;
+    const MIDI_INPUT: MidiConfig = MidiConfig::None;
+
+    #[cfg(feature = "midi")]
+    const MIDI_OUTPUT: MidiConfig = MidiConfig::MidiCCs;
+
+    #[cfg(not(feature = "midi"))]
+    const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
 
     type SysExMessage = ();
     type BackgroundTask = ();
@@ -197,6 +221,11 @@ impl Plugin for MyPlugin {
             buffer_config: *buffer_config,
         });
 
+        #[cfg(feature = "midi")]
+        {
+            self.midi_needs_reset = true;
+        }
+
         true
     }
 
@@ -214,8 +243,166 @@ impl Plugin for MyPlugin {
                 self.latency_samples = analysis_chain.latency_samples;
             }
 
-            analysis_chain.analyze(buffer, &self.analysis_output);
+            analysis_chain.analyze(
+                buffer,
+                &self.analysis_output,
+                &mut self.analysis_midi_output,
+            );
         }
+
+        #[cfg(feature = "midi")]
+        if self.midi_needs_reset {
+            context.send_event(NoteEvent::MidiCC {
+                timing: 0,
+                channel: 0,
+                cc: RESET_ALL_CONTROLLERS,
+                value: 0.0,
+            });
+            self.midi_poly_on = false;
+            self.midi_notes_on = false;
+            self.midi_notes = [false; 128];
+            self.midi_volume_changed = false;
+        }
+
+        #[cfg(feature = "midi")]
+        if !self.midi_poly_on {
+            context.send_event(NoteEvent::MidiCC {
+                timing: 0,
+                channel: 0,
+                cc: POLY_MODE_ON,
+                value: 0.0,
+            });
+            self.midi_poly_on = true;
+        }
+
+        #[cfg(feature = "midi")]
+        for buffer in &self.analysis_midi_output {
+            self.midi_notes_on = true;
+
+            if let Some(pressures) = buffer.pressures {
+                if self.midi_volume_changed {
+                    for note in 0..127 {
+                        context.send_event(NoteEvent::PolyVolume {
+                            timing: buffer.timing,
+                            voice_id: None,
+                            channel: 0,
+                            note: note as u8,
+                            gain: 1.0,
+                        });
+                    }
+                    self.midi_volume_changed = false;
+                }
+
+                for (note, (pan, volume)) in buffer.notes.iter().enumerate() {
+                    if *volume > buffer.min_value {
+                        context.send_event(NoteEvent::PolyPan {
+                            timing: buffer.timing,
+                            voice_id: None,
+                            channel: 0,
+                            note: note as u8,
+                            pan: *pan,
+                        });
+
+                        if self.midi_notes[note] {
+                            context.send_event(NoteEvent::NoteOff {
+                                timing: buffer.timing,
+                                voice_id: None,
+                                channel: 0,
+                                note: note as u8,
+                                velocity: pressures[note],
+                            });
+                            context.send_event(NoteEvent::NoteOn {
+                                timing: buffer.timing,
+                                voice_id: None,
+                                channel: 0,
+                                note: note as u8,
+                                velocity: pressures[note],
+                            });
+                            /*context.send_event(NoteEvent::PolyPressure {
+                                timing: buffer.timing,
+                                voice_id: None,
+                                channel: 0,
+                                note: note as u8,
+                                pressure: pressures[note],
+                            });*/
+                        } else {
+                            context.send_event(NoteEvent::NoteOn {
+                                timing: buffer.timing,
+                                voice_id: None,
+                                channel: 0,
+                                note: note as u8,
+                                velocity: pressures[note],
+                            });
+                            self.midi_notes[note] = true;
+                        }
+                    } else if self.midi_notes[note] {
+                        context.send_event(NoteEvent::NoteOff {
+                            timing: buffer.timing,
+                            voice_id: None,
+                            channel: 0,
+                            note: note as u8,
+                            velocity: 0.0,
+                        });
+                        self.midi_notes[note] = false;
+                    }
+                }
+            } else {
+                self.midi_volume_changed = true;
+
+                for (note, (pan, volume)) in buffer.notes.iter().enumerate() {
+                    if *volume > buffer.min_value {
+                        context.send_event(NoteEvent::PolyPan {
+                            timing: buffer.timing,
+                            voice_id: None,
+                            channel: 0,
+                            note: note as u8,
+                            pan: *pan,
+                        });
+
+                        if !self.midi_notes[note] {
+                            context.send_event(NoteEvent::NoteOn {
+                                timing: buffer.timing,
+                                voice_id: None,
+                                channel: 0,
+                                note: note as u8,
+                                velocity: 1.0,
+                            });
+                            self.midi_notes[note] = true;
+                        }
+                        context.send_event(NoteEvent::PolyVolume {
+                            timing: buffer.timing,
+                            voice_id: None,
+                            channel: 0,
+                            note: note as u8,
+                            gain: db_to_gain(*volume) + 1.0,
+                        });
+                    } else if self.midi_notes[note] {
+                        context.send_event(NoteEvent::NoteOff {
+                            timing: buffer.timing,
+                            voice_id: None,
+                            channel: 0,
+                            note: note as u8,
+                            velocity: 0.0,
+                        });
+                        self.midi_notes[note] = false;
+                    }
+                }
+            }
+        }
+
+        #[cfg(feature = "midi")]
+        if self.midi_notes_on && self.analysis_midi_output.is_empty() {
+            context.send_event(NoteEvent::MidiCC {
+                timing: 0,
+                channel: 0,
+                cc: ALL_NOTES_OFF,
+                value: 0.0,
+            });
+            self.midi_notes_on = false;
+            self.midi_notes = [false; 128];
+        }
+
+        self.analysis_midi_output.clear();
 
         #[cfg(feature = "mute-output")]
         for channel_samples in buffer.iter_samples() {
@@ -236,6 +423,12 @@ pub(crate) struct AnalysisChainConfig {
     internal_buffering: bool,
     update_rate_hz: f64,
     latency_offset: Duration,
+
+    output_midi: bool,
+    midi_amplitude_threshold: f32,
+    midi_use_volume: bool,
+    midi_pressure_min_amplitude: f32,
+    midi_pressure_max_amplitude: f32,
 
     resolution: usize,
     start_frequency: f64,
@@ -258,6 +451,13 @@ impl Default for AnalysisChainConfig {
             update_rate_hz: 1024.0,
             resolution: 512,
             latency_offset: Duration::ZERO,
+
+            output_midi: false,
+            midi_amplitude_threshold: 50.0 - 86.0,
+            midi_use_volume: false,
+            midi_pressure_min_amplitude: 40.0 - 86.0,
+            midi_pressure_max_amplitude: 80.0 - 86.0,
+
             start_frequency: BetterAnalyzerConfiguration::default().start_frequency,
             end_frequency: BetterAnalyzerConfiguration::default().end_frequency,
             erb_frequency_scale: BetterAnalyzerConfiguration::default().erb_frequency_scale,
@@ -276,6 +476,11 @@ pub(crate) struct AnalysisChain {
     right_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
     gain: f64,
     internal_buffering: bool,
+    output_midi: bool,
+    midi_amplitude_threshold: f32,
+    midi_use_volume: bool,
+    midi_pressure_min_amplitude: f32,
+    midi_pressure_max_amplitude: f32,
     update_rate: f64,
     listening_volume: Option<f64>,
     pub(crate) latency_samples: u32,
@@ -286,6 +491,15 @@ pub(crate) struct AnalysisChain {
     single_input: bool,
     pool: ThreadPool,
     pub(crate) frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
+}
+
+// See: https://nih-plug.robbertvanderhelm.nl/nih_plug/util/fn.midi_note_to_freq.html
+
+struct AnalysisBufferMidi {
+    timing: u32,
+    min_value: f32,
+    notes: [(f32, f32); 128],
+    pressures: Option<[f32; 128]>,
 }
 
 impl AnalysisChain {
@@ -326,6 +540,11 @@ impl AnalysisChain {
         Self {
             sample_rate,
             internal_buffering: config.internal_buffering,
+            output_midi: config.output_midi,
+            midi_amplitude_threshold: config.midi_amplitude_threshold,
+            midi_use_volume: config.midi_use_volume,
+            midi_pressure_min_amplitude: config.midi_pressure_min_amplitude,
+            midi_pressure_max_amplitude: config.midi_pressure_max_amplitude,
             latency_samples: if config.internal_buffering {
                 chunker.latency_samples()
             } else {
@@ -353,8 +572,11 @@ impl AnalysisChain {
         &mut self,
         buffer: &mut Buffer,
         output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
+        midi_output: &mut Vec<AnalysisBufferMidi>,
     ) {
         let mut finished = Instant::now();
+
+        let mut midi_timing = 0;
 
         if self.internal_buffering {
             self.chunker
@@ -483,6 +705,76 @@ impl AnalysisChain {
                 }
             });
 
+            #[cfg(feature = "midi")]
+            if self.output_midi {
+                let frequencies = self.frequencies.read();
+                let mut note_scratchpad: [(f32, f32, f32); 128] = [(0.0, 0.0, 0.0); 128];
+                for ((_, frequency, _), (pan, volume)) in spectrogram.data[0]
+                    .data
+                    .iter()
+                    .enumerate()
+                    .map(|(i, d)| (frequencies[i], d))
+                {
+                    let note = freq_to_midi_note(frequency).round().max(0.0) as usize;
+
+                    if note > 127 {
+                        break;
+                    }
+
+                    note_scratchpad[note].0 += 1.0;
+                    note_scratchpad[note].1 += pan;
+                    note_scratchpad[note].2 += volume;
+                }
+
+                if !self.midi_use_volume {
+                    let mut notes: [(f32, f32); 128] = [(0.0, 0.0); 128];
+                    let mut pressures: [f32; 128] = [0.0; 128];
+
+                    for (i, (items, pan_sum, volume_sum)) in note_scratchpad.into_iter().enumerate()
+                    {
+                        use crate::analyzer::map_value_f32;
+
+                        let volume = volume_sum / items;
+
+                        notes[i] = (pan_sum / items, volume);
+                        pressures[i] = map_value_f32(
+                            volume,
+                            self.midi_pressure_min_amplitude,
+                            self.midi_pressure_max_amplitude,
+                            0.0,
+                            1.0,
+                        )
+                        .clamp(0.0, 1.0);
+                    }
+
+                    midi_output.push(AnalysisBufferMidi {
+                        timing: midi_timing,
+                        min_value: self.midi_amplitude_threshold,
+                        notes,
+                        pressures: Some(pressures),
+                    });
+                } else {
+                    let mut notes: [(f32, f32); 128] = [(0.0, 0.0); 128];
+
+                    for (i, (items, pan_sum, volume_sum)) in note_scratchpad.into_iter().enumerate()
+                    {
+                        notes[i] = (pan_sum / items, volume_sum / items);
+                    }
+
+                    midi_output.push(AnalysisBufferMidi {
+                        timing: midi_timing,
+                        min_value: self.midi_amplitude_threshold,
+                        notes,
+                        pressures: None,
+                    });
+                }
+
+                #[allow(unused_assignments)]
+                {
+                    midi_timing += buffer.samples() as u32;
+                }
+            }
+
             let now = Instant::now();
             metrics.processing = now.duration_since(finished);
             metrics.finished = now;
@@ -499,6 +791,11 @@ impl AnalysisChain {
                 .unwrap_or(AnalysisChainConfig::default().listening_volume),
             normalize_amplitude: self.listening_volume.is_some(),
             internal_buffering: self.internal_buffering,
+            output_midi: self.output_midi,
+            midi_amplitude_threshold: self.midi_amplitude_threshold,
+            midi_use_volume: self.midi_use_volume,
+            midi_pressure_min_amplitude: self.midi_pressure_min_amplitude,
+            midi_pressure_max_amplitude: self.midi_pressure_max_amplitude,
             update_rate_hz: self.update_rate,
             latency_offset: self.additional_latency,
             resolution: analyzer_config.resolution,
@@ -522,6 +819,15 @@ impl AnalysisChain {
 
         let old_left_analyzer = self.left_analyzer.lock();
         let old_analyzer_config = old_left_analyzer.1.config();
+
+        self.output_midi = config.output_midi;
+        self.midi_amplitude_threshold = config.midi_amplitude_threshold;
+        self.midi_use_volume = config.midi_use_volume;
+        self.midi_pressure_min_amplitude = config.midi_pressure_min_amplitude;
+        self.midi_pressure_max_amplitude = config.midi_pressure_max_amplitude;
+        if self.internal_buffering {
+            self.output_midi = false;
+        }
 
         if self.update_rate != config.update_rate_hz {
             self.chunk_size = (self.sample_rate as f64 / config.update_rate_hz).round() as usize;
