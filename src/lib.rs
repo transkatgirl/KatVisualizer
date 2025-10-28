@@ -429,6 +429,7 @@ pub(crate) struct AnalysisChainConfig {
     latency_offset: Duration,
 
     output_midi: bool,
+    midi_max_simultaneous: u8,
     midi_amplitude_threshold: f32,
     midi_use_aftertouch: bool,
     midi_use_volume: bool,
@@ -458,10 +459,11 @@ impl Default for AnalysisChainConfig {
             latency_offset: Duration::ZERO,
 
             output_midi: false,
-            midi_amplitude_threshold: 50.0 - 86.0,
+            midi_max_simultaneous: 32,
+            midi_amplitude_threshold: 30.0 - 86.0,
             midi_use_aftertouch: true,
             midi_use_volume: false,
-            midi_pressure_min_amplitude: 40.0 - 86.0,
+            midi_pressure_min_amplitude: 30.0 - 86.0,
             midi_pressure_max_amplitude: 80.0 - 86.0,
 
             start_frequency: BetterAnalyzerConfiguration::default().start_frequency,
@@ -483,6 +485,7 @@ pub(crate) struct AnalysisChain {
     gain: f64,
     internal_buffering: bool,
     output_midi: bool,
+    midi_max_simultaneous: u8,
     midi_amplitude_threshold: f32,
     midi_use_aftertouch: bool,
     midi_use_volume: bool,
@@ -549,6 +552,7 @@ impl AnalysisChain {
             sample_rate,
             internal_buffering: config.internal_buffering,
             output_midi: config.output_midi,
+            midi_max_simultaneous: config.midi_max_simultaneous,
             midi_amplitude_threshold: config.midi_amplitude_threshold,
             midi_use_aftertouch: config.midi_use_aftertouch,
             midi_use_volume: config.midi_use_volume,
@@ -747,7 +751,7 @@ impl AnalysisChain {
                     }
                 }
 
-                if !self.midi_use_volume {
+                let mut analysis_midi = if !self.midi_use_volume {
                     let mut notes: [(f32, f32); 128] = [(0.0, 0.0); 128];
                     let mut pressures: [f32; 128] = [0.0; 128];
 
@@ -771,13 +775,13 @@ impl AnalysisChain {
                         }
                     }
 
-                    midi_output.push(AnalysisBufferMidi {
+                    AnalysisBufferMidi {
                         timing: midi_timing,
                         min_value: self.midi_amplitude_threshold,
                         use_aftertouch: self.midi_use_aftertouch,
                         notes,
                         pressures: Some(pressures),
-                    });
+                    }
                 } else {
                     let mut notes: [(f32, f32); 128] = [(0.0, 0.0); 128];
 
@@ -790,14 +794,31 @@ impl AnalysisChain {
                         }
                     }
 
-                    midi_output.push(AnalysisBufferMidi {
+                    AnalysisBufferMidi {
                         timing: midi_timing,
                         min_value: self.midi_amplitude_threshold,
                         use_aftertouch: self.midi_use_aftertouch,
                         notes,
                         pressures: None,
-                    });
+                    }
+                };
+
+                let mut sorted_notes: [(f32, usize); 128] = [(0.0, 0); 128];
+
+                for (note, (_, volume)) in analysis_midi.notes.iter().enumerate() {
+                    sorted_notes[note] = (*volume, note);
                 }
+                sorted_notes.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+
+                sorted_notes
+                    .into_iter()
+                    .rev()
+                    .skip(self.midi_max_simultaneous as usize)
+                    .for_each(|(_, note)| {
+                        analysis_midi.notes[note].1 = f32::NEG_INFINITY;
+                    });
+
+                midi_output.push(analysis_midi);
 
                 #[allow(unused_assignments)]
                 {
@@ -822,6 +843,7 @@ impl AnalysisChain {
             normalize_amplitude: self.listening_volume.is_some(),
             internal_buffering: self.internal_buffering,
             output_midi: self.output_midi,
+            midi_max_simultaneous: self.midi_max_simultaneous,
             midi_amplitude_threshold: self.midi_amplitude_threshold,
             midi_use_aftertouch: self.midi_use_aftertouch,
             midi_use_volume: self.midi_use_volume,
@@ -852,6 +874,7 @@ impl AnalysisChain {
         let old_analyzer_config = old_left_analyzer.1.config();
 
         self.output_midi = config.output_midi;
+        self.midi_max_simultaneous = config.midi_max_simultaneous;
         self.midi_amplitude_threshold = config.midi_amplitude_threshold;
         self.midi_use_aftertouch = config.midi_use_aftertouch;
         self.midi_use_volume = config.midi_use_volume;

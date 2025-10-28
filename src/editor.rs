@@ -1527,6 +1527,16 @@ pub fn create(
                         }
 
                         if analysis_settings.output_midi {
+                            if ui.add(
+                                egui::Slider::new(&mut analysis_settings.midi_max_simultaneous, 1..=127)
+                                    .suffix(" notes")
+                                    .text("Maximum simultaneous MIDI events"),
+                            ).changed() {
+                                update(&analysis_settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            };
+
                             if !analysis_settings.midi_use_volume {
                                 if ui
                                     .checkbox(
