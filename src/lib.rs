@@ -306,29 +306,15 @@ impl Plugin for MyPlugin {
                             pan: *pan,
                         });
 
-                        if self.midi_notes[note] {
-                            /*context.send_event(NoteEvent::NoteOff {
-                                timing: buffer.timing,
-                                voice_id: None,
-                                channel: 0,
-                                note: note as u8,
-                                velocity: pressures[note],
-                            });
-                            context.send_event(NoteEvent::NoteOn {
-                                timing: buffer.timing,
-                                voice_id: None,
-                                channel: 0,
-                                note: note as u8,
-                                velocity: pressures[note],
-                            });*/
-                            context.send_event(NoteEvent::PolyPressure {
-                                timing: buffer.timing,
-                                voice_id: None,
-                                channel: 0,
-                                note: note as u8,
-                                pressure: pressures[note],
-                            });
-                        } else {
+                        /*context.send_event(NoteEvent::NoteOff {
+                            timing: buffer.timing,
+                            voice_id: None,
+                            channel: 0,
+                            note: note as u8,
+                            velocity: pressures[note],
+                        });*/
+
+                        if !self.midi_notes[note] {
                             context.send_event(NoteEvent::NoteOn {
                                 timing: buffer.timing,
                                 voice_id: None,
@@ -337,6 +323,14 @@ impl Plugin for MyPlugin {
                                 velocity: pressures[note],
                             });
                             self.midi_notes[note] = true;
+                        } else {
+                            context.send_event(NoteEvent::PolyPressure {
+                                timing: buffer.timing,
+                                voice_id: None,
+                                channel: 0,
+                                note: note as u8,
+                                pressure: pressures[note],
+                            });
                         }
                     } else if self.midi_notes[note] {
                         context.send_event(NoteEvent::NoteOff {
@@ -718,8 +712,8 @@ impl AnalysisChain {
                     .enumerate()
                     .map(|(i, d)| (frequencies[i], d))
                 {
-                    let lower_note = freq_to_midi_note(lower).round().max(0.0) as usize;
-                    let upper_note = freq_to_midi_note(upper).round().max(0.0) as usize;
+                    let lower_note = freq_to_midi_note(lower).round().max(15.0) as usize;
+                    let upper_note = freq_to_midi_note(upper).round().max(15.0) as usize;
 
                     if lower_note > 127 {
                         break;
