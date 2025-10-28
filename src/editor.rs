@@ -25,11 +25,15 @@ use crate::{
     analyzer::{BetterSpectrogram, map_value_f32},
 };
 
-fn calculate_agc_min_max(
+fn calculate_volume_min_max(
     settings: &RenderSettings,
     scratchpad: &mut Vec<f32>,
     spectrogram: &BetterSpectrogram,
 ) -> (f32, f32) {
+    if !settings.automatic_gain {
+        return (settings.min_db, settings.max_db);
+    }
+
     scratchpad.clear();
     let mut elapsed = Duration::ZERO;
 
@@ -46,6 +50,11 @@ fn calculate_agc_min_max(
             scratchpad.push(row.max);
         }
     }
+
+    if scratchpad.is_empty() {
+        return (settings.min_db, settings.max_db);
+    }
+
     scratchpad.voracious_sort();
 
     let rows = scratchpad.len() as f32;
@@ -546,8 +555,6 @@ pub fn create(
                     },
                     max: Pos2 { x: max_x, y: max_y },
                 };
-                let mut min_db = settings.min_db;
-                let mut max_db = settings.max_db;
 
                 let start = Instant::now();
 
@@ -576,10 +583,8 @@ pub fn create(
                 let processing_duration = metrics.processing;
                 let chunk_duration = front.duration;
 
-                if settings.automatic_gain {
-                    (min_db, max_db) =
-                        calculate_agc_min_max(&settings, &mut agc_scratchpad, spectrogram);
-                }
+                let (min_db, max_db) =
+                    calculate_volume_min_max(&settings, &mut agc_scratchpad, spectrogram);
 
                 if settings.bargraph_height != 0.0 {
                     draw_bargraph(
