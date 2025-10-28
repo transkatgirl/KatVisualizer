@@ -716,35 +716,27 @@ impl AnalysisChain {
                     .enumerate()
                     .map(|(i, d)| (frequencies[i], d))
                 {
-                    /*if lower.is_finite() && upper.is_finite() {
-                        let lower_note = freq_to_midi_note(lower).round().max(0.0) as usize;
-                        let upper_note = freq_to_midi_note(upper).round().max(0.0) as usize;
+                    let lower_note = freq_to_midi_note(lower).round().max(0.0) as usize;
+                    let upper_note = freq_to_midi_note(upper).round().max(0.0) as usize;
 
-                        if lower_note > 127 {
-                            break;
-                        }
-
-                        #[allow(clippy::needless_range_loop)]
-                        for note in lower_note..=upper_note {
-                            if note > 127 {
-                                break;
-                            }
-
-                            note_scratchpad[note].0 += 1.0;
-                            note_scratchpad[note].1 += pan;
-                            note_scratchpad[note].2 += volume;
-                        }
-                    } else if center.is_nan() {*/
-                    let note = freq_to_midi_note(center).round().max(0.0) as usize;
-
-                    if note > 127 {
+                    if lower_note > 127 {
                         break;
                     }
 
-                    note_scratchpad[note].0 += 1.0;
-                    note_scratchpad[note].1 += pan;
-                    note_scratchpad[note].2 += volume;
-                    //}
+                    #[allow(clippy::needless_range_loop)]
+                    for note in lower_note..=upper_note {
+                        if note > 127 {
+                            break;
+                        }
+
+                        if !volume.is_finite() {
+                            continue;
+                        }
+
+                        note_scratchpad[note].0 += 1.0;
+                        note_scratchpad[note].1 += pan;
+                        note_scratchpad[note].2 += volume;
+                    }
                 }
 
                 if !self.midi_use_volume {
