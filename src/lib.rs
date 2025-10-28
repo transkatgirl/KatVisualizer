@@ -140,6 +140,7 @@ impl Plugin for MyPlugin {
     }];
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
+    const HARD_REALTIME_ONLY: bool = true;
 
     type SysExMessage = ();
     type BackgroundTask = ();
