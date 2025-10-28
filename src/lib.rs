@@ -730,7 +730,7 @@ impl AnalysisChain {
                         }
 
                         if !volume.is_finite() {
-                            continue;
+                            break;
                         }
 
                         note_scratchpad[note].0 += 1.0;
@@ -749,15 +749,20 @@ impl AnalysisChain {
 
                         let volume = volume_sum / items;
 
-                        notes[i] = (pan_sum / items, volume);
-                        pressures[i] = map_value_f32(
-                            volume,
-                            self.midi_pressure_min_amplitude,
-                            self.midi_pressure_max_amplitude,
-                            0.0,
-                            1.0,
-                        )
-                        .clamp(0.0, 1.0);
+                        if items == 0.0 {
+                            notes[i] = (0.0, f32::NEG_INFINITY);
+                            pressures[i] = 0.0;
+                        } else {
+                            notes[i] = (pan_sum / items, volume);
+                            pressures[i] = map_value_f32(
+                                volume,
+                                self.midi_pressure_min_amplitude,
+                                self.midi_pressure_max_amplitude,
+                                0.0,
+                                1.0,
+                            )
+                            .clamp(0.0, 1.0);
+                        }
                     }
 
                     midi_output.push(AnalysisBufferMidi {
