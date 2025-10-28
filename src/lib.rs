@@ -306,14 +306,6 @@ impl Plugin for MyPlugin {
                             pan: *pan,
                         });
 
-                        /*context.send_event(NoteEvent::NoteOff {
-                            timing: buffer.timing,
-                            voice_id: None,
-                            channel: 0,
-                            note: note as u8,
-                            velocity: pressures[note],
-                        });*/
-
                         if !self.midi_notes[note] {
                             context.send_event(NoteEvent::NoteOn {
                                 timing: buffer.timing,
@@ -323,13 +315,28 @@ impl Plugin for MyPlugin {
                                 velocity: pressures[note],
                             });
                             self.midi_notes[note] = true;
-                        } else {
+                        } else if buffer.use_aftertouch {
                             context.send_event(NoteEvent::PolyPressure {
                                 timing: buffer.timing,
                                 voice_id: None,
                                 channel: 0,
                                 note: note as u8,
                                 pressure: pressures[note],
+                            });
+                        } else {
+                            context.send_event(NoteEvent::NoteOff {
+                                timing: buffer.timing,
+                                voice_id: None,
+                                channel: 0,
+                                note: note as u8,
+                                velocity: pressures[note],
+                            });
+                            context.send_event(NoteEvent::NoteOn {
+                                timing: buffer.timing,
+                                voice_id: None,
+                                channel: 0,
+                                note: note as u8,
+                                velocity: pressures[note],
                             });
                         }
                     } else if self.midi_notes[note] {
@@ -423,6 +430,7 @@ pub(crate) struct AnalysisChainConfig {
 
     output_midi: bool,
     midi_amplitude_threshold: f32,
+    midi_use_aftertouch: bool,
     midi_use_volume: bool,
     midi_pressure_min_amplitude: f32,
     midi_pressure_max_amplitude: f32,
@@ -451,6 +459,7 @@ impl Default for AnalysisChainConfig {
 
             output_midi: false,
             midi_amplitude_threshold: 50.0 - 86.0,
+            midi_use_aftertouch: true,
             midi_use_volume: false,
             midi_pressure_min_amplitude: 40.0 - 86.0,
             midi_pressure_max_amplitude: 80.0 - 86.0,
@@ -475,6 +484,7 @@ pub(crate) struct AnalysisChain {
     internal_buffering: bool,
     output_midi: bool,
     midi_amplitude_threshold: f32,
+    midi_use_aftertouch: bool,
     midi_use_volume: bool,
     midi_pressure_min_amplitude: f32,
     midi_pressure_max_amplitude: f32,
@@ -495,6 +505,7 @@ pub(crate) struct AnalysisChain {
 struct AnalysisBufferMidi {
     timing: u32,
     min_value: f32,
+    use_aftertouch: bool,
     notes: [(f32, f32); 128],
     pressures: Option<[f32; 128]>,
 }
@@ -539,6 +550,7 @@ impl AnalysisChain {
             internal_buffering: config.internal_buffering,
             output_midi: config.output_midi,
             midi_amplitude_threshold: config.midi_amplitude_threshold,
+            midi_use_aftertouch: config.midi_use_aftertouch,
             midi_use_volume: config.midi_use_volume,
             midi_pressure_min_amplitude: config.midi_pressure_min_amplitude,
             midi_pressure_max_amplitude: config.midi_pressure_max_amplitude,
@@ -762,6 +774,7 @@ impl AnalysisChain {
                     midi_output.push(AnalysisBufferMidi {
                         timing: midi_timing,
                         min_value: self.midi_amplitude_threshold,
+                        use_aftertouch: self.midi_use_aftertouch,
                         notes,
                         pressures: Some(pressures),
                     });
@@ -780,6 +793,7 @@ impl AnalysisChain {
                     midi_output.push(AnalysisBufferMidi {
                         timing: midi_timing,
                         min_value: self.midi_amplitude_threshold,
+                        use_aftertouch: self.midi_use_aftertouch,
                         notes,
                         pressures: None,
                     });
@@ -809,6 +823,7 @@ impl AnalysisChain {
             internal_buffering: self.internal_buffering,
             output_midi: self.output_midi,
             midi_amplitude_threshold: self.midi_amplitude_threshold,
+            midi_use_aftertouch: self.midi_use_aftertouch,
             midi_use_volume: self.midi_use_volume,
             midi_pressure_min_amplitude: self.midi_pressure_min_amplitude,
             midi_pressure_max_amplitude: self.midi_pressure_max_amplitude,
@@ -838,6 +853,7 @@ impl AnalysisChain {
 
         self.output_midi = config.output_midi;
         self.midi_amplitude_threshold = config.midi_amplitude_threshold;
+        self.midi_use_aftertouch = config.midi_use_aftertouch;
         self.midi_use_volume = config.midi_use_volume;
         self.midi_pressure_min_amplitude = config.midi_pressure_min_amplitude;
         self.midi_pressure_max_amplitude = config.midi_pressure_max_amplitude;

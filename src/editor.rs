@@ -1527,6 +1527,21 @@ pub fn create(
                         }
 
                         if analysis_settings.output_midi {
+                            if !analysis_settings.midi_use_volume {
+                                if ui
+                                    .checkbox(
+                                        &mut analysis_settings.midi_use_aftertouch,
+                                        "Use MIDI aftertouch events",
+                                    )
+                                    .on_hover_text("If this is enabled, ")
+                                    .changed()
+                                {
+                                    update(&analysis_settings);
+                                    egui_ctx.request_discard("Changed setting");
+                                    return;
+                                }
+                            }
+
                             if analysis_settings.normalize_amplitude {
                                 let mut midi_threshold_phon =
                                     (analysis_settings.midi_amplitude_threshold as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
