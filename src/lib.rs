@@ -884,7 +884,7 @@ impl AnalysisChain {
                     analysis_midi.notes[note].1 = f32::NEG_INFINITY;
                 });
 
-            // TODO: Use models of auditory masking to determine which notes to remove
+            // TODO: Determine note prioritization based on signal-to-mask ratio rather than amplitude
         }
 
         analysis_midi
