@@ -1516,7 +1516,7 @@ pub fn create(
                                 &mut analysis_settings.output_midi,
                                 "Output analysis as MIDI",
                             )
-                            .on_hover_text("If this is enabled, the analysis results will be used to create a MIDI output that can be used as an input for alternative visualization methods.\n\nIf you plan on including low frequency signals in your MIDI output, consider disabling NC method.\nIn addition, if you are using the plugin's MIDI output as input to a synthesizer, you should turn off amplitude normalization.)")
+                            .on_hover_text("If this is enabled, the analysis results will be used to create a MIDI output that can be used as an input for alternative visualization methods.\n\nIf you are using the plugin's MIDI output as input to a synthesizer, you should turn off amplitude normalization.")
                             .changed()
                         {
                             if analysis_settings.output_midi {
