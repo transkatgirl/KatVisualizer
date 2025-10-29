@@ -287,7 +287,7 @@ impl Plugin for MyPlugin {
                     for note in 0..127 {
                         context.send_event(NoteEvent::PolyVolume {
                             timing: buffer.timing,
-                            voice_id: None,
+                            voice_id: Some(note),
                             channel: 0,
                             note: note as u8,
                             gain: 1.0,
@@ -301,7 +301,7 @@ impl Plugin for MyPlugin {
                         if !self.midi_notes[note] {
                             context.send_event(NoteEvent::NoteOn {
                                 timing: buffer.timing,
-                                voice_id: None,
+                                voice_id: Some(note as i32),
                                 channel: 0,
                                 note: note as u8,
                                 velocity: pressures[note],
@@ -310,7 +310,7 @@ impl Plugin for MyPlugin {
                         } else if buffer.use_aftertouch {
                             context.send_event(NoteEvent::PolyPressure {
                                 timing: buffer.timing,
-                                voice_id: None,
+                                voice_id: Some(note as i32),
                                 channel: 0,
                                 note: note as u8,
                                 pressure: pressures[note],
@@ -318,14 +318,14 @@ impl Plugin for MyPlugin {
                         } else {
                             context.send_event(NoteEvent::NoteOff {
                                 timing: buffer.timing,
-                                voice_id: None,
+                                voice_id: Some(note as i32),
                                 channel: 0,
                                 note: note as u8,
                                 velocity: pressures[note],
                             });
                             context.send_event(NoteEvent::NoteOn {
                                 timing: buffer.timing,
-                                voice_id: None,
+                                voice_id: Some(note as i32),
                                 channel: 0,
                                 note: note as u8,
                                 velocity: pressures[note],
@@ -334,7 +334,7 @@ impl Plugin for MyPlugin {
 
                         context.send_event(NoteEvent::PolyPan {
                             timing: buffer.timing,
-                            voice_id: None,
+                            voice_id: Some(note as i32),
                             channel: 0,
                             note: note as u8,
                             pan: *pan,
@@ -342,7 +342,7 @@ impl Plugin for MyPlugin {
                     } else if self.midi_notes[note] {
                         context.send_event(NoteEvent::NoteOff {
                             timing: buffer.timing,
-                            voice_id: None,
+                            voice_id: Some(note as i32),
                             channel: 0,
                             note: note as u8,
                             velocity: 0.0,
@@ -358,7 +358,7 @@ impl Plugin for MyPlugin {
                         if !self.midi_notes[note] {
                             context.send_event(NoteEvent::NoteOn {
                                 timing: buffer.timing,
-                                voice_id: None,
+                                voice_id: Some(note as i32),
                                 channel: 0,
                                 note: note as u8,
                                 velocity: 1.0,
@@ -367,7 +367,7 @@ impl Plugin for MyPlugin {
                         }
                         context.send_event(NoteEvent::PolyVolume {
                             timing: buffer.timing,
-                            voice_id: None,
+                            voice_id: Some(note as i32),
                             channel: 0,
                             note: note as u8,
                             gain: db_to_gain(*volume),
@@ -375,7 +375,7 @@ impl Plugin for MyPlugin {
 
                         context.send_event(NoteEvent::PolyPan {
                             timing: buffer.timing,
-                            voice_id: None,
+                            voice_id: Some(note as i32),
                             channel: 0,
                             note: note as u8,
                             pan: *pan,
@@ -383,7 +383,7 @@ impl Plugin for MyPlugin {
                     } else if self.midi_notes[note] {
                         context.send_event(NoteEvent::NoteOff {
                             timing: buffer.timing,
-                            voice_id: None,
+                            voice_id: Some(note as i32),
                             channel: 0,
                             note: note as u8,
                             velocity: 0.0,
