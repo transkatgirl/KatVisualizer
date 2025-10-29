@@ -820,6 +820,8 @@ impl AnalysisChain {
 
                 // TODO: Allow performing ISO 226 weighting when limiting simultaneous notes if amplitude normalization is off
 
+                // TODO: Use models of auditory masking to determine which notes to remove?
+
                 midi_output.push(analysis_midi);
 
                 #[allow(unused_assignments)]
