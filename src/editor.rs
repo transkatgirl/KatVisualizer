@@ -1547,7 +1547,7 @@ pub fn create(
                             }
 
                             if ui.add(
-                                egui::Slider::new(&mut analysis_settings.midi_max_simultaneous, 1..=127)
+                                egui::Slider::new(&mut analysis_settings.midi_max_simultaneous, 1..=128)
                                     .suffix(" notes")
                                     .text("Maximum simultaneous MIDI events"),
                             ).changed() {

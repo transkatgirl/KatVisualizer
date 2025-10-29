@@ -868,22 +868,24 @@ impl AnalysisChain {
             }
         };
 
-        let mut sorted_notes: [(f32, usize); 128] = [(0.0, 0); 128];
+        if self.midi_max_simultaneous != 128 {
+            let mut sorted_notes: [(f32, usize); 128] = [(0.0, 0); 128];
 
-        for (note, volume) in sorting_notes.into_iter().enumerate() {
-            sorted_notes[note] = (volume, note);
+            for (note, volume) in sorting_notes.into_iter().enumerate() {
+                sorted_notes[note] = (volume, note);
+            }
+            sorted_notes.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+
+            sorted_notes
+                .into_iter()
+                .rev()
+                .skip(self.midi_max_simultaneous as usize)
+                .for_each(|(_, note)| {
+                    analysis_midi.notes[note].1 = f32::NEG_INFINITY;
+                });
+
+            // TODO: Use models of auditory masking to determine which notes to remove
         }
-        sorted_notes.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
-
-        sorted_notes
-            .into_iter()
-            .rev()
-            .skip(self.midi_max_simultaneous as usize)
-            .for_each(|(_, note)| {
-                analysis_midi.notes[note].1 = f32::NEG_INFINITY;
-            });
-
-        // TODO: Use models of auditory masking to determine which notes to remove?
 
         analysis_midi
     }
