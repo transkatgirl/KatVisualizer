@@ -1510,6 +1510,7 @@ pub fn create(
                             return;
                         }
 
+                        #[cfg(feature = "midi")]
                         if ui
                             .checkbox(
                                 &mut analysis_settings.output_midi,
@@ -1526,6 +1527,7 @@ pub fn create(
                             return;
                         }
 
+                        #[cfg(feature = "midi")]
                         if analysis_settings.output_midi {
                             if ui.add(
                                 egui::Slider::new(&mut analysis_settings.midi_max_simultaneous, 1..=127)
