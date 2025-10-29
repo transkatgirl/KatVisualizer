@@ -757,7 +757,7 @@ impl AnalysisChain {
                     }
 
                     if !volume.is_finite() {
-                        break;
+                        continue;
                     }
 
                     note_scratchpad[note].0 += 1.0;
