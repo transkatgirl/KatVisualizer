@@ -321,7 +321,7 @@ impl Plugin for MyPlugin {
                                 voice_id: Some(note as i32),
                                 channel: 0,
                                 note: note as u8,
-                                velocity: pressures[note],
+                                velocity: 1.0 - pressures[note],
                             });
                             context.send_event(NoteEvent::NoteOn {
                                 timing: buffer.timing,
@@ -345,7 +345,7 @@ impl Plugin for MyPlugin {
                             voice_id: Some(note as i32),
                             channel: 0,
                             note: note as u8,
-                            velocity: 0.0,
+                            velocity: 1.0 - pressures[note],
                         });
                         self.midi_notes[note] = false;
                     }
@@ -386,7 +386,7 @@ impl Plugin for MyPlugin {
                             voice_id: Some(note as i32),
                             channel: 0,
                             note: note as u8,
-                            velocity: 0.0,
+                            velocity: 1.0,
                         });
                         self.midi_notes[note] = false;
                     }
