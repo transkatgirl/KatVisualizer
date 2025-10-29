@@ -1516,7 +1516,7 @@ pub fn create(
                                 &mut analysis_settings.output_midi,
                                 "Output analysis as MIDI",
                             )
-                            .on_hover_text("If this is enabled, the analysis results will be used to create a MIDI output that can be used as an input for alternative visualization methods.\n\nIf you are using the plugin's MIDI output as input to a synthesizer, you should turn off amplitude normalization.")
+                            .on_hover_text("If this is enabled, the analysis results will be used to create a MIDI output that can be used as an input for alternative visualization methods.")
                             .changed()
                         {
                             if analysis_settings.output_midi {
@@ -1531,6 +1531,21 @@ pub fn create(
 
                         #[cfg(feature = "midi")]
                         if analysis_settings.output_midi {
+                            if analysis_settings.normalize_amplitude {
+                                if ui
+                                    .checkbox(
+                                        &mut analysis_settings.midi_use_unnormalized,
+                                        "Output unnormalized amplitudes",
+                                    )
+                                    .on_hover_text("If this is enabled, the MIDI output will be generated using the unnormalized amplitudes, which is what most programs expect.\nIf this is disabled, the MIDI output will be generated using the same normalization used in the visualizer.")
+                                    .changed()
+                                {
+                                    update(&analysis_settings);
+                                    egui_ctx.request_discard("Changed setting");
+                                    return;
+                                }
+                            }
+
                             if ui.add(
                                 egui::Slider::new(&mut analysis_settings.midi_max_simultaneous, 1..=127)
                                     .suffix(" notes")

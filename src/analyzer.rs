@@ -109,6 +109,9 @@ impl BetterAnalyzer {
     pub fn analyze(&mut self, samples: impl Iterator<Item = f64>) {
         self.transform.analyze(samples);
     }
+    pub fn raw_analysis(&self) -> &[f64] {
+        &self.transform.spectrum_data
+    }
 }
 
 #[derive(Clone)]

@@ -21,7 +21,8 @@ use threadpool::ThreadPool;
 static GLOBAL: MiMalloc = MiMalloc;
 
 use crate::analyzer::{
-    BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram, map_value_f32,
+    BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram, amplitude_to_dbfs,
+    map_value_f32,
 };
 
 pub mod analyzer;
@@ -429,6 +430,7 @@ pub(crate) struct AnalysisChainConfig {
     latency_offset: Duration,
 
     output_midi: bool,
+    midi_use_unnormalized: bool,
     midi_max_simultaneous: u8,
     midi_amplitude_threshold: f32,
     midi_use_aftertouch: bool,
@@ -459,6 +461,7 @@ impl Default for AnalysisChainConfig {
             latency_offset: Duration::ZERO,
 
             output_midi: false,
+            midi_use_unnormalized: true,
             midi_max_simultaneous: 32,
             midi_amplitude_threshold: 30.0 - 86.0,
             midi_use_aftertouch: true,
@@ -486,6 +489,7 @@ pub(crate) struct AnalysisChain {
     internal_buffering: bool,
     output_midi: bool,
     midi_max_simultaneous: u8,
+    midi_use_unnormalized: bool,
     midi_amplitude_threshold: f32,
     midi_use_aftertouch: bool,
     midi_use_volume: bool,
@@ -552,6 +556,7 @@ impl AnalysisChain {
             sample_rate,
             internal_buffering: config.internal_buffering,
             output_midi: config.output_midi,
+            midi_use_unnormalized: config.midi_use_unnormalized,
             midi_max_simultaneous: config.midi_max_simultaneous,
             midi_amplitude_threshold: config.midi_amplitude_threshold,
             midi_use_aftertouch: config.midi_use_aftertouch,
@@ -720,101 +725,12 @@ impl AnalysisChain {
 
             #[cfg(feature = "midi")]
             if self.output_midi {
-                let frequencies = self.frequencies.read();
-                let mut note_scratchpad: [(f32, f32, f32); 128] = [(0.0, 0.0, 0.0); 128];
-                for ((_, center, _), (pan, volume)) in spectrogram.data[0]
-                    .data
-                    .iter()
-                    .enumerate()
-                    .map(|(i, d)| (frequencies[i], d))
-                {
-                    let note = freq_to_midi_note(center).round().max(15.0) as usize;
-
-                    if note > 127 {
-                        break;
-                    }
-
-                    if !volume.is_finite() {
-                        continue;
-                    }
-
-                    note_scratchpad[note].0 += 1.0;
-                    note_scratchpad[note].1 += pan;
-                    note_scratchpad[note].2 += volume;
-                }
-
-                let mut analysis_midi = if !self.midi_use_volume {
-                    let mut notes: [(f32, f32); 128] = [(0.0, 0.0); 128];
-                    let mut pressures: [f32; 128] = [0.0; 128];
-
-                    for (i, (items, pan_sum, volume_sum)) in note_scratchpad.into_iter().enumerate()
-                    {
-                        if items == 0.0 {
-                            notes[i] = (0.0, f32::NEG_INFINITY);
-                            pressures[i] = 0.0;
-                        } else {
-                            let volume = volume_sum / items;
-
-                            notes[i] = (pan_sum / items, volume);
-                            pressures[i] = map_value_f32(
-                                volume,
-                                self.midi_pressure_min_amplitude,
-                                self.midi_pressure_max_amplitude,
-                                0.0,
-                                1.0,
-                            )
-                            .clamp(0.0, 1.0);
-                        }
-                    }
-
-                    AnalysisBufferMidi {
-                        timing: midi_timing,
-                        min_value: self.midi_amplitude_threshold,
-                        use_aftertouch: self.midi_use_aftertouch,
-                        notes,
-                        pressures: Some(pressures),
-                    }
-                } else {
-                    let mut notes: [(f32, f32); 128] = [(0.0, 0.0); 128];
-
-                    for (i, (items, pan_sum, volume_sum)) in note_scratchpad.into_iter().enumerate()
-                    {
-                        if items == 0.0 {
-                            notes[i] = (0.0, f32::NEG_INFINITY);
-                        } else {
-                            notes[i] = (pan_sum / items, volume_sum / items);
-                        }
-                    }
-
-                    AnalysisBufferMidi {
-                        timing: midi_timing,
-                        min_value: self.midi_amplitude_threshold,
-                        use_aftertouch: self.midi_use_aftertouch,
-                        notes,
-                        pressures: None,
-                    }
-                };
-
-                let mut sorted_notes: [(f32, usize); 128] = [(0.0, 0); 128];
-
-                for (note, (_, volume)) in analysis_midi.notes.iter().enumerate() {
-                    sorted_notes[note] = (*volume, note);
-                }
-                sorted_notes.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
-
-                sorted_notes
-                    .into_iter()
-                    .rev()
-                    .skip(self.midi_max_simultaneous as usize)
-                    .for_each(|(_, note)| {
-                        analysis_midi.notes[note].1 = f32::NEG_INFINITY;
-                    });
-
-                // TODO: Allow performing ISO 226 weighting when limiting simultaneous notes if amplitude normalization is off
-
-                // TODO: Use models of auditory masking to determine which notes to remove?
-
-                midi_output.push(analysis_midi);
+                midi_output.push(self.generate_midi(
+                    midi_timing,
+                    spectrogram,
+                    left_analyzer,
+                    right_analyzer,
+                ));
 
                 #[allow(unused_assignments)]
                 {
@@ -826,6 +742,150 @@ impl AnalysisChain {
             metrics.processing = now.duration_since(finished);
             metrics.finished = now;
         }
+    }
+    fn generate_midi(
+        &self,
+        timing: u32,
+        spectrogram: &BetterSpectrogram,
+        left_analyzer: &BetterAnalyzer,
+        right_analyzer: &BetterAnalyzer,
+    ) -> AnalysisBufferMidi {
+        let frequencies = self.frequencies.read();
+        let mut note_scratchpad: [(f32, f32, f32, f32); 128] = [(0.0, 0.0, 0.0, 0.0); 128];
+
+        if self.midi_use_unnormalized && self.listening_volume.is_some() {
+            let left = left_analyzer.raw_analysis();
+            let right = right_analyzer.raw_analysis();
+
+            for (index, (_, center, _), (pan, normalized_volume)) in spectrogram.data[0]
+                .data
+                .iter()
+                .enumerate()
+                .map(|(i, d)| (i, frequencies[i], d))
+            {
+                let note = freq_to_midi_note(center).round() as usize;
+
+                if note > 127 {
+                    break;
+                }
+
+                let volume = if self.single_input {
+                    amplitude_to_dbfs(left[index])
+                } else {
+                    amplitude_to_dbfs(left[index] + right[index])
+                } + self.gain;
+
+                if !volume.is_finite() {
+                    continue;
+                }
+
+                note_scratchpad[note].0 += 1.0;
+                note_scratchpad[note].1 += pan;
+                note_scratchpad[note].2 += volume as f32;
+                note_scratchpad[note].3 += normalized_volume;
+            }
+        } else {
+            for ((_, center, _), (pan, volume)) in spectrogram.data[0]
+                .data
+                .iter()
+                .enumerate()
+                .map(|(i, d)| (frequencies[i], d))
+            {
+                let note = freq_to_midi_note(center).round() as usize;
+
+                if note > 127 {
+                    break;
+                }
+
+                if !volume.is_finite() {
+                    continue;
+                }
+
+                note_scratchpad[note].0 += 1.0;
+                note_scratchpad[note].1 += pan;
+                note_scratchpad[note].2 += volume;
+                note_scratchpad[note].3 += volume;
+            }
+        }
+
+        let mut sorting_notes: [f32; 128] = [0.0; 128];
+
+        let mut analysis_midi = if !self.midi_use_volume {
+            let mut notes: [(f32, f32); 128] = [(0.0, 0.0); 128];
+            let mut pressures: [f32; 128] = [0.0; 128];
+
+            for (i, (items, pan_sum, volume_sum, sorting_volume_sum)) in
+                note_scratchpad.into_iter().enumerate()
+            {
+                if items == 0.0 {
+                    notes[i] = (0.0, f32::NEG_INFINITY);
+                    pressures[i] = 0.0;
+                    sorting_notes[i] = f32::NEG_INFINITY;
+                } else {
+                    let volume = volume_sum / items;
+
+                    notes[i] = (pan_sum / items, volume);
+                    pressures[i] = map_value_f32(
+                        volume,
+                        self.midi_pressure_min_amplitude,
+                        self.midi_pressure_max_amplitude,
+                        0.0,
+                        1.0,
+                    )
+                    .clamp(0.0, 1.0);
+                    sorting_notes[i] = sorting_volume_sum / items;
+                }
+            }
+
+            AnalysisBufferMidi {
+                timing,
+                min_value: self.midi_amplitude_threshold,
+                use_aftertouch: self.midi_use_aftertouch,
+                notes,
+                pressures: Some(pressures),
+            }
+        } else {
+            let mut notes: [(f32, f32); 128] = [(0.0, 0.0); 128];
+
+            for (i, (items, pan_sum, volume_sum, sorting_volume_sum)) in
+                note_scratchpad.into_iter().enumerate()
+            {
+                if items == 0.0 {
+                    notes[i] = (0.0, f32::NEG_INFINITY);
+                    sorting_notes[i] = f32::NEG_INFINITY;
+                } else {
+                    notes[i] = (pan_sum / items, volume_sum / items);
+                    sorting_notes[i] = sorting_volume_sum / items;
+                }
+            }
+
+            AnalysisBufferMidi {
+                timing,
+                min_value: self.midi_amplitude_threshold,
+                use_aftertouch: self.midi_use_aftertouch,
+                notes,
+                pressures: None,
+            }
+        };
+
+        let mut sorted_notes: [(f32, usize); 128] = [(0.0, 0); 128];
+
+        for (note, volume) in sorting_notes.into_iter().enumerate() {
+            sorted_notes[note] = (volume, note);
+        }
+        sorted_notes.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+
+        sorted_notes
+            .into_iter()
+            .rev()
+            .skip(self.midi_max_simultaneous as usize)
+            .for_each(|(_, note)| {
+                analysis_midi.notes[note].1 = f32::NEG_INFINITY;
+            });
+
+        // TODO: Use models of auditory masking to determine which notes to remove?
+
+        analysis_midi
     }
     pub(crate) fn config(&self) -> AnalysisChainConfig {
         let analyzer = self.left_analyzer.lock();
@@ -839,6 +899,7 @@ impl AnalysisChain {
             normalize_amplitude: self.listening_volume.is_some(),
             internal_buffering: self.internal_buffering,
             output_midi: self.output_midi,
+            midi_use_unnormalized: self.midi_use_unnormalized,
             midi_max_simultaneous: self.midi_max_simultaneous,
             midi_amplitude_threshold: self.midi_amplitude_threshold,
             midi_use_aftertouch: self.midi_use_aftertouch,
@@ -870,6 +931,7 @@ impl AnalysisChain {
         let old_analyzer_config = old_left_analyzer.1.config();
 
         self.output_midi = config.output_midi;
+        self.midi_use_unnormalized = config.midi_use_unnormalized;
         self.midi_max_simultaneous = config.midi_max_simultaneous;
         self.midi_amplitude_threshold = config.midi_amplitude_threshold;
         self.midi_use_aftertouch = config.midi_use_aftertouch;
