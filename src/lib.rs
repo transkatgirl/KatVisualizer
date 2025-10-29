@@ -297,7 +297,7 @@ impl Plugin for MyPlugin {
                 }
 
                 for (note, (pan, volume)) in buffer.notes.iter().enumerate() {
-                    if *volume > buffer.min_value {
+                    if *volume >= buffer.min_value {
                         if !self.midi_notes[note] {
                             context.send_event(NoteEvent::NoteOn {
                                 timing: buffer.timing,
@@ -354,7 +354,7 @@ impl Plugin for MyPlugin {
                 self.midi_volume_changed = true;
 
                 for (note, (pan, volume)) in buffer.notes.iter().enumerate() {
-                    if *volume > buffer.min_value {
+                    if *volume >= buffer.min_value {
                         if !self.midi_notes[note] {
                             context.send_event(NoteEvent::NoteOn {
                                 timing: buffer.timing,
