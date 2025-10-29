@@ -1439,7 +1439,7 @@ pub fn create(
                                         .logarithmic(true)
                                         .clamping(egui::SliderClamping::Never)
                                         .suffix(" Q")
-                                        .fixed_decimals(0)
+                                        .fixed_decimals(1)
                                         .text("Time resolution"),
                                 )
                                 .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.")
@@ -1521,6 +1521,8 @@ pub fn create(
                         {
                             if analysis_settings.output_midi {
                                 analysis_settings.internal_buffering = false;
+                                analysis_settings.erb_time_resolution = false;
+                                analysis_settings.q_time_resolution = 17.30993;
                             }
                             update(&analysis_settings);
                             egui_ctx.request_discard("Changed setting");
