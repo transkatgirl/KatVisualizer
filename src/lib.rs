@@ -370,7 +370,7 @@ impl Plugin for MyPlugin {
                             voice_id: None,
                             channel: 0,
                             note: note as u8,
-                            gain: db_to_gain(*volume) + 1.0,
+                            gain: db_to_gain(*volume),
                         });
 
                         context.send_event(NoteEvent::PolyPan {
@@ -722,13 +722,13 @@ impl AnalysisChain {
             if self.output_midi {
                 let frequencies = self.frequencies.read();
                 let mut note_scratchpad: [(f32, f32, f32); 128] = [(0.0, 0.0, 0.0); 128];
-                for ((lower, _, upper), (pan, volume)) in spectrogram.data[0]
+                for ((lower, center, upper), (pan, volume)) in spectrogram.data[0]
                     .data
                     .iter()
                     .enumerate()
                     .map(|(i, d)| (frequencies[i], d))
                 {
-                    let lower_note = freq_to_midi_note(lower).round().max(15.0) as usize;
+                    /*let lower_note = freq_to_midi_note(lower).round().max(15.0) as usize;
                     let upper_note = freq_to_midi_note(upper).round().max(15.0) as usize;
 
                     if lower_note > 127 {
@@ -748,7 +748,21 @@ impl AnalysisChain {
                         note_scratchpad[note].0 += 1.0;
                         note_scratchpad[note].1 += pan;
                         note_scratchpad[note].2 += volume;
+                    }*/
+
+                    let note = freq_to_midi_note(center).round().max(15.0) as usize;
+
+                    if note > 127 {
+                        break;
                     }
+
+                    if !volume.is_finite() {
+                        break;
+                    }
+
+                    note_scratchpad[note].0 += 1.0;
+                    note_scratchpad[note].1 += pan;
+                    note_scratchpad[note].2 += volume;
                 }
 
                 let mut analysis_midi = if !self.midi_use_volume {
