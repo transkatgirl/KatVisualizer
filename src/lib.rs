@@ -818,7 +818,7 @@ impl AnalysisChain {
                         analysis_midi.notes[note].1 = f32::NEG_INFINITY;
                     });
 
-                // TODO: Allow performing a-weighting when limiting simultaneous notes if amplitude normalization is off
+                // TODO: Allow performing ISO 226 weighting when limiting simultaneous notes if amplitude normalization is off
 
                 midi_output.push(analysis_midi);
 
