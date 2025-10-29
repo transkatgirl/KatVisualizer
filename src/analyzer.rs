@@ -387,6 +387,110 @@ impl BetterSpectrogram {
     }
 }
 
+// ----- Below algorithms are taken from https://www.gammaelectronics.xyz/poda_6e_11b.html -----
+
+fn spectral_flatness(spectrum: &[f64]) -> f64 {
+    let geometric_mean = spectrum
+        .iter()
+        .fold(1.0, |acc, v| acc * v)
+        .powf(1.0 / spectrum.len() as f64);
+    let arithmetic_mean = spectrum.iter().fold(0.0, |acc, v| acc + v) / spectrum.len() as f64;
+    amplitude_to_dbfs(geometric_mean / arithmetic_mean)
+}
+
+fn bark_masking_threshold(center_bark: f64, flatness: f64) -> f64 {
+    let sfm = map_value_f64(flatness, -60.0, 0.0, 0.0, 1.0);
+
+    let tonal_masking_threshold = -6.025 - (0.275 * center_bark);
+    let nontonal_masking_threshold = -2.025 - (0.175 * center_bark);
+
+    tonal_masking_threshold * (1.0 - sfm) + (nontonal_masking_threshold * sfm)
+}
+
+// ----- Below formula is taken from https://www.mp3-tech.org/programmer/docs/di042001.pdf -----
+
+fn bark_spreading_function(frequency: f64, amplitude_db: f64) -> (f64, f64) {
+    (
+        27.0,
+        22.0 + (230.0 / frequency).min(10.0) - 0.2 * amplitude_db,
+    )
+}
+
+// ----- Below formulas are based on https://wiki.hydrogenaudio.org/index.php?title=MP3 -----
+
+pub struct Masker {
+    frequencies: Vec<f64>,
+    bark_frequencies: Vec<f64>,
+    spectrum_scratchpad: Vec<f64>,
+}
+
+impl Masker {
+    pub fn new(frequencies: Vec<f64>) -> Self {
+        Self {
+            spectrum_scratchpad: vec![0.0; frequencies.len()],
+            bark_frequencies: frequencies
+                .iter()
+                .map(|f| FrequencyScale::Bark.scale(*f))
+                .collect(),
+            frequencies,
+        }
+    }
+    pub fn calculate_signal_to_mask(
+        &mut self,
+        spectrum: &[f64],
+        stm: &mut [f64],
+        hearing_threshold: f64,
+    ) {
+        spectrum
+            .iter()
+            .enumerate()
+            .for_each(|(i, s)| self.spectrum_scratchpad[i] = dbfs_to_amplitude(*s));
+
+        stm.iter_mut().for_each(|s| *s = hearing_threshold);
+
+        let flatness = spectral_flatness(spectrum);
+
+        for (i, component) in spectrum.iter().enumerate() {
+            let amplitude = self.spectrum_scratchpad[i];
+            let bark = self.bark_frequencies[i];
+
+            let (lower_spread, upper_spread) =
+                bark_spreading_function(self.frequencies[i], *component);
+
+            self.spectrum_scratchpad
+                .iter_mut()
+                .enumerate()
+                .map(|(i, s)| (self.bark_frequencies[i], s))
+                .for_each(|(b, s)| {
+                    *s += if b > bark {
+                        dbfs_to_amplitude(-upper_spread * (b - bark))
+                    } else if b < bark {
+                        dbfs_to_amplitude(-lower_spread * (bark - b))
+                    } else {
+                        0.0
+                    } * amplitude;
+                });
+        }
+
+        for (i, amplitude) in self.spectrum_scratchpad.iter().enumerate() {
+            let mask_per_bark = bark_masking_threshold(self.bark_frequencies[i], flatness);
+            let bark = self.bark_frequencies[i];
+
+            stm.iter_mut()
+                .enumerate()
+                .map(|(i, m)| (i, self.bark_frequencies[i], m))
+                .for_each(|(i, b, m)| {
+                    let masking = dbfs_to_amplitude(mask_per_bark * (bark - b).abs()) * amplitude;
+                    let mask_to_noise = spectrum[i] - amplitude_to_dbfs(masking);
+
+                    if mask_to_noise > *m {
+                        *m = mask_to_noise;
+                    }
+                });
+        }
+    }
+}
+
 // ----- Below formula is based on https://stackoverflow.com/a/35614871 -----
 
 pub fn calculate_pan_and_volume_from_amplitude(
@@ -534,28 +638,28 @@ pub fn map_value_f32(x: f32, min: f32, max: f32, target_min: f32, target_max: f3
     (x - min) / (max - min) * (target_max - target_min) + target_min
 }
 
-enum FrequencyScale {
+pub enum FrequencyScale {
     Logarithmic,
     Erb,
-    /*Bark,
-    Mel,*/
+    Bark,
+    Mel,
 }
 
 impl FrequencyScale {
-    fn scale(&self, x: f64) -> f64 {
+    pub fn scale(&self, x: f64) -> f64 {
         match self {
             Self::Logarithmic => x.log2(),
             Self::Erb => (1.0 + 0.00437 * x).log2(),
-            /*Self::Bark => (26.81 * x) / (1960.0 + x) - 0.53,
-            Self::Mel => (1.0 + x / 700.0).log2(),*/
+            Self::Bark => (26.81 * x) / (1960.0 + x) - 0.53,
+            Self::Mel => (1.0 + x / 700.0).log2(),
         }
     }
-    fn inv_scale(&self, x: f64) -> f64 {
+    pub fn inv_scale(&self, x: f64) -> f64 {
         match self {
             Self::Logarithmic => 2.0_f64.powf(x),
             Self::Erb => (1.0 / 0.00437) * ((2.0_f64.powf(x)) - 1.0),
-            /*Self::Bark => 1960.0 / (26.81 / (x + 0.53) - 1.0),
-            Self::Mel => 700.0 * ((2.0_f64.powf(x)) - 1.0),*/
+            Self::Bark => 1960.0 / (26.81 / (x + 0.53) - 1.0),
+            Self::Mel => 700.0 * ((2.0_f64.powf(x)) - 1.0),
         }
     }
     fn generate_bands<F>(&self, n: usize, low: f64, high: f64, bandwidth: F) -> Vec<FrequencyBand>
