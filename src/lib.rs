@@ -722,34 +722,12 @@ impl AnalysisChain {
             if self.output_midi {
                 let frequencies = self.frequencies.read();
                 let mut note_scratchpad: [(f32, f32, f32); 128] = [(0.0, 0.0, 0.0); 128];
-                for ((lower, center, upper), (pan, volume)) in spectrogram.data[0]
+                for ((_, center, _), (pan, volume)) in spectrogram.data[0]
                     .data
                     .iter()
                     .enumerate()
                     .map(|(i, d)| (frequencies[i], d))
                 {
-                    /*let lower_note = freq_to_midi_note(lower).round().max(15.0) as usize;
-                    let upper_note = freq_to_midi_note(upper).round().max(15.0) as usize;
-
-                    if lower_note > 127 {
-                        break;
-                    }
-
-                    #[allow(clippy::needless_range_loop)]
-                    for note in lower_note..=upper_note {
-                        if note > 127 {
-                            break;
-                        }
-
-                        if !volume.is_finite() {
-                            break;
-                        }
-
-                        note_scratchpad[note].0 += 1.0;
-                        note_scratchpad[note].1 += pan;
-                        note_scratchpad[note].2 += volume;
-                    }*/
-
                     let note = freq_to_midi_note(center).round().max(15.0) as usize;
 
                     if note > 127 {
