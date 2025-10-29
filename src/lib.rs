@@ -464,7 +464,7 @@ impl Default for AnalysisChainConfig {
             midi_use_aftertouch: true,
             midi_use_volume: false,
             midi_pressure_min_amplitude: 30.0 - 86.0,
-            midi_pressure_max_amplitude: 80.0 - 86.0,
+            midi_pressure_max_amplitude: 70.0 - 86.0,
 
             start_frequency: BetterAnalyzerConfiguration::default().start_frequency,
             end_frequency: BetterAnalyzerConfiguration::default().end_frequency,
