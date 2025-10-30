@@ -565,6 +565,10 @@ impl Masker {
             let frequency = self.frequency_set[i].0;
             let bark = self.frequency_set[i].1;
 
+            if !amplitude.is_normal() {
+                continue;
+            }
+
             let (lower_spread, upper_spread, simultaneous) = (
                 27.0,
                 22.0 + (230.0 / frequency).min(10.0) - 0.2 * amplitude_db,
@@ -579,19 +583,20 @@ impl Masker {
             let min = i.saturating_sub(stride.floor() as usize);
             let max = (i + stride.ceil() as usize).min(self.frequency_set.len());
 
-            (min..max)
+            (min..i)
                 .map(|i| (i, self.frequency_set[i].1))
                 .for_each(|(i, b)| {
-                    masking_threshold[i] += dbfs_to_amplitude(
-                        if b > bark {
-                            -upper_spread
-                        } else if b < bark {
-                            -lower_spread
-                        } else {
-                            0.0
-                        } * (bark - b).abs()
-                            + offset,
-                    ) * amplitude;
+                    masking_threshold[i] +=
+                        dbfs_to_amplitude(-lower_spread * (bark - b) + offset) * amplitude;
+                });
+
+            masking_threshold[i] += dbfs_to_amplitude(offset) * amplitude;
+
+            (i..max)
+                .map(|i| (i, self.frequency_set[i].1))
+                .for_each(|(i, b)| {
+                    masking_threshold[i] +=
+                        dbfs_to_amplitude(-upper_spread * (b - bark) + offset) * amplitude;
                 });
         }
 
