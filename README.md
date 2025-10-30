@@ -5,6 +5,7 @@ A realtime music visualizer designed to better match human hearing.
 The current processing chain consists of the following:
 - ERB-scale VQT with ERB based bandwidths
 - NC method windowing & spectral reassignment
+- Calcuation of simultaneous masking thresholds
 - ISO 226:2023 equal loudness contour
 - Extraction of panning information
 
@@ -55,6 +56,7 @@ If you're having performance or latency issues, enabling performance counters ca
 	- Affected by the following settings:
 		- Update rate
 		- Resolution
+		- Apply simultaneous masking
 		- Use NC method
 - rasterize = Proportion of the processing time taken up by the render thread.
 	- Affected by the following settings:

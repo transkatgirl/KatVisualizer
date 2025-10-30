@@ -126,6 +126,8 @@ pub struct BetterAnalysis {
     pub max: f32,
 }
 
+// TODO: Apply masking thresholds to analysis output
+
 impl BetterAnalysis {
     pub fn new(capacity: usize) -> Self {
         Self {
@@ -143,6 +145,7 @@ impl BetterAnalysis {
         right: &BetterAnalyzer,
         gain: f64,
         normalization_volume: Option<f64>,
+        masking: bool,
         duration: Duration,
     ) {
         assert_eq!(
@@ -154,6 +157,67 @@ impl BetterAnalysis {
 
         let mut sum = 0.0;
         self.max = f32::NEG_INFINITY;
+
+        if masking {
+            if self.data.len() != new_length {
+                self.masking.clear();
+
+                for _ in 0..new_length {
+                    self.masking.push(0.0);
+                }
+            }
+
+            /*let flatness = if spectrum.len() > 128 {
+                0.0
+            } else {
+                map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0)
+            };*/
+
+            let hearing_threshold = normalization_volume.map(|listening_volume| {
+                left.frequency_bands
+                    .iter()
+                    .map(move |(_, c, _)| approximate_hearing_threshold(*c) - listening_volume)
+            });
+
+            let gain_amplitude = dbfs_to_amplitude(gain);
+
+            left.masker.calculate_masking_threshold(
+                left.transform
+                    .spectrum_data
+                    .iter()
+                    .zip(right.transform.spectrum_data.iter())
+                    .map(|(l, r)| (l + r) * gain_amplitude),
+                0.0,
+                hearing_threshold,
+                &mut self.masking_scratchpad,
+            );
+
+            if let Some(listening_volume) = normalization_volume {
+                left.normalizers
+                    .iter()
+                    .enumerate()
+                    .for_each(|(i, normalizer)| {
+                        self.masking[i] = (normalizer
+                            .spl_to_phon(self.masking_scratchpad[i] + listening_volume)
+                            //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                            .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                            - listening_volume) as f32
+                    });
+            } else {
+                self.masking
+                    .iter_mut()
+                    .enumerate()
+                    .for_each(|(i, m)| *m = self.masking_scratchpad[i] as f32);
+            }
+        } else if self.data.len() != new_length {
+            self.masking.clear();
+
+            for _ in 0..new_length {
+                self.masking.push(f32::NEG_INFINITY);
+            }
+        } else {
+            self.masking.iter_mut().for_each(|m| *m = f32::NEG_INFINITY);
+        }
 
         if self.data.len() == new_length {
             if let Some(listening_volume) = normalization_volume {
@@ -257,49 +321,6 @@ impl BetterAnalysis {
             }
         }
 
-        /*let flatness = if spectrum.len() > 128 {
-            0.0
-        } else {
-            map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0)
-        };*/
-
-        let hearing_threshold = normalization_volume.map(|listening_volume| {
-            left.frequency_bands
-                .iter()
-                .map(move |(_, c, _)| approximate_hearing_threshold(*c) - listening_volume)
-        });
-
-        let gain_amplitude = dbfs_to_amplitude(gain);
-
-        left.masker.calculate_masking_threshold(
-            left.transform
-                .spectrum_data
-                .iter()
-                .zip(right.transform.spectrum_data.iter())
-                .map(|(l, r)| (l + r) * gain_amplitude),
-            0.0,
-            hearing_threshold,
-            &mut self.masking_scratchpad,
-        );
-
-        if let Some(listening_volume) = normalization_volume {
-            left.normalizers
-                .iter()
-                .enumerate()
-                .for_each(|(i, normalizer)| {
-                    self.masking[i] = (normalizer
-                        .spl_to_phon(self.masking_scratchpad[i] + listening_volume)
-                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                        .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                        - listening_volume) as f32
-                });
-        } else {
-            self.masking
-                .iter_mut()
-                .enumerate()
-                .for_each(|(i, m)| *m = self.masking_scratchpad[i] as f32);
-        }
-
         self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
 
         self.duration = duration;
@@ -309,12 +330,76 @@ impl BetterAnalysis {
         center: &BetterAnalyzer,
         gain: f64,
         normalization_volume: Option<f64>,
+        masking: bool,
         duration: Duration,
     ) {
         let new_length = center.transform.spectrum_data.len();
 
         let mut sum = 0.0;
         self.max = f32::NEG_INFINITY;
+
+        if masking {
+            if self.data.len() != new_length {
+                self.masking.clear();
+
+                for _ in 0..new_length {
+                    self.masking.push(0.0);
+                }
+            }
+
+            /*let flatness = if spectrum.len() > 128 {
+                0.0
+            } else {
+                map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0)
+            };*/
+
+            let hearing_threshold = normalization_volume.map(|listening_volume| {
+                center
+                    .frequency_bands
+                    .iter()
+                    .map(move |(_, c, _)| approximate_hearing_threshold(*c) - listening_volume)
+            });
+
+            let gain_amplitude = dbfs_to_amplitude(gain);
+
+            center.masker.calculate_masking_threshold(
+                center
+                    .transform
+                    .spectrum_data
+                    .iter()
+                    .map(|c| *c * gain_amplitude),
+                0.0,
+                hearing_threshold,
+                &mut self.masking_scratchpad,
+            );
+
+            if let Some(listening_volume) = normalization_volume {
+                center
+                    .normalizers
+                    .iter()
+                    .enumerate()
+                    .for_each(|(i, normalizer)| {
+                        self.masking[i] = (normalizer
+                            .spl_to_phon(self.masking_scratchpad[i] + listening_volume)
+                            //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                            .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                            - listening_volume) as f32
+                    });
+            } else {
+                self.masking
+                    .iter_mut()
+                    .enumerate()
+                    .for_each(|(i, m)| *m = self.masking_scratchpad[i] as f32);
+            }
+        } else if self.data.len() != new_length {
+            self.masking.clear();
+
+            for _ in 0..new_length {
+                self.masking.push(f32::NEG_INFINITY);
+            }
+        } else {
+            self.masking.iter_mut().for_each(|m| *m = f32::NEG_INFINITY);
+        }
 
         if self.data.len() == new_length {
             if let Some(listening_volume) = normalization_volume {
@@ -391,57 +476,6 @@ impl BetterAnalysis {
                     }
                 }
             }
-
-            self.masking.clear();
-
-            for _ in 0..new_length {
-                self.masking.push(0.0);
-            }
-        }
-
-        /*let flatness = if spectrum.len() > 128 {
-            0.0
-        } else {
-            map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0)
-        };*/
-
-        let hearing_threshold = normalization_volume.map(|listening_volume| {
-            center
-                .frequency_bands
-                .iter()
-                .map(move |(_, c, _)| approximate_hearing_threshold(*c) - listening_volume)
-        });
-
-        let gain_amplitude = dbfs_to_amplitude(gain);
-
-        center.masker.calculate_masking_threshold(
-            center
-                .transform
-                .spectrum_data
-                .iter()
-                .map(|c| *c * gain_amplitude),
-            0.0,
-            hearing_threshold,
-            &mut self.masking_scratchpad,
-        );
-
-        if let Some(listening_volume) = normalization_volume {
-            center
-                .normalizers
-                .iter()
-                .enumerate()
-                .for_each(|(i, normalizer)| {
-                    self.masking[i] = (normalizer
-                        .spl_to_phon(self.masking_scratchpad[i] + listening_volume)
-                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                        .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                        - listening_volume) as f32
-                });
-        } else {
-            self.masking
-                .iter_mut()
-                .enumerate()
-                .for_each(|(i, m)| *m = self.masking_scratchpad[i] as f32);
         }
 
         self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;

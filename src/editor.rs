@@ -207,6 +207,71 @@ fn draw_bargraph_from_iter(
     }
 }
 
+fn draw_bargraph_secondary(
+    mesh: &mut Mesh,
+    analysis: impl Iterator<Item = f32>,
+    analysis_len: usize,
+    bounds: Rect,
+    color: Color32,
+    (max_db, min_db): (f32, f32),
+) {
+    let width = bounds.max.x - bounds.min.x;
+    let height = bounds.max.y - bounds.min.y;
+
+    let mut vertices = mesh.vertices.len() as u32;
+
+    let band_width = width / analysis_len as f32;
+
+    for (i, volume) in analysis.enumerate() {
+        let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+
+        let start_x = bounds.min.x + i as f32 * band_width;
+
+        let rect = Rect {
+            min: Pos2 {
+                x: start_x,
+                y: bounds.max.y - intensity * height,
+            },
+            max: Pos2 {
+                x: start_x + band_width,
+                y: bounds.max.y,
+            },
+        };
+
+        mesh.indices.extend_from_slice(&[
+            vertices,
+            vertices + 1,
+            vertices + 2,
+            vertices + 2,
+            vertices + 1,
+            vertices + 3,
+        ]);
+        mesh.vertices.extend_from_slice(&[
+            Vertex {
+                pos: rect.left_top(),
+                uv: WHITE_UV,
+                color,
+            },
+            Vertex {
+                pos: rect.right_top(),
+                uv: WHITE_UV,
+                color,
+            },
+            Vertex {
+                pos: rect.left_bottom(),
+                uv: WHITE_UV,
+                color,
+            },
+            Vertex {
+                pos: rect.right_bottom(),
+                uv: WHITE_UV,
+                color,
+            },
+        ]);
+        vertices += 4;
+    }
+}
+
 fn draw_spectrogram_image(
     image: &mut ColorImage,
     spectrogram: &BetterSpectrogram,
@@ -341,6 +406,7 @@ struct RenderSettings {
     show_performance: bool,
     show_format: bool,
     show_hover: bool,
+    show_masking: bool,
 }
 
 impl Default for RenderSettings {
@@ -366,6 +432,7 @@ impl Default for RenderSettings {
             show_performance: true,
             show_format: false,
             show_hover: true,
+            show_masking: false,
         }
     }
 }
@@ -595,6 +662,16 @@ pub fn create(
                         (max_db, min_db),
                         settings.bargraph_averaging,
                     );
+                    if settings.show_masking {
+                        draw_bargraph_secondary(
+                            &mut bargraph_mesh,
+                            spectrogram.data[0].masking.iter().copied(),
+                            spectrogram.data[0].masking.len(),
+                            bargraph_bounds,
+                            Color32::RED,
+                            (max_db, min_db),
+                        );
+                    }
                 }
 
                 if settings.bargraph_height != 1.0 {
@@ -1135,6 +1212,10 @@ pub fn create(
 
                         ui.checkbox(&mut render_settings.show_format, "Show audio format information");
 
+                        if analysis_settings.masking {
+                            ui.checkbox(&mut render_settings.show_masking, "Show simultaneous masking thresholds");
+                        }
+
                         if ui.button("Reset Render Options").clicked() {
                             *render_settings = RenderSettings::default();
                             render_settings.max_db =
@@ -1277,6 +1358,19 @@ pub fn create(
                                 egui_ctx.request_discard("Changed setting");
                                 return;
                             };
+                        }
+
+                        if ui
+                            .checkbox(
+                                &mut analysis_settings.masking,
+                                "Apply simultaneous masking",
+                            )
+                            .on_hover_text("If this is enabled, simultaneous masking thresholds are calculated and applied to the amplitude values.\nIf this is disabled, simultaneous masking thresholds are not calculated.")
+                            .changed()
+                        {
+                            update(&analysis_settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
                         }
 
                         if ui

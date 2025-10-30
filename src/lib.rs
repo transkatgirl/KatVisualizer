@@ -425,6 +425,7 @@ pub(crate) struct AnalysisChainConfig {
     gain: f64,
     listening_volume: f64,
     normalize_amplitude: bool,
+    masking: bool,
     internal_buffering: bool,
     update_rate_hz: f64,
     latency_offset: Duration,
@@ -455,6 +456,7 @@ impl Default for AnalysisChainConfig {
             gain: 0.0,
             listening_volume: 86.0,
             normalize_amplitude: true,
+            masking: true,
             internal_buffering: true,
             update_rate_hz: 1024.0,
             resolution: 512,
@@ -497,6 +499,7 @@ pub(crate) struct AnalysisChain {
     midi_pressure_max_amplitude: f32,
     update_rate: f64,
     listening_volume: Option<f64>,
+    masking: bool,
     pub(crate) latency_samples: u32,
     additional_latency: Duration,
     sample_rate: f32,
@@ -580,6 +583,7 @@ impl AnalysisChain {
             } else {
                 None
             },
+            masking: config.masking,
             chunk_size,
             chunk_duration: Duration::from_secs_f64(chunk_size as f64 / sample_rate as f64),
             single_input: layout.main_input_channels == NonZero::new(1),
@@ -640,6 +644,7 @@ impl AnalysisChain {
                                     left_analyzer,
                                     self.gain,
                                     self.listening_volume,
+                                    self.masking,
                                     self.chunk_duration,
                                 );
                             } else {
@@ -648,6 +653,7 @@ impl AnalysisChain {
                                     right_analyzer,
                                     self.gain,
                                     self.listening_volume,
+                                    self.masking,
                                     self.chunk_duration,
                                 );
                             }
@@ -710,6 +716,7 @@ impl AnalysisChain {
                         left_analyzer,
                         self.gain,
                         self.listening_volume,
+                        self.masking,
                         chunk_duration,
                     );
                 } else {
@@ -718,6 +725,7 @@ impl AnalysisChain {
                         right_analyzer,
                         self.gain,
                         self.listening_volume,
+                        self.masking,
                         chunk_duration,
                     );
                 }
@@ -899,6 +907,7 @@ impl AnalysisChain {
                 .listening_volume
                 .unwrap_or(AnalysisChainConfig::default().listening_volume),
             normalize_amplitude: self.listening_volume.is_some(),
+            masking: self.masking,
             internal_buffering: self.internal_buffering,
             output_midi: self.output_midi,
             midi_use_unnormalized: self.midi_use_unnormalized,
@@ -928,6 +937,7 @@ impl AnalysisChain {
         } else {
             None
         };
+        self.masking = config.masking;
 
         let old_left_analyzer = self.left_analyzer.lock();
         let old_analyzer_config = old_left_analyzer.1.config();
