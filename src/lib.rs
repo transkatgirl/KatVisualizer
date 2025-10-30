@@ -662,6 +662,8 @@ impl AnalysisChain {
         left_analyzer: &BetterAnalyzer,
         right_analyzer: &BetterAnalyzer,
     ) -> AnalysisBufferMidi {
+        // TODO: better handle tones positioned in between two MIDI notes
+
         let frequencies = self.frequencies.read();
         let mut note_scratchpad: [(f32, f32, f32, f32); 128] = [(0.0, 0.0, 0.0, 0.0); 128];
 
