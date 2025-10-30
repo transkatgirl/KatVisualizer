@@ -387,6 +387,24 @@ impl BetterSpectrogram {
     }
 }
 
+// ----- Below algorithms are taken from https://www.gammaelectronics.xyz/poda_6e_11b.html -----
+
+fn spectral_flatness(spectrum: &[f64]) -> f64 {
+    let geometric_mean = spectrum
+        .iter()
+        .fold(1.0, |acc, v| acc * v)
+        .powf(1.0 / spectrum.len() as f64);
+    let arithmetic_mean = spectrum.iter().fold(0.0, |acc, v| acc + v) / spectrum.len() as f64;
+    amplitude_to_dbfs(geometric_mean / arithmetic_mean)
+}
+
+fn masking_threshold_offset(center_bark: f64, flatness: f64) -> f64 {
+    let tonal_masking_threshold = -6.025 - (0.275 * center_bark);
+    let nontonal_masking_threshold = -2.025 - (0.175 * center_bark);
+
+    tonal_masking_threshold * (1.0 - flatness) + (nontonal_masking_threshold * flatness)
+}
+
 // ----- Below formula is taken from https://www.mp3-tech.org/programmer/docs/di042001.pdf -----
 
 fn bark_spreading_function(frequency: f64, amplitude_db: f64) -> (f64, f64) {
@@ -425,6 +443,8 @@ impl Masker {
             .iter_mut()
             .for_each(|s| *s = hearing_threshold_amplitude);
 
+        //let flatness = map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0);
+
         for (i, component) in spectrum.iter().enumerate() {
             let amplitude = dbfs_to_amplitude(*component);
             let bark = self.bark_frequencies[i];
@@ -432,18 +452,27 @@ impl Masker {
             let (lower_spread, upper_spread) =
                 bark_spreading_function(self.frequencies[i], *component);
 
+            let offset = masking_threshold_offset(bark, 0.0); // TODO
+
             masking_threshold
                 .iter_mut()
                 .enumerate()
                 .map(|(i, s)| (self.bark_frequencies[i], s))
                 .for_each(|(b, s)| {
-                    *s += if b > bark {
-                        dbfs_to_amplitude((-upper_spread * (b - bark)))
-                    } else if b < bark {
-                        dbfs_to_amplitude((-lower_spread * (bark - b)))
-                    } else {
-                        0.0
-                    } * amplitude;
+                    let m = dbfs_to_amplitude(
+                        if b > bark {
+                            -upper_spread
+                        } else if b < bark {
+                            -lower_spread
+                        } else {
+                            0.0
+                        } * (bark - b).abs()
+                            + offset,
+                    ) * amplitude;
+
+                    if m > *s {
+                        *s = m;
+                    }
                 });
         }
 
