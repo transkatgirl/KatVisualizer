@@ -389,13 +389,21 @@ impl BetterSpectrogram {
 
 // ----- Below algorithms are taken from https://www.gammaelectronics.xyz/poda_6e_11b.html -----
 
+// Only recommended for use on small arrays (len <= 128) due to underflow/overflow issues
 fn spectral_flatness(spectrum: &[f64]) -> f64 {
-    let geometric_mean = spectrum
+    let (count, product, sum): (usize, f64, f64) = spectrum
         .iter()
-        .fold(1.0, |acc, v| acc * v)
-        .powf(1.0 / spectrum.len() as f64);
-    let arithmetic_mean = spectrum.iter().fold(0.0, |acc, v| acc + v) / spectrum.len() as f64;
-    amplitude_to_dbfs(geometric_mean / arithmetic_mean)
+        .filter(|v| v.is_finite())
+        .map(|v| dbfs_to_amplitude(*v) * 8192.0) // Helps with underflow/overflow issues
+        .fold((0, 1.0, 0.0), |acc, v| (acc.0 + 1, acc.1 * v, acc.2 + v));
+    let count = count as f64;
+
+    let geometric_mean = product.powf(1.0 / count);
+    let arithmetic_mean = sum / count;
+
+    let flatness = amplitude_to_dbfs(geometric_mean / arithmetic_mean);
+
+    if flatness.is_normal() { flatness } else { 0.0 }
 }
 
 fn masking_threshold_offset(center_bark: f64, flatness: f64) -> f64 {
@@ -436,8 +444,7 @@ impl Masker {
             .enumerate()
             .for_each(|(i, h)| masking_threshold[i] = dbfs_to_amplitude(*h));
 
-        //let flatness = map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0);
-        let flatness = 0.0; // TODO
+        let flatness = map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0);
 
         for (i, component) in spectrum.iter().enumerate() {
             let amplitude = dbfs_to_amplitude(*component);
