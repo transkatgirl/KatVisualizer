@@ -78,21 +78,13 @@ fn draw_bargraph(
     spectrogram: &BetterSpectrogram,
     bounds: Rect,
     color_table: &ColorTable,
+    masking: bool,
     (max_db, min_db): (f32, f32),
     averaging: Duration,
 ) {
     let front = &spectrogram.data.front().unwrap();
 
-    if averaging.is_zero() {
-        draw_bargraph_from_iter(
-            mesh,
-            front.data.iter().copied(),
-            front.data.len(),
-            bounds,
-            color_table,
-            (max_db, min_db),
-        );
-    } else {
+    if !averaging.is_zero() {
         let target_len = front.data.len();
         let target_duration = front.duration;
 
@@ -112,33 +104,74 @@ fn draw_bargraph(
         if max_index > 1 {
             let count = max_index as f32 + 1.0;
 
-            let iterator = (0..target_len).map(move |i| {
-                let sum = (0..=max_index)
-                    .map(|ii| spectrogram.data[ii].data[i])
-                    .fold((0.0, 0.0), |acc, d| (acc.0 + d.0, acc.1 + d.1));
+            if masking {
+                let iterator = (0..target_len).map(move |i| {
+                    let sum = (0..=max_index)
+                        .map(|ii| {
+                            (
+                                spectrogram.data[ii].data[i],
+                                spectrogram.data[ii].masking[i],
+                            )
+                        })
+                        .fold((0.0, 0.0), |acc, (d, m)| (acc.0 + d.0, acc.1 + d.1.max(m)));
 
-                (sum.0 / count, sum.1 / count)
-            });
+                    (sum.0 / count, sum.1 / count)
+                });
 
-            draw_bargraph_from_iter(
-                mesh,
-                iterator,
-                target_len,
-                bounds,
-                color_table,
-                (max_db, min_db),
-            );
-        } else {
-            draw_bargraph_from_iter(
-                mesh,
-                front.data.iter().copied(),
-                target_len,
-                bounds,
-                color_table,
-                (max_db, min_db),
-            );
-        };
-    };
+                draw_bargraph_from_iter(
+                    mesh,
+                    iterator,
+                    target_len,
+                    bounds,
+                    color_table,
+                    (max_db, min_db),
+                );
+            } else {
+                let iterator = (0..target_len).map(move |i| {
+                    let sum = (0..=max_index)
+                        .map(|ii| spectrogram.data[ii].data[i])
+                        .fold((0.0, 0.0), |acc, d| (acc.0 + d.0, acc.1 + d.1));
+
+                    (sum.0 / count, sum.1 / count)
+                });
+
+                draw_bargraph_from_iter(
+                    mesh,
+                    iterator,
+                    target_len,
+                    bounds,
+                    color_table,
+                    (max_db, min_db),
+                );
+            }
+
+            return;
+        }
+    }
+
+    if masking {
+        draw_bargraph_from_iter(
+            mesh,
+            front
+                .data
+                .iter()
+                .zip(front.masking.iter())
+                .map(|(d, m)| (d.0, d.1.max(*m))),
+            front.data.len(),
+            bounds,
+            color_table,
+            (max_db, min_db),
+        );
+    } else {
+        draw_bargraph_from_iter(
+            mesh,
+            front.data.iter().copied(),
+            front.data.len(),
+            bounds,
+            color_table,
+            (max_db, min_db),
+        );
+    }
 }
 
 fn draw_bargraph_from_iter(
@@ -207,75 +240,11 @@ fn draw_bargraph_from_iter(
     }
 }
 
-fn draw_bargraph_secondary(
-    mesh: &mut Mesh,
-    analysis: impl Iterator<Item = f32>,
-    analysis_len: usize,
-    bounds: Rect,
-    color: Color32,
-    (max_db, min_db): (f32, f32),
-) {
-    let width = bounds.max.x - bounds.min.x;
-    let height = bounds.max.y - bounds.min.y;
-
-    let mut vertices = mesh.vertices.len() as u32;
-
-    let band_width = width / analysis_len as f32;
-
-    for (i, volume) in analysis.enumerate() {
-        let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
-
-        let start_x = bounds.min.x + i as f32 * band_width;
-
-        let rect = Rect {
-            min: Pos2 {
-                x: start_x,
-                y: bounds.max.y - intensity * height,
-            },
-            max: Pos2 {
-                x: start_x + band_width,
-                y: bounds.max.y,
-            },
-        };
-
-        mesh.indices.extend_from_slice(&[
-            vertices,
-            vertices + 1,
-            vertices + 2,
-            vertices + 2,
-            vertices + 1,
-            vertices + 3,
-        ]);
-        mesh.vertices.extend_from_slice(&[
-            Vertex {
-                pos: rect.left_top(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.right_top(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.left_bottom(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.right_bottom(),
-                uv: WHITE_UV,
-                color,
-            },
-        ]);
-        vertices += 4;
-    }
-}
-
 fn draw_spectrogram_image(
     image: &mut ColorImage,
     spectrogram: &BetterSpectrogram,
     color_table: &ColorTable,
+    masking: bool,
     (max_db, min_db): (f32, f32),
 ) {
     let target_duration = spectrogram.data.front().unwrap().duration;
@@ -291,9 +260,21 @@ fn draw_spectrogram_image(
             break;
         }
 
-        for (x, (pan, volume)) in analysis.data.iter().enumerate() {
-            let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
-            image.pixels[(image_width * y) + x] = color_table.lookup(*pan, intensity);
+        if masking {
+            for (x, ((pan, volume), masking)) in analysis
+                .data
+                .iter()
+                .zip(analysis.masking.iter())
+                .enumerate()
+            {
+                let intensity = map_value_f32(volume.max(*masking), min_db, max_db, 0.0, 1.0);
+                image.pixels[(image_width * y) + x] = color_table.lookup(*pan, intensity);
+            }
+        } else {
+            for (x, (pan, volume)) in analysis.data.iter().enumerate() {
+                let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
+                image.pixels[(image_width * y) + x] = color_table.lookup(*pan, intensity);
+            }
         }
     }
 }
@@ -432,7 +413,7 @@ impl Default for RenderSettings {
             show_performance: true,
             show_format: false,
             show_hover: true,
-            show_masking: false,
+            show_masking: true,
         }
     }
 }
@@ -659,19 +640,10 @@ pub fn create(
                         spectrogram,
                         bargraph_bounds,
                         color_table,
+                        settings.show_masking,
                         (max_db, min_db),
                         settings.bargraph_averaging,
                     );
-                    if settings.show_masking {
-                        draw_bargraph_secondary(
-                            &mut bargraph_mesh,
-                            spectrogram.data[0].masking.iter().copied(),
-                            spectrogram.data[0].masking.len(),
-                            bargraph_bounds,
-                            Color32::RED,
-                            (max_db, min_db),
-                        );
-                    }
                 }
 
                 if settings.bargraph_height != 1.0 {
@@ -679,6 +651,7 @@ pub fn create(
                         &mut spectrogram_image,
                         spectrogram,
                         color_table,
+                        settings.show_masking,
                         (max_db, min_db),
                     );
                 }
@@ -1208,13 +1181,13 @@ pub fn create(
 
                         ui.checkbox(&mut render_settings.show_hover, "Show hover information");
 
+                        if analysis_settings.masking {
+                            ui.checkbox(&mut render_settings.show_masking, "Show simultaneous masking");
+                        }
+
                         ui.checkbox(&mut render_settings.show_performance, "Show performance counters");
 
                         ui.checkbox(&mut render_settings.show_format, "Show audio format information");
-
-                        if analysis_settings.masking {
-                            ui.checkbox(&mut render_settings.show_masking, "Show simultaneous masking thresholds");
-                        }
 
                         if ui.button("Reset Render Options").clicked() {
                             *render_settings = RenderSettings::default();
@@ -1365,7 +1338,7 @@ pub fn create(
                                 &mut analysis_settings.masking,
                                 "Apply simultaneous masking",
                             )
-                            .on_hover_text("If this is enabled, simultaneous masking thresholds are calculated using a tone-masking-tone model and signals below the masking threshold are removed.\nIf this is disabled, simultaneous masking thresholds are not calculated.")
+                            .on_hover_text("If this is enabled, simultaneous masking thresholds are calculated using a tone-masking-tone model.\nIf this is disabled, simultaneous masking thresholds are not calculated.")
                             .changed()
                         {
                             update(&analysis_settings);
