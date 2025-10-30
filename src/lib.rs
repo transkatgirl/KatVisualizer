@@ -778,7 +778,7 @@ impl AnalysisChain {
                 .rev()
                 .skip(self.midi_max_simultaneous as usize)
                 .for_each(|(_, _, note)| {
-                    analysis_midi.notes[note] = f32::NEG_INFINITY;
+                    analysis_midi.notes[note] = 0.0;
                 });
         }
 
