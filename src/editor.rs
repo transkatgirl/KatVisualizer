@@ -1615,6 +1615,7 @@ pub fn create(
                         {
                             if analysis_settings.output_midi {
                                 analysis_settings.internal_buffering = false;
+                                analysis_settings.masking = true;
                                 analysis_settings.erb_time_resolution = false;
                                 analysis_settings.q_time_resolution = 17.30993;
                             }

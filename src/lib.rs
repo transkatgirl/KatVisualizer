@@ -456,7 +456,7 @@ impl Default for AnalysisChainConfig {
             gain: 0.0,
             listening_volume: 86.0,
             normalize_amplitude: true,
-            masking: true,
+            masking: false,
             internal_buffering: true,
             update_rate_hz: 1024.0,
             resolution: 512,
@@ -765,32 +765,72 @@ impl AnalysisChain {
             let left = left_analyzer.raw_analysis();
             let right = right_analyzer.raw_analysis();
 
-            for (index, (_, center, _), (pan, normalized_volume)) in spectrogram.data[0]
-                .data
-                .iter()
-                .enumerate()
-                .map(|(i, d)| (i, frequencies[i], d))
-            {
-                let note = freq_to_midi_note(center).round() as usize;
+            if self.masking {
+                for (index, (_, center, _), (pan, normalized_volume)) in spectrogram.data[0]
+                    .data
+                    .iter()
+                    .enumerate()
+                    .map(|(i, d)| (i, frequencies[i], d))
+                {
+                    let note = freq_to_midi_note(center).round() as usize;
 
-                if note > 127 {
-                    break;
+                    if note > 127 {
+                        break;
+                    }
+
+                    let volume = (if self.single_input {
+                        amplitude_to_dbfs(left[index])
+                    } else {
+                        amplitude_to_dbfs(left[index] + right[index])
+                    } + self.gain) as f32;
+
+                    if !volume.is_finite() {
+                        continue;
+                    }
+
+                    if volume < spectrogram.data[0].masking[index] {
+                        note_scratchpad[note].0 += 1.0;
+                        note_scratchpad[note].3 += normalized_volume;
+                    } else {
+                        note_scratchpad[note].0 += 1.0;
+                        note_scratchpad[note].1 += pan;
+                        note_scratchpad[note].2 += volume;
+                        note_scratchpad[note].3 += normalized_volume;
+                    }
+
+                    note_scratchpad[note].0 += 1.0;
+                    note_scratchpad[note].1 += pan;
+                    note_scratchpad[note].2 += volume;
+                    note_scratchpad[note].3 += normalized_volume;
                 }
+            } else {
+                for (index, (_, center, _), (pan, normalized_volume)) in spectrogram.data[0]
+                    .data
+                    .iter()
+                    .enumerate()
+                    .map(|(i, d)| (i, frequencies[i], d))
+                {
+                    let note = freq_to_midi_note(center).round() as usize;
 
-                let volume = if self.single_input {
-                    amplitude_to_dbfs(left[index])
-                } else {
-                    amplitude_to_dbfs(left[index] + right[index])
-                } + self.gain;
+                    if note > 127 {
+                        break;
+                    }
 
-                if !volume.is_finite() {
-                    continue;
+                    let volume = if self.single_input {
+                        amplitude_to_dbfs(left[index])
+                    } else {
+                        amplitude_to_dbfs(left[index] + right[index])
+                    } + self.gain;
+
+                    if !volume.is_finite() {
+                        continue;
+                    }
+
+                    note_scratchpad[note].0 += 1.0;
+                    note_scratchpad[note].1 += pan;
+                    note_scratchpad[note].2 += volume as f32;
+                    note_scratchpad[note].3 += normalized_volume;
                 }
-
-                note_scratchpad[note].0 += 1.0;
-                note_scratchpad[note].1 += pan;
-                note_scratchpad[note].2 += volume as f32;
-                note_scratchpad[note].3 += normalized_volume;
             }
         } else {
             for ((_, center, _), (pan, volume)) in spectrogram.data[0]
