@@ -1705,7 +1705,7 @@ pub fn create(
                                                 .fixed_decimals(0)
                                                 .text("MIDI note pressure minimum amplitude"),
                                         )
-                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.")
+                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
                                         .changed()
                                     {
                                         analysis_settings.midi_pressure_min_amplitude =
@@ -1774,7 +1774,7 @@ pub fn create(
                                                 .fixed_decimals(0)
                                                 .text("MIDI note pressure minimum amplitude"),
                                         )
-                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.")
+                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
                                         .changed()
                                     {
                                         update(&analysis_settings);

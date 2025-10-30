@@ -246,6 +246,8 @@ impl Plugin for MyPlugin {
 
             drop(lock);
 
+            // TODO: Need to ensure that we're compliant with the MIDI spec, and need to see if PolyPan & PolyVolume work
+
             #[cfg(feature = "midi")]
             for buffer in &self.analysis_midi_output {
                 if !self.midi_on {
@@ -272,7 +274,7 @@ impl Plugin for MyPlugin {
                     }
 
                     for (note, (_, volume)) in buffer.notes.iter().enumerate() {
-                        if *volume >= buffer.min_value {
+                        if *volume >= buffer.min_value && pressures[note] > 0.0 {
                             if !self.midi_notes[note] {
                                 context.send_event(NoteEvent::NoteOn {
                                     timing: buffer.timing,
