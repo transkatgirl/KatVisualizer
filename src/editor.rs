@@ -1347,7 +1347,7 @@ pub fn create(
                         if ui
                             .checkbox(
                                 &mut analysis_settings.masking,
-                                "Apply simultaneous masking",
+                                "Perform simultaneous masking",
                             )
                             .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, simultaneous masking thresholds are calculated using a tone-masking-tone model.\nIf this is disabled, simultaneous masking thresholds are not calculated.")
                             .changed()
