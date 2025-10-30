@@ -10,6 +10,7 @@ use nih_plug::{
 use nih_plug_egui::EguiState;
 use parking_lot::{FairMutex, Mutex, RwLock};
 use std::{
+    cmp::Ordering,
     num::NonZero,
     sync::Arc,
     time::{Duration, Instant},
@@ -880,7 +881,22 @@ impl AnalysisChain {
         };
 
         if self.midi_max_simultaneous != 128 {
-            sorting_notes.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+            if self.masking {
+                const AMPLITUDE_BIN_SIZE: f32 = 3.0;
+
+                sorting_notes.sort_unstable_by(|a, b| {
+                    let amplitude_cmp = ((a.0 / AMPLITUDE_BIN_SIZE).round())
+                        .total_cmp(&(b.0 / AMPLITUDE_BIN_SIZE).round());
+
+                    if amplitude_cmp == Ordering::Equal {
+                        a.1.total_cmp(&b.1)
+                    } else {
+                        amplitude_cmp
+                    }
+                });
+            } else {
+                sorting_notes.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+            }
 
             sorting_notes
                 .into_iter()
