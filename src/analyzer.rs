@@ -405,16 +405,10 @@ fn masking_threshold_offset(center_bark: f64, flatness: f64) -> f64 {
     tonal_masking_threshold * (1.0 - flatness) + (nontonal_masking_threshold * flatness)
 }
 
-// ----- Below formula is taken from https://www.mp3-tech.org/programmer/docs/di042001.pdf -----
-
-fn bark_spreading_function(frequency: f64, amplitude_db: f64) -> (f64, f64) {
-    (
-        27.0,
-        22.0 + (230.0 / frequency).min(10.0) - 0.2 * amplitude_db,
-    )
-}
-
-// ----- Below algorithm is based on https://link.springer.com/chapter/10.1007/978-3-319-07974-5_2 chapter 2.4 -----
+// ----- Below algorithm is based on the following: -----
+// https://link.springer.com/chapter/10.1007/978-3-319-07974-5_2 chapter 2.4
+// https://www.mp3-tech.org/programmer/docs/di042001.pdf
+// https://dn790006.ca.archive.org/0/items/05shlacpsychacousticsmodelsws201718gs/05_shl_AC_Psychacoustics_Models_WS-2017-18_gs.pdf
 
 pub struct Masker {
     frequencies: Vec<f64>,
@@ -434,32 +428,37 @@ impl Masker {
     pub fn calculate_masking_threshold(
         &mut self,
         spectrum: &[f64],
+        hearing_threshold: &[f64],
         masking_threshold: &mut [f64],
-        hearing_threshold: f64, // TODO
     ) {
-        let hearing_threshold_amplitude = dbfs_to_amplitude(hearing_threshold);
-
-        masking_threshold
-            .iter_mut()
-            .for_each(|s| *s = hearing_threshold_amplitude);
+        hearing_threshold
+            .iter()
+            .enumerate()
+            .for_each(|(i, h)| masking_threshold[i] = dbfs_to_amplitude(*h));
 
         //let flatness = map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0);
+        let flatness = 0.0; // TODO
 
         for (i, component) in spectrum.iter().enumerate() {
             let amplitude = dbfs_to_amplitude(*component);
+            let amplitude_db = *component;
+            let frequency = self.frequencies[i];
             let bark = self.bark_frequencies[i];
 
-            let (lower_spread, upper_spread) =
-                bark_spreading_function(self.frequencies[i], *component);
+            let (lower_spread, upper_spread, simultaneous) = (
+                27.0,
+                22.0 + (230.0 / frequency).min(10.0) - 0.2 * amplitude_db,
+                27.0,
+            );
 
-            let offset = masking_threshold_offset(bark, 0.0); // TODO
+            let offset = masking_threshold_offset(bark, flatness) - simultaneous;
 
             masking_threshold
                 .iter_mut()
                 .enumerate()
                 .map(|(i, s)| (self.bark_frequencies[i], s))
                 .for_each(|(b, s)| {
-                    let m = dbfs_to_amplitude(
+                    *s += dbfs_to_amplitude(
                         if b > bark {
                             -upper_spread
                         } else if b < bark {
@@ -469,10 +468,6 @@ impl Masker {
                         } * (bark - b).abs()
                             + offset,
                     ) * amplitude;
-
-                    if m > *s {
-                        *s = m;
-                    }
                 });
         }
 
