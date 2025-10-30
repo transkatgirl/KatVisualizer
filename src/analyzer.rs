@@ -120,7 +120,8 @@ impl BetterAnalyzer {
 pub struct BetterAnalysis {
     pub duration: Duration,
     pub data: Vec<(f32, f32)>,
-    pub masking: Vec<f64>,
+    masking_scratchpad: Vec<f64>,
+    pub masking: Vec<f32>,
     pub mean: f32,
     pub max: f32,
 }
@@ -130,6 +131,7 @@ impl BetterAnalysis {
         Self {
             duration: Duration::ZERO,
             data: Vec::with_capacity(capacity),
+            masking_scratchpad: Vec::with_capacity(capacity),
             masking: Vec::with_capacity(capacity),
             mean: f32::NEG_INFINITY,
             max: f32::NEG_INFINITY,
@@ -277,7 +279,7 @@ impl BetterAnalysis {
                 .map(|(l, r)| (l + r) * gain_amplitude),
             0.0,
             hearing_threshold,
-            &mut self.masking,
+            &mut self.masking_scratchpad,
         );
 
         if let Some(listening_volume) = normalization_volume {
@@ -285,12 +287,17 @@ impl BetterAnalysis {
                 .iter()
                 .enumerate()
                 .for_each(|(i, normalizer)| {
-                    self.masking[i] = normalizer
-                        .spl_to_phon(self.masking[i] + listening_volume)
+                    self.masking[i] = (normalizer
+                        .spl_to_phon(self.masking_scratchpad[i] + listening_volume)
                         //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                         .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                        - listening_volume
+                        - listening_volume) as f32
                 });
+        } else {
+            self.masking
+                .iter_mut()
+                .enumerate()
+                .for_each(|(i, m)| *m = self.masking_scratchpad[i] as f32);
         }
 
         self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
@@ -415,7 +422,7 @@ impl BetterAnalysis {
                 .map(|c| *c * gain_amplitude),
             0.0,
             hearing_threshold,
-            &mut self.masking,
+            &mut self.masking_scratchpad,
         );
 
         if let Some(listening_volume) = normalization_volume {
@@ -424,12 +431,17 @@ impl BetterAnalysis {
                 .iter()
                 .enumerate()
                 .for_each(|(i, normalizer)| {
-                    self.masking[i] = normalizer
-                        .spl_to_phon(self.masking[i] + listening_volume)
+                    self.masking[i] = (normalizer
+                        .spl_to_phon(self.masking_scratchpad[i] + listening_volume)
                         //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                         .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                        - listening_volume
+                        - listening_volume) as f32
                 });
+        } else {
+            self.masking
+                .iter_mut()
+                .enumerate()
+                .for_each(|(i, m)| *m = self.masking_scratchpad[i] as f32);
         }
 
         self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
@@ -449,7 +461,8 @@ impl BetterSpectrogram {
                 BetterAnalysis {
                     duration: Duration::from_secs(1),
                     data: vec![(0.0, f32::NEG_INFINITY); slice_capacity],
-                    masking: vec![f64::NEG_INFINITY; slice_capacity],
+                    masking_scratchpad: vec![f64::NEG_INFINITY; slice_capacity],
+                    masking: vec![f32::NEG_INFINITY; slice_capacity],
                     mean: f32::NEG_INFINITY,
                     max: f32::NEG_INFINITY,
                 };
