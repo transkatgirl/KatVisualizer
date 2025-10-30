@@ -113,7 +113,13 @@ fn draw_bargraph(
                                 spectrogram.data[ii].masking[i],
                             )
                         })
-                        .fold((0.0, 0.0), |acc, (d, m)| (acc.0 + d.0, acc.1 + d.1.max(m)));
+                        .fold((0.0, 0.0), |acc, (d, m)| {
+                            if d.1 >= m {
+                                (acc.0 + d.0, acc.1 + d.1)
+                            } else {
+                                (acc.0 + 0.0, acc.1 + m)
+                            }
+                        });
 
                     (sum.0 / count, sum.1 / count)
                 });
@@ -156,7 +162,7 @@ fn draw_bargraph(
                 .data
                 .iter()
                 .zip(front.masking.iter())
-                .map(|(d, m)| (d.0, d.1.max(*m))),
+                .map(|(d, m)| if d.1 >= *m { (d.0, d.1) } else { (0.0, *m) }),
             front.data.len(),
             bounds,
             color_table,
@@ -267,8 +273,13 @@ fn draw_spectrogram_image(
                 .zip(analysis.masking.iter())
                 .enumerate()
             {
-                let intensity = map_value_f32(volume.max(*masking), min_db, max_db, 0.0, 1.0);
-                image.pixels[(image_width * y) + x] = color_table.lookup(*pan, intensity);
+                if volume >= masking {
+                    let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
+                    image.pixels[(image_width * y) + x] = color_table.lookup(*pan, intensity);
+                } else {
+                    let intensity = map_value_f32(*masking, min_db, max_db, 0.0, 1.0);
+                    image.pixels[(image_width * y) + x] = color_table.lookup(0.0, intensity);
+                }
             }
         } else {
             for (x, (pan, volume)) in analysis.data.iter().enumerate() {
