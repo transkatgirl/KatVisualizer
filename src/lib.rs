@@ -398,6 +398,8 @@ pub(crate) struct AnalysisChain {
     gain: f64,
     internal_buffering: bool,
     output_midi: bool,
+    tone_prioritization_scratchpad: Vec<(f32, f32, f32)>,
+    midi_note_scratchpad: Vec<u8>,
     midi_max_simultaneous: u8,
     midi_use_unnormalized: bool,
     midi_amplitude_threshold: f32,
@@ -464,6 +466,8 @@ impl AnalysisChain {
             sample_rate,
             internal_buffering: config.internal_buffering,
             output_midi: config.output_midi,
+            tone_prioritization_scratchpad: Vec::with_capacity(MAX_FREQUENCY_BINS),
+            midi_note_scratchpad: Vec::with_capacity(128),
             midi_use_unnormalized: config.midi_use_unnormalized,
             midi_max_simultaneous: config.midi_max_simultaneous,
             midi_amplitude_threshold: config.midi_amplitude_threshold,
@@ -663,6 +667,9 @@ impl AnalysisChain {
         right_analyzer: &BetterAnalyzer,
     ) -> AnalysisBufferMidi {
         // TODO: better handle tones positioned in between two MIDI notes
+
+        // possible algorithm: determine prioritization using full spectrum rather than MIDI notes
+        // then, when going through the selected tones and converting them to notes, block out the equiv. of +/- 0.5 MIDI notes in the spectrum before proceeding to the next one
 
         let frequencies = self.frequencies.read();
         let mut note_scratchpad: [(f32, f32, f32, f32); 128] = [(0.0, 0.0, 0.0, 0.0); 128];
