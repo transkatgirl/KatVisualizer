@@ -398,8 +398,7 @@ pub(crate) struct AnalysisChain {
     gain: f64,
     internal_buffering: bool,
     output_midi: bool,
-    tone_prioritization_scratchpad: Vec<(f32, f32, f32)>,
-    midi_note_scratchpad: Vec<u8>,
+    tone_scratchpad: Vec<(f32, f32, (f32, f32, f32))>,
     midi_max_simultaneous: u8,
     midi_use_unnormalized: bool,
     midi_amplitude_threshold: f32,
@@ -466,8 +465,7 @@ impl AnalysisChain {
             sample_rate,
             internal_buffering: config.internal_buffering,
             output_midi: config.output_midi,
-            tone_prioritization_scratchpad: Vec::with_capacity(MAX_FREQUENCY_BINS),
-            midi_note_scratchpad: Vec::with_capacity(128),
+            tone_scratchpad: Vec::with_capacity(MAX_FREQUENCY_BINS),
             midi_use_unnormalized: config.midi_use_unnormalized,
             midi_max_simultaneous: config.midi_max_simultaneous,
             midi_amplitude_threshold: config.midi_amplitude_threshold,
@@ -612,9 +610,11 @@ impl AnalysisChain {
 
             let (ref mut spectrogram, ref mut metrics) = *output.lock();
 
+            let (left_ref, right_ref) = (self.left_analyzer.clone(), self.right_analyzer.clone());
+
             self.pool.join();
-            let left_lock = self.left_analyzer.lock();
-            let right_lock = self.right_analyzer.lock();
+            let left_lock = left_ref.lock();
+            let right_lock = right_ref.lock();
             let left_analyzer = &left_lock.1;
             let right_analyzer = &right_lock.1;
 
@@ -660,30 +660,99 @@ impl AnalysisChain {
         }
     }
     fn generate_midi(
-        &self,
+        &mut self,
         timing: u32,
         spectrogram: &BetterSpectrogram,
         left_analyzer: &BetterAnalyzer,
         right_analyzer: &BetterAnalyzer,
     ) -> AnalysisBufferMidi {
-        // TODO: better handle tones positioned in between two MIDI notes
-
-        // possible algorithm: determine prioritization using full spectrum rather than MIDI notes
-        // then, when going through the selected tones and converting them to notes, block out the equiv. of +/- 0.5 MIDI notes in the spectrum before proceeding to the next one
-
         let frequencies = self.frequencies.read();
-        let mut note_scratchpad: [(f32, f32, f32, f32); 128] = [(0.0, 0.0, 0.0, 0.0); 128];
+
+        let mut enabled_notes = [false; 128];
+
+        if self.midi_max_simultaneous != 128 {
+            self.tone_scratchpad.clear();
+
+            for ((_, volume), (masking, (lower, center, upper))) in
+                spectrogram.data[0].data.iter().copied().zip(
+                    spectrogram.data[0]
+                        .masking
+                        .iter()
+                        .copied()
+                        .zip(frequencies.iter().copied()),
+                )
+            {
+                self.tone_scratchpad
+                    .push((volume, volume - masking, (lower, center, upper)));
+            }
+
+            if self.masking {
+                self.tone_scratchpad.sort_unstable_by(|a, b| {
+                    if a.0 >= self.midi_amplitude_threshold && b.0 >= self.midi_amplitude_threshold
+                    {
+                        a.1.total_cmp(&b.1)
+                    } else if a.0 >= self.midi_amplitude_threshold {
+                        Ordering::Greater
+                    } else if b.0 >= self.midi_amplitude_threshold {
+                        Ordering::Less
+                    } else {
+                        a.0.total_cmp(&b.0)
+                    }
+                });
+            } else {
+                self.tone_scratchpad
+                    .sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+            }
+
+            let mut note_count: u8 = 0;
+
+            let mut occupied_notes = [false; 128];
+
+            for (_, _, (lower, center, upper)) in self.tone_scratchpad.iter().rev() {
+                let note = freq_to_midi_note(*center).clamp(0.0, 127.0).round() as usize;
+
+                if !occupied_notes[note] {
+                    note_count += 1;
+                    enabled_notes[note] = true;
+
+                    let lower_note = freq_to_midi_note(*lower).clamp(0.0, 127.0).round() as usize;
+                    let upper_note = freq_to_midi_note(*upper).clamp(0.0, 127.0).round() as usize;
+
+                    occupied_notes
+                        .iter_mut()
+                        .take(upper_note + 1)
+                        .skip(lower_note)
+                        .for_each(|o| *o = true);
+
+                    if note_count == self.midi_max_simultaneous {
+                        break;
+                    }
+                }
+            }
+
+            if note_count < self.midi_max_simultaneous {
+                for (_, _, (_, center, _)) in self.tone_scratchpad.iter().rev() {
+                    let note = freq_to_midi_note(*center).clamp(0.0, 127.0).round() as usize;
+
+                    if !enabled_notes[note] {
+                        note_count += 1;
+                        enabled_notes[note] = true;
+
+                        if note_count == self.midi_max_simultaneous {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut note_scratchpad: [(f32, f32); 128] = [(0.0, 0.0); 128];
 
         if self.midi_use_unnormalized && self.listening_volume.is_some() {
             let left = left_analyzer.raw_analysis();
             let right = right_analyzer.raw_analysis();
 
-            for (index, (_, center, _), (_, normalized_volume)) in spectrogram.data[0]
-                .data
-                .iter()
-                .enumerate()
-                .map(|(i, d)| (i, frequencies[i], d))
-            {
+            for (index, (_, center, _)) in frequencies.iter().copied().enumerate() {
                 let note = freq_to_midi_note(center).round() as usize;
 
                 if note > 127 {
@@ -702,15 +771,13 @@ impl AnalysisChain {
 
                 note_scratchpad[note].0 += 1.0;
                 note_scratchpad[note].1 += volume;
-                note_scratchpad[note].2 += normalized_volume;
-                note_scratchpad[note].3 += spectrogram.data[0].masking[index];
             }
         } else {
-            for (index, (_, center, _), (_, volume)) in spectrogram.data[0]
+            for ((_, volume), (_, center, _)) in spectrogram.data[0]
                 .data
                 .iter()
-                .enumerate()
-                .map(|(i, d)| (i, frequencies[i], d))
+                .copied()
+                .zip(frequencies.iter().copied())
             {
                 let note = freq_to_midi_note(center).round() as usize;
 
@@ -724,20 +791,14 @@ impl AnalysisChain {
 
                 note_scratchpad[note].0 += 1.0;
                 note_scratchpad[note].1 += volume;
-                note_scratchpad[note].2 += volume;
-                note_scratchpad[note].3 += spectrogram.data[0].masking[index];
             }
         }
 
-        let mut sorting_notes: [(f32, f32, usize); 128] = [(0.0, 0.0, 0); 128];
         let mut notes: [f32; 128] = [0.0; 128];
 
-        for (i, (items, volume_sum, sorting_volume_sum, masking_sum)) in
-            note_scratchpad.into_iter().enumerate()
-        {
+        for (i, (items, volume_sum)) in note_scratchpad.into_iter().enumerate() {
             if items == 0.0 {
                 notes[i] = 0.0;
-                sorting_notes[i] = (f32::NEG_INFINITY, f32::NEG_INFINITY, i);
             } else {
                 let volume = volume_sum / items;
 
@@ -751,47 +812,22 @@ impl AnalysisChain {
                     )
                     .clamp(0.0, 1.0);
                 }
-
-                let sorting_volume = sorting_volume_sum / items;
-                let masking_volume = masking_sum / items;
-                sorting_notes[i] = (sorting_volume, sorting_volume - masking_volume, i);
             }
         }
 
-        let mut analysis_midi = AnalysisBufferMidi {
+        if self.midi_max_simultaneous != 128 {
+            for (index, enabled) in enabled_notes.into_iter().enumerate() {
+                if !enabled {
+                    notes[index] = 0.0;
+                }
+            }
+        }
+
+        AnalysisBufferMidi {
             timing,
             use_aftertouch: self.midi_use_aftertouch,
             notes,
-        };
-
-        if self.midi_max_simultaneous != 128 {
-            if self.masking {
-                sorting_notes.sort_unstable_by(|a, b| {
-                    if a.0 >= self.midi_amplitude_threshold && b.0 >= self.midi_amplitude_threshold
-                    {
-                        a.1.total_cmp(&b.1)
-                    } else if a.0 >= self.midi_amplitude_threshold {
-                        Ordering::Greater
-                    } else if b.0 >= self.midi_amplitude_threshold {
-                        Ordering::Less
-                    } else {
-                        a.0.total_cmp(&b.0)
-                    }
-                });
-            } else {
-                sorting_notes.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
-            }
-
-            sorting_notes
-                .into_iter()
-                .rev()
-                .skip(self.midi_max_simultaneous as usize)
-                .for_each(|(_, _, note)| {
-                    analysis_midi.notes[note] = 0.0;
-                });
         }
-
-        analysis_midi
     }
     pub(crate) fn config(&self) -> AnalysisChainConfig {
         let analyzer = self.left_analyzer.lock();
