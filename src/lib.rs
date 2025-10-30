@@ -759,85 +759,47 @@ impl AnalysisChain {
         right_analyzer: &BetterAnalyzer,
     ) -> AnalysisBufferMidi {
         let frequencies = self.frequencies.read();
-        let mut note_scratchpad: [(f32, f32, f32, f32); 128] = [(0.0, 0.0, 0.0, 0.0); 128];
+        let mut note_scratchpad: [(f32, f32, f32, f32, f32); 128] =
+            [(0.0, 0.0, 0.0, 0.0, 0.0); 128];
 
         if self.midi_use_unnormalized && self.listening_volume.is_some() {
             let left = left_analyzer.raw_analysis();
             let right = right_analyzer.raw_analysis();
 
-            if self.masking {
-                for (index, (_, center, _), (pan, normalized_volume)) in spectrogram.data[0]
-                    .data
-                    .iter()
-                    .enumerate()
-                    .map(|(i, d)| (i, frequencies[i], d))
-                {
-                    let note = freq_to_midi_note(center).round() as usize;
-
-                    if note > 127 {
-                        break;
-                    }
-
-                    let volume = (if self.single_input {
-                        amplitude_to_dbfs(left[index])
-                    } else {
-                        amplitude_to_dbfs(left[index] + right[index])
-                    } + self.gain) as f32;
-
-                    if !volume.is_finite() {
-                        continue;
-                    }
-
-                    if volume < spectrogram.data[0].masking[index] {
-                        note_scratchpad[note].0 += 1.0;
-                        note_scratchpad[note].3 += normalized_volume;
-                    } else {
-                        note_scratchpad[note].0 += 1.0;
-                        note_scratchpad[note].1 += pan;
-                        note_scratchpad[note].2 += volume;
-                        note_scratchpad[note].3 += normalized_volume;
-                    }
-
-                    note_scratchpad[note].0 += 1.0;
-                    note_scratchpad[note].1 += pan;
-                    note_scratchpad[note].2 += volume;
-                    note_scratchpad[note].3 += normalized_volume;
-                }
-            } else {
-                for (index, (_, center, _), (pan, normalized_volume)) in spectrogram.data[0]
-                    .data
-                    .iter()
-                    .enumerate()
-                    .map(|(i, d)| (i, frequencies[i], d))
-                {
-                    let note = freq_to_midi_note(center).round() as usize;
-
-                    if note > 127 {
-                        break;
-                    }
-
-                    let volume = if self.single_input {
-                        amplitude_to_dbfs(left[index])
-                    } else {
-                        amplitude_to_dbfs(left[index] + right[index])
-                    } + self.gain;
-
-                    if !volume.is_finite() {
-                        continue;
-                    }
-
-                    note_scratchpad[note].0 += 1.0;
-                    note_scratchpad[note].1 += pan;
-                    note_scratchpad[note].2 += volume as f32;
-                    note_scratchpad[note].3 += normalized_volume;
-                }
-            }
-        } else {
-            for ((_, center, _), (pan, volume)) in spectrogram.data[0]
+            for (index, (_, center, _), (pan, normalized_volume)) in spectrogram.data[0]
                 .data
                 .iter()
                 .enumerate()
-                .map(|(i, d)| (frequencies[i], d))
+                .map(|(i, d)| (i, frequencies[i], d))
+            {
+                let note = freq_to_midi_note(center).round() as usize;
+
+                if note > 127 {
+                    break;
+                }
+
+                let volume = (if self.single_input {
+                    amplitude_to_dbfs(left[index])
+                } else {
+                    amplitude_to_dbfs(left[index] + right[index])
+                } + self.gain) as f32;
+
+                if !volume.is_finite() || volume < spectrogram.data[0].masking[index] {
+                    continue;
+                }
+
+                note_scratchpad[note].0 += 1.0;
+                note_scratchpad[note].1 += pan;
+                note_scratchpad[note].2 += volume;
+                note_scratchpad[note].3 += normalized_volume;
+                note_scratchpad[note].4 += spectrogram.data[0].masking[index];
+            }
+        } else {
+            for (index, (_, center, _), (pan, volume)) in spectrogram.data[0]
+                .data
+                .iter()
+                .enumerate()
+                .map(|(i, d)| (i, frequencies[i], d))
             {
                 let note = freq_to_midi_note(center).round() as usize;
 
@@ -853,22 +815,23 @@ impl AnalysisChain {
                 note_scratchpad[note].1 += pan;
                 note_scratchpad[note].2 += volume;
                 note_scratchpad[note].3 += volume;
+                note_scratchpad[note].4 += spectrogram.data[0].masking[index];
             }
         }
 
-        let mut sorting_notes: [f32; 128] = [0.0; 128];
+        let mut sorting_notes: [(f32, f32); 128] = [(0.0, 0.0); 128];
 
         let mut analysis_midi = if !self.midi_use_volume {
             let mut notes: [(f32, f32); 128] = [(0.0, 0.0); 128];
             let mut pressures: [f32; 128] = [0.0; 128];
 
-            for (i, (items, pan_sum, volume_sum, sorting_volume_sum)) in
+            for (i, (items, pan_sum, volume_sum, sorting_volume_sum, masking_sum)) in
                 note_scratchpad.into_iter().enumerate()
             {
                 if items == 0.0 {
                     notes[i] = (0.0, f32::NEG_INFINITY);
                     pressures[i] = 0.0;
-                    sorting_notes[i] = f32::NEG_INFINITY;
+                    sorting_notes[i] = (f32::NEG_INFINITY, f32::NEG_INFINITY);
                 } else {
                     let volume = volume_sum / items;
 
@@ -881,7 +844,7 @@ impl AnalysisChain {
                         1.0,
                     )
                     .clamp(0.0, 1.0);
-                    sorting_notes[i] = sorting_volume_sum / items;
+                    sorting_notes[i] = (sorting_volume_sum / items, masking_sum / items);
                 }
             }
 
@@ -895,15 +858,15 @@ impl AnalysisChain {
         } else {
             let mut notes: [(f32, f32); 128] = [(0.0, 0.0); 128];
 
-            for (i, (items, pan_sum, volume_sum, sorting_volume_sum)) in
+            for (i, (items, pan_sum, volume_sum, sorting_volume_sum, masking_sum)) in
                 note_scratchpad.into_iter().enumerate()
             {
                 if items == 0.0 {
                     notes[i] = (0.0, f32::NEG_INFINITY);
-                    sorting_notes[i] = f32::NEG_INFINITY;
+                    sorting_notes[i] = (f32::NEG_INFINITY, f32::NEG_INFINITY);
                 } else {
                     notes[i] = (pan_sum / items, volume_sum / items);
-                    sorting_notes[i] = sorting_volume_sum / items;
+                    sorting_notes[i] = (sorting_volume_sum / items, masking_sum / items);
                 }
             }
 
@@ -919,9 +882,16 @@ impl AnalysisChain {
         if self.midi_max_simultaneous != 128 {
             let mut sorted_notes: [(f32, usize); 128] = [(0.0, 0); 128];
 
-            for (note, volume) in sorting_notes.into_iter().enumerate() {
-                sorted_notes[note] = (volume, note);
+            if self.masking {
+                for (note, (volume, mask)) in sorting_notes.into_iter().enumerate() {
+                    sorted_notes[note] = (volume, note);
+                }
+            } else {
+                for (note, (volume, _)) in sorting_notes.into_iter().enumerate() {
+                    sorted_notes[note] = (volume, note);
+                }
             }
+
             sorted_notes.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
 
             sorted_notes
