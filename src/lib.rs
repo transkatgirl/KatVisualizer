@@ -752,8 +752,8 @@ impl AnalysisChain {
             let left = left_analyzer.raw_analysis();
             let right = right_analyzer.raw_analysis();
 
-            for (index, (_, center, _)) in frequencies.iter().copied().enumerate() {
-                let note = freq_to_midi_note(center).round() as usize;
+            for (index, (_, center, _)) in frequencies.iter().enumerate() {
+                let note = freq_to_midi_note(*center).round() as usize;
 
                 if note > 127 {
                     break;
@@ -773,13 +773,10 @@ impl AnalysisChain {
                 note_scratchpad[note].1 += volume;
             }
         } else {
-            for ((_, volume), (_, center, _)) in spectrogram.data[0]
-                .data
-                .iter()
-                .copied()
-                .zip(frequencies.iter().copied())
+            for ((_, volume), (_, center, _)) in
+                spectrogram.data[0].data.iter().zip(frequencies.iter())
             {
-                let note = freq_to_midi_note(center).round() as usize;
+                let note = freq_to_midi_note(*center).round() as usize;
 
                 if note > 127 {
                     break;
