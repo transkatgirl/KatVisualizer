@@ -467,7 +467,7 @@ impl Default for AnalysisChainConfig {
             output_midi: false,
             midi_use_unnormalized: true,
             midi_max_simultaneous: 32,
-            midi_amplitude_bin_size: 30.0,
+            midi_amplitude_bin_size: 20.0,
             midi_amplitude_threshold: 30.0 - 86.0,
             midi_use_aftertouch: true,
             midi_use_volume: false,
