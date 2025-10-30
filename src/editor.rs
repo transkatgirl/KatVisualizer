@@ -1681,18 +1681,20 @@ pub fn create(
                                     return;
                                 }
 
-                                if ui
+                                // PolyVolume & PolyPan should work in theory but are untested, as they are CLAP only. Disabling for now.
+
+                                /*if ui
                                     .checkbox(
                                         &mut analysis_settings.midi_use_volume,
                                         "Use MIDI volume events",
                                     )
-                                    .on_hover_text("If this is enabled, ")
+                                    .on_hover_text("WIP")
                                     .changed()
                                 {
                                     update(&analysis_settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
-                                }
+                                }*/
 
                                 if !analysis_settings.midi_use_volume {
                                     if ui
