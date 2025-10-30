@@ -1594,7 +1594,7 @@ pub fn create(
                                 &mut analysis_settings.output_midi,
                                 "Output analysis as MIDI",
                             )
-                            .on_hover_text("If this is enabled, the analysis results will be used to create a MIDI output that can be used as an input for alternative visualization methods.")
+                            .on_hover_text("If this is enabled, the plugin will use analysis data to generate a MIDI output, which can then be used as an input for alternative visualization methods.")
                             .changed()
                         {
                             if analysis_settings.output_midi {
@@ -1617,7 +1617,7 @@ pub fn create(
                                         &mut analysis_settings.midi_use_unnormalized,
                                         "Output unnormalized amplitudes",
                                     )
-                                    .on_hover_text("If this is enabled, the MIDI output will be generated using the unnormalized amplitudes, which is what most programs expect.\nIf this is disabled, the MIDI output will be generated using the same normalization used in the visualizer.")
+                                    .on_hover_text("If this is enabled, the MIDI output will be generated using the unnormalized amplitudes, which is what most programs expect.\nIf this is disabled, the MIDI output will be generated using the same psychoacoustic normalization used in the visualizer.")
                                     .changed()
                                 {
                                     update(&analysis_settings);
@@ -1632,7 +1632,7 @@ pub fn create(
                                         .suffix(" notes")
                                         .text("Maximum simultaneous MIDI events"),
                                 )
-                                .on_hover_text("")
+                                .on_hover_text("This setting adjusts the maximum number of simultaneous MIDI notes output by the plugin.\nValid notes are prioritized by their distance from the masking threshold, or if masking data is not available, their perceptual amplitude. If amplitude normalization is also disabled, notes will then be prioritized based on absolute amplitude.")
                                 .changed()
                             {
                                 update(&analysis_settings);
@@ -1646,7 +1646,7 @@ pub fn create(
                                         &mut analysis_settings.midi_use_aftertouch,
                                         "Use MIDI aftertouch events",
                                     )
-                                    .on_hover_text("If this is enabled, ")
+                                    .on_hover_text("If this is enabled, this plugin will output MIDI aftertouch events when an active note's amplitude is updated.\nIf this is disabled, active notes will always be toggled when new amplitude data is available.")
                                     .changed()
                                 {
                                     update(&analysis_settings);
@@ -1671,7 +1671,7 @@ pub fn create(
                                             .fixed_decimals(0)
                                             .text("MIDI note amplitude threshold"),
                                     )
-                                    .on_hover_text("")
+                                    .on_hover_text("This setting adjusts the minimum amplitude necessary for a note to be considered valid. Notes with an amplitude below this threshold will always be considered inactive, regardless of the note limit.")
                                     .changed()
                                 {
                                     analysis_settings.midi_amplitude_threshold =
@@ -1741,7 +1741,7 @@ pub fn create(
                                             .fixed_decimals(0)
                                             .text("MIDI note amplitude threshold"),
                                     )
-                                    .on_hover_text("")
+                                    .on_hover_text("This setting adjusts the minimum amplitude necessary for a note to be considered valid. Notes with an amplitude below this threshold will always be considered inactive, regardless of the note limit.")
                                     .changed()
                                 {
                                     update(&analysis_settings);
