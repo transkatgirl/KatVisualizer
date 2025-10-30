@@ -933,7 +933,7 @@ impl AnalysisChain {
         self.midi_use_volume = config.midi_use_volume;
         self.midi_pressure_min_amplitude = config.midi_pressure_min_amplitude;
         self.midi_pressure_max_amplitude = config.midi_pressure_max_amplitude;
-        if self.internal_buffering {
+        if config.internal_buffering {
             self.output_midi = false;
         }
 
