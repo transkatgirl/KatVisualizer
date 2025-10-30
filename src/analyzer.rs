@@ -444,7 +444,11 @@ impl Masker {
             .enumerate()
             .for_each(|(i, h)| masking_threshold[i] = dbfs_to_amplitude(*h));
 
-        let flatness = map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0);
+        let flatness = if spectrum.len() > 128 {
+            0.0
+        } else {
+            map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0)
+        };
 
         for (i, component) in spectrum.iter().enumerate() {
             let amplitude = dbfs_to_amplitude(*component);
