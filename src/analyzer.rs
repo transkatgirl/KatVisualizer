@@ -571,9 +571,10 @@ impl Masker {
                 27.0,
             );
 
-            let offset = masking_threshold_offset(bark, flatness) - simultaneous;
-
-            let stride = (MAX_MASKING_DYNAMIC_RANGE / lower_spread) * self.max_bark_stride;
+            let threshold_offset = masking_threshold_offset(bark, flatness);
+            let offset = threshold_offset - simultaneous;
+            let stride = ((MAX_MASKING_DYNAMIC_RANGE + threshold_offset) / lower_spread)
+                * self.max_bark_stride;
 
             let min = i.saturating_sub(stride.floor() as usize);
             let max = (i + stride.ceil() as usize).min(self.frequency_set.len());
