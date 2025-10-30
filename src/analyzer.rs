@@ -515,18 +515,34 @@ fn masking_threshold_offset(center_bark: f64, flatness: f64) -> f64 {
 // https://www.mp3-tech.org/programmer/docs/di042001.pdf
 // https://dn790006.ca.archive.org/0/items/05shlacpsychacousticsmodelsws201718gs/05_shl_AC_Psychacoustics_Models_WS-2017-18_gs.pdf
 
+const MAX_MASKING_DYNAMIC_RANGE: f64 = 100.0;
+
 #[derive(Clone)]
 struct Masker {
     frequency_set: Vec<(f64, f64)>,
+    max_bark_stride: f64,
 }
 
 impl Masker {
     fn new(frequencies: impl Iterator<Item = f64>) -> Self {
-        let frequency_set = frequencies
+        let frequency_set: Vec<(f64, f64)> = frequencies
             .map(|f| (f, FrequencyScale::Bark.scale(f)))
             .collect();
 
-        Self { frequency_set }
+        let mut max_bark_stride = 1.0;
+
+        for i in 1..frequency_set.len() {
+            let bark_stride = 1.0 / (frequency_set[i].1 - frequency_set[i - 1].1);
+
+            if bark_stride > max_bark_stride {
+                max_bark_stride = bark_stride;
+            }
+        }
+
+        Self {
+            max_bark_stride,
+            frequency_set,
+        }
     }
     fn calculate_masking_threshold(
         &self,
@@ -557,12 +573,15 @@ impl Masker {
 
             let offset = masking_threshold_offset(bark, flatness) - simultaneous;
 
-            masking_threshold
-                .iter_mut()
-                .enumerate()
-                .map(|(i, s)| (self.frequency_set[i].1, s))
-                .for_each(|(b, s)| {
-                    *s += dbfs_to_amplitude(
+            let stride = (MAX_MASKING_DYNAMIC_RANGE / lower_spread) * self.max_bark_stride;
+
+            let min = i.saturating_sub(stride.floor() as usize);
+            let max = (i + stride.ceil() as usize).min(self.frequency_set.len());
+
+            (min..max)
+                .map(|i| (i, self.frequency_set[i].1))
+                .for_each(|(i, b)| {
+                    masking_threshold[i] += dbfs_to_amplitude(
                         if b > bark {
                             -upper_spread
                         } else if b < bark {
