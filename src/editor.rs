@@ -1652,19 +1652,6 @@ pub fn create(
                                 return;
                             };
 
-                            if analysis_settings.masking && analysis_settings.midi_max_simultaneous != 128 {
-                                if ui.add(
-                                    egui::Slider::new(&mut analysis_settings.midi_amplitude_bin_size, 0.0..=60.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix(" dB")
-                                        .text("MIDI amplitude prioritization bin size"),
-                                ).changed() {
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                };
-                            }
-
                             if !analysis_settings.midi_use_volume {
                                 if ui
                                     .checkbox(

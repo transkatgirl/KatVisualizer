@@ -434,7 +434,6 @@ pub(crate) struct AnalysisChainConfig {
     output_midi: bool,
     midi_use_unnormalized: bool,
     midi_max_simultaneous: u8,
-    midi_amplitude_bin_size: f32,
     midi_amplitude_threshold: f32,
     midi_use_aftertouch: bool,
     midi_use_volume: bool,
@@ -467,7 +466,6 @@ impl Default for AnalysisChainConfig {
             output_midi: false,
             midi_use_unnormalized: true,
             midi_max_simultaneous: 32,
-            midi_amplitude_bin_size: 30.0,
             midi_amplitude_threshold: 30.0 - 86.0,
             midi_use_aftertouch: true,
             midi_use_volume: false,
@@ -494,7 +492,6 @@ pub(crate) struct AnalysisChain {
     internal_buffering: bool,
     output_midi: bool,
     midi_max_simultaneous: u8,
-    midi_amplitude_bin_size: f32,
     midi_use_unnormalized: bool,
     midi_amplitude_threshold: f32,
     midi_use_aftertouch: bool,
@@ -565,7 +562,6 @@ impl AnalysisChain {
             output_midi: config.output_midi,
             midi_use_unnormalized: config.midi_use_unnormalized,
             midi_max_simultaneous: config.midi_max_simultaneous,
-            midi_amplitude_bin_size: config.midi_amplitude_bin_size,
             midi_amplitude_threshold: config.midi_amplitude_threshold,
             midi_use_aftertouch: config.midi_use_aftertouch,
             midi_use_volume: config.midi_use_volume,
@@ -885,15 +881,17 @@ impl AnalysisChain {
         };
 
         if self.midi_max_simultaneous != 128 {
-            if self.masking && self.midi_amplitude_bin_size > 0.0 {
+            if self.masking {
                 sorting_notes.sort_unstable_by(|a, b| {
-                    let amplitude_cmp = ((a.0 / self.midi_amplitude_bin_size).round())
-                        .total_cmp(&(b.0 / self.midi_amplitude_bin_size).round());
-
-                    if amplitude_cmp == Ordering::Equal {
+                    if a.0 >= self.midi_amplitude_threshold && b.0 >= self.midi_amplitude_threshold
+                    {
                         a.1.total_cmp(&b.1)
+                    } else if a.0 >= self.midi_amplitude_threshold {
+                        Ordering::Greater
+                    } else if b.0 >= self.midi_amplitude_threshold {
+                        Ordering::Less
                     } else {
-                        amplitude_cmp
+                        a.0.total_cmp(&b.0)
                     }
                 });
             } else {
@@ -928,7 +926,6 @@ impl AnalysisChain {
             output_midi: self.output_midi,
             midi_use_unnormalized: self.midi_use_unnormalized,
             midi_max_simultaneous: self.midi_max_simultaneous,
-            midi_amplitude_bin_size: self.midi_amplitude_bin_size,
             midi_amplitude_threshold: self.midi_amplitude_threshold,
             midi_use_aftertouch: self.midi_use_aftertouch,
             midi_use_volume: self.midi_use_volume,
@@ -962,7 +959,6 @@ impl AnalysisChain {
         self.output_midi = config.output_midi;
         self.midi_use_unnormalized = config.midi_use_unnormalized;
         self.midi_max_simultaneous = config.midi_max_simultaneous;
-        self.midi_amplitude_bin_size = config.midi_amplitude_bin_size;
         self.midi_amplitude_threshold = config.midi_amplitude_threshold;
         self.midi_use_aftertouch = config.midi_use_aftertouch;
         self.midi_use_volume = config.midi_use_volume;
