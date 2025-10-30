@@ -1640,19 +1640,17 @@ pub fn create(
                                 return;
                             };
 
-                            if !analysis_settings.midi_use_volume {
-                                if ui
-                                    .checkbox(
-                                        &mut analysis_settings.midi_use_aftertouch,
-                                        "Use MIDI aftertouch events",
-                                    )
-                                    .on_hover_text("If this is enabled, this plugin will output MIDI aftertouch events when an active note's amplitude is updated.\nIf this is disabled, active notes will always be toggled when new amplitude data is available.")
-                                    .changed()
-                                {
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                }
+                            if ui
+                                .checkbox(
+                                    &mut analysis_settings.midi_use_aftertouch,
+                                    "Use MIDI aftertouch events",
+                                )
+                                .on_hover_text("If this is enabled, this plugin will output MIDI aftertouch events when an active note's amplitude is updated.\nIf this is disabled, active notes will always be toggled when new amplitude data is available.")
+                                .changed()
+                            {
+                                update(&analysis_settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
                             }
 
                             if analysis_settings.normalize_amplitude {
@@ -1681,57 +1679,40 @@ pub fn create(
                                     return;
                                 }
 
-                                // PolyVolume & PolyPan should work in theory but are untested, as they are CLAP only. Disabling for now.
-
-                                /*if ui
-                                    .checkbox(
-                                        &mut analysis_settings.midi_use_volume,
-                                        "Use MIDI volume events",
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut midi_min_phon, 0.0..=100.0)
+                                            .suffix(" phon")
+                                            .step_by(1.0)
+                                            .fixed_decimals(0)
+                                            .text("MIDI note pressure minimum amplitude"),
                                     )
-                                    .on_hover_text("WIP")
+                                    .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
                                     .changed()
                                 {
+                                    analysis_settings.midi_pressure_min_amplitude =
+                                        (midi_min_phon - analysis_settings.listening_volume) as f32;
                                     update(&analysis_settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
-                                }*/
+                                }
 
-                                if !analysis_settings.midi_use_volume {
-                                    if ui
-                                        .add(
-                                            egui::Slider::new(&mut midi_min_phon, 0.0..=100.0)
-                                                .suffix(" phon")
-                                                .step_by(1.0)
-                                                .fixed_decimals(0)
-                                                .text("MIDI note pressure minimum amplitude"),
-                                        )
-                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
-                                        .changed()
-                                    {
-                                        analysis_settings.midi_pressure_min_amplitude =
-                                            (midi_min_phon - analysis_settings.listening_volume) as f32;
-                                        update(&analysis_settings);
-                                        egui_ctx.request_discard("Changed setting");
-                                        return;
-                                    }
-
-                                    if ui
-                                        .add(
-                                            egui::Slider::new(&mut midi_max_phon, 0.0..=100.0)
-                                                .suffix(" phon")
-                                                .step_by(1.0)
-                                                .fixed_decimals(0)
-                                                .text("MIDI note pressure maximum amplitude"),
-                                        )
-                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
-                                        .changed()
-                                    {
-                                        analysis_settings.midi_pressure_max_amplitude =
-                                            (midi_max_phon - analysis_settings.listening_volume) as f32;
-                                        update(&analysis_settings);
-                                        egui_ctx.request_discard("Changed setting");
-                                        return;
-                                    }
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut midi_max_phon, 0.0..=100.0)
+                                            .suffix(" phon")
+                                            .step_by(1.0)
+                                            .fixed_decimals(0)
+                                            .text("MIDI note pressure maximum amplitude"),
+                                    )
+                                    .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
+                                    .changed()
+                                {
+                                    analysis_settings.midi_pressure_max_amplitude =
+                                        (midi_max_phon - analysis_settings.listening_volume) as f32;
+                                    update(&analysis_settings);
+                                    egui_ctx.request_discard("Changed setting");
+                                    return;
                                 }
                             } else {
                                 if ui
@@ -1751,54 +1732,39 @@ pub fn create(
                                     return;
                                 };
 
-                                /*if ui
-                                    .checkbox(
-                                        &mut analysis_settings.midi_use_volume,
-                                        "Use MIDI volume events",
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut analysis_settings.midi_pressure_min_amplitude, -100.0..=0.0)
+                                            .clamping(egui::SliderClamping::Never)
+                                            .suffix("dB")
+                                            .step_by(1.0)
+                                            .fixed_decimals(0)
+                                            .text("MIDI note pressure minimum amplitude"),
                                     )
-                                    .on_hover_text("If this is enabled, ")
+                                    .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
                                     .changed()
                                 {
                                     update(&analysis_settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
-                                }*/
+                                };
 
-                                if !analysis_settings.midi_use_volume {
-                                    if ui
-                                        .add(
-                                            egui::Slider::new(&mut analysis_settings.midi_pressure_min_amplitude, -100.0..=0.0)
-                                                .clamping(egui::SliderClamping::Never)
-                                                .suffix("dB")
-                                                .step_by(1.0)
-                                                .fixed_decimals(0)
-                                                .text("MIDI note pressure minimum amplitude"),
-                                        )
-                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
-                                        .changed()
-                                    {
-                                        update(&analysis_settings);
-                                        egui_ctx.request_discard("Changed setting");
-                                        return;
-                                    };
-
-                                    if ui
-                                        .add(
-                                            egui::Slider::new(&mut analysis_settings.midi_pressure_max_amplitude, -100.0..=0.0)
-                                                .clamping(egui::SliderClamping::Never)
-                                                .suffix("dB")
-                                                .step_by(1.0)
-                                                .fixed_decimals(0)
-                                                .text("MIDI note pressure maximum amplitude"),
-                                        )
-                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
-                                        .changed()
-                                    {
-                                        update(&analysis_settings);
-                                        egui_ctx.request_discard("Changed setting");
-                                        return;
-                                    };
-                                }
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut analysis_settings.midi_pressure_max_amplitude, -100.0..=0.0)
+                                            .clamping(egui::SliderClamping::Never)
+                                            .suffix("dB")
+                                            .step_by(1.0)
+                                            .fixed_decimals(0)
+                                            .text("MIDI note pressure maximum amplitude"),
+                                    )
+                                    .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
+                                    .changed()
+                                {
+                                    update(&analysis_settings);
+                                    egui_ctx.request_discard("Changed setting");
+                                    return;
+                                };
                             }
                         }
 
