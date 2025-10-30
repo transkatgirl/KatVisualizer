@@ -1751,7 +1751,7 @@ pub fn create(
                                     return;
                                 };
 
-                                if ui
+                                /*if ui
                                     .checkbox(
                                         &mut analysis_settings.midi_use_volume,
                                         "Use MIDI volume events",
@@ -1762,7 +1762,7 @@ pub fn create(
                                     update(&analysis_settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
-                                }
+                                }*/
 
                                 if !analysis_settings.midi_use_volume {
                                     if ui
