@@ -243,62 +243,70 @@ impl Plugin for MyPlugin {
                 &self.analysis_output,
                 &mut self.analysis_midi_output,
             );
-        }
 
-        #[cfg(feature = "midi")]
-        for buffer in &self.analysis_midi_output {
-            if !self.midi_on {
-                context.send_event(NoteEvent::MidiCC {
-                    timing: 0,
-                    channel: 0,
-                    cc: RESET_ALL_CONTROLLERS,
-                    value: 0.0,
-                });
-                context.send_event(NoteEvent::MidiCC {
-                    timing: 0,
-                    channel: 0,
-                    cc: POLY_MODE_ON,
-                    value: 0.0,
-                });
-                self.midi_notes = [false; 128];
-                self.midi_on = true;
-                self.midi_volume_changed = false;
-            }
+            drop(lock);
 
-            if let Some(pressures) = buffer.pressures {
-                if self.midi_volume_changed {
-                    for note in 0..127 {
-                        context.send_event(NoteEvent::PolyVolume {
-                            timing: buffer.timing,
-                            voice_id: Some(note),
-                            channel: 0,
-                            note: note as u8,
-                            gain: 1.0,
-                        });
-                    }
+            #[cfg(feature = "midi")]
+            for buffer in &self.analysis_midi_output {
+                if !self.midi_on {
+                    context.send_event(NoteEvent::MidiCC {
+                        timing: 0,
+                        channel: 0,
+                        cc: POLY_MODE_ON,
+                        value: 0.0,
+                    });
+                    self.midi_notes = [false; 128];
+                    self.midi_on = true;
                     self.midi_volume_changed = false;
                 }
 
-                for (note, (pan, volume)) in buffer.notes.iter().enumerate() {
-                    if *volume >= buffer.min_value {
-                        if !self.midi_notes[note] {
-                            context.send_event(NoteEvent::NoteOn {
-                                timing: buffer.timing,
-                                voice_id: Some(note as i32),
-                                channel: 0,
-                                note: note as u8,
-                                velocity: pressures[note],
-                            });
-                            self.midi_notes[note] = true;
-                        } else if buffer.use_aftertouch {
-                            context.send_event(NoteEvent::PolyPressure {
-                                timing: buffer.timing,
-                                voice_id: Some(note as i32),
-                                channel: 0,
-                                note: note as u8,
-                                pressure: pressures[note],
-                            });
-                        } else {
+                if let Some(pressures) = buffer.pressures {
+                    if self.midi_volume_changed {
+                        context.send_event(NoteEvent::MidiCC {
+                            timing: 0,
+                            channel: 0,
+                            cc: RESET_ALL_CONTROLLERS,
+                            value: 0.0,
+                        });
+                        self.midi_volume_changed = false;
+                    }
+
+                    for (note, (pan, volume)) in buffer.notes.iter().enumerate() {
+                        if *volume >= buffer.min_value {
+                            if !self.midi_notes[note] {
+                                context.send_event(NoteEvent::NoteOn {
+                                    timing: buffer.timing,
+                                    voice_id: Some(note as i32),
+                                    channel: 0,
+                                    note: note as u8,
+                                    velocity: pressures[note],
+                                });
+                                self.midi_notes[note] = true;
+                            } else if buffer.use_aftertouch {
+                                context.send_event(NoteEvent::PolyPressure {
+                                    timing: buffer.timing,
+                                    voice_id: Some(note as i32),
+                                    channel: 0,
+                                    note: note as u8,
+                                    pressure: pressures[note],
+                                });
+                            } else {
+                                context.send_event(NoteEvent::NoteOff {
+                                    timing: buffer.timing,
+                                    voice_id: Some(note as i32),
+                                    channel: 0,
+                                    note: note as u8,
+                                    velocity: 1.0 - pressures[note],
+                                });
+                                context.send_event(NoteEvent::NoteOn {
+                                    timing: buffer.timing,
+                                    voice_id: Some(note as i32),
+                                    channel: 0,
+                                    note: note as u8,
+                                    velocity: pressures[note],
+                                });
+                            }
+                        } else if self.midi_notes[note] {
                             context.send_event(NoteEvent::NoteOff {
                                 timing: buffer.timing,
                                 voice_id: Some(note as i32),
@@ -306,89 +314,66 @@ impl Plugin for MyPlugin {
                                 note: note as u8,
                                 velocity: 1.0 - pressures[note],
                             });
-                            context.send_event(NoteEvent::NoteOn {
+                            self.midi_notes[note] = false;
+                        }
+                    }
+                } else {
+                    self.midi_volume_changed = true;
+
+                    for (note, (pan, volume)) in buffer.notes.iter().enumerate() {
+                        if *volume >= buffer.min_value {
+                            if !self.midi_notes[note] {
+                                context.send_event(NoteEvent::NoteOn {
+                                    timing: buffer.timing,
+                                    voice_id: Some(note as i32),
+                                    channel: 0,
+                                    note: note as u8,
+                                    velocity: 1.0,
+                                });
+                                self.midi_notes[note] = true;
+                            }
+                            context.send_event(NoteEvent::PolyVolume {
                                 timing: buffer.timing,
                                 voice_id: Some(note as i32),
                                 channel: 0,
                                 note: note as u8,
-                                velocity: pressures[note],
+                                gain: db_to_gain(*volume),
                             });
-                        }
 
-                        context.send_event(NoteEvent::PolyPan {
-                            timing: buffer.timing,
-                            voice_id: Some(note as i32),
-                            channel: 0,
-                            note: note as u8,
-                            pan: *pan,
-                        });
-                    } else if self.midi_notes[note] {
-                        context.send_event(NoteEvent::NoteOff {
-                            timing: buffer.timing,
-                            voice_id: Some(note as i32),
-                            channel: 0,
-                            note: note as u8,
-                            velocity: 1.0 - pressures[note],
-                        });
-                        self.midi_notes[note] = false;
-                    }
-                }
-            } else {
-                self.midi_volume_changed = true;
-
-                for (note, (pan, volume)) in buffer.notes.iter().enumerate() {
-                    if *volume >= buffer.min_value {
-                        if !self.midi_notes[note] {
-                            context.send_event(NoteEvent::NoteOn {
+                            context.send_event(NoteEvent::PolyPan {
+                                timing: buffer.timing,
+                                voice_id: Some(note as i32),
+                                channel: 0,
+                                note: note as u8,
+                                pan: *pan,
+                            });
+                        } else if self.midi_notes[note] {
+                            context.send_event(NoteEvent::NoteOff {
                                 timing: buffer.timing,
                                 voice_id: Some(note as i32),
                                 channel: 0,
                                 note: note as u8,
                                 velocity: 1.0,
                             });
-                            self.midi_notes[note] = true;
+                            self.midi_notes[note] = false;
                         }
-                        context.send_event(NoteEvent::PolyVolume {
-                            timing: buffer.timing,
-                            voice_id: Some(note as i32),
-                            channel: 0,
-                            note: note as u8,
-                            gain: db_to_gain(*volume),
-                        });
-
-                        context.send_event(NoteEvent::PolyPan {
-                            timing: buffer.timing,
-                            voice_id: Some(note as i32),
-                            channel: 0,
-                            note: note as u8,
-                            pan: *pan,
-                        });
-                    } else if self.midi_notes[note] {
-                        context.send_event(NoteEvent::NoteOff {
-                            timing: buffer.timing,
-                            voice_id: Some(note as i32),
-                            channel: 0,
-                            note: note as u8,
-                            velocity: 1.0,
-                        });
-                        self.midi_notes[note] = false;
                     }
                 }
             }
-        }
 
-        #[cfg(feature = "midi")]
-        if self.midi_on && self.analysis_midi_output.is_empty() {
-            context.send_event(NoteEvent::MidiCC {
-                timing: 0,
-                channel: 0,
-                cc: ALL_NOTES_OFF,
-                value: 0.0,
-            });
-            self.midi_on = false;
-        }
+            #[cfg(feature = "midi")]
+            if self.midi_on && self.analysis_midi_output.is_empty() {
+                context.send_event(NoteEvent::MidiCC {
+                    timing: 0,
+                    channel: 0,
+                    cc: ALL_NOTES_OFF,
+                    value: 0.0,
+                });
+                self.midi_on = false;
+            }
 
-        self.analysis_midi_output.clear();
+            self.analysis_midi_output.clear();
+        }
 
         #[cfg(feature = "mute-output")]
         for channel_samples in buffer.iter_samples() {
@@ -445,7 +430,7 @@ impl Default for AnalysisChainConfig {
 
             output_midi: false,
             midi_use_unnormalized: true,
-            midi_max_simultaneous: 16,
+            midi_max_simultaneous: 24,
             midi_amplitude_threshold: 30.0 - 86.0,
             midi_use_aftertouch: true,
             midi_use_volume: false,
