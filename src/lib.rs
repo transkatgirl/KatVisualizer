@@ -845,7 +845,9 @@ impl AnalysisChain {
                         1.0,
                     )
                     .clamp(0.0, 1.0);
-                    sorting_notes[i] = (sorting_volume_sum / items, masking_sum / items, i);
+                    let sorting_volume = sorting_volume_sum / items;
+                    let masking_volume = masking_sum / items;
+                    sorting_notes[i] = (sorting_volume, sorting_volume - masking_volume, i);
                 }
             }
 
@@ -867,7 +869,9 @@ impl AnalysisChain {
                     sorting_notes[i] = (f32::NEG_INFINITY, f32::NEG_INFINITY, i);
                 } else {
                     notes[i] = (pan_sum / items, volume_sum / items);
-                    sorting_notes[i] = (sorting_volume_sum / items, masking_sum / items, i);
+                    let sorting_volume = sorting_volume_sum / items;
+                    let masking_volume = masking_sum / items;
+                    sorting_notes[i] = (sorting_volume, sorting_volume - masking_volume, i);
                 }
             }
 
