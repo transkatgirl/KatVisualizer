@@ -38,6 +38,7 @@ impl Default for BetterAnalyzerConfiguration {
 pub struct BetterAnalyzer {
     config: BetterAnalyzerConfiguration,
     transform: VQsDFT,
+    masker: Masker,
     buffer_size: usize,
     frequency_bands: Vec<(f64, f64, f64)>,
     normalizers: Vec<PrecomputedNormalizer>,
@@ -89,6 +90,7 @@ impl BetterAnalyzer {
         Self {
             config,
             buffer_size: transform.buffer.len(),
+            masker: Masker::new(frequency_bands.iter().map(|(_, c, _)| *c)),
             transform,
             frequency_bands,
             normalizers,
@@ -118,6 +120,7 @@ impl BetterAnalyzer {
 pub struct BetterAnalysis {
     pub duration: Duration,
     pub data: Vec<(f32, f32)>,
+    pub masking: Vec<f64>,
     pub mean: f32,
     pub max: f32,
 }
@@ -127,6 +130,7 @@ impl BetterAnalysis {
         Self {
             duration: Duration::ZERO,
             data: Vec::with_capacity(capacity),
+            masking: Vec::with_capacity(capacity),
             mean: f32::NEG_INFINITY,
             max: f32::NEG_INFINITY,
         }
@@ -243,7 +247,38 @@ impl BetterAnalysis {
                     }
                 }
             }
+
+            self.masking.clear();
+
+            for _ in 0..new_length {
+                self.masking.push(0.0);
+            }
         }
+
+        /*let flatness = if spectrum.len() > 128 {
+            0.0
+        } else {
+            map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0)
+        };*/
+
+        let hearing_threshold = normalization_volume.map(|listening_volume| {
+            left.frequency_bands
+                .iter()
+                .map(move |(_, c, _)| approximate_hearing_threshold(*c) - listening_volume)
+        });
+
+        let gain_amplitude = dbfs_to_amplitude(gain);
+
+        left.masker.calculate_masking_threshold(
+            left.transform
+                .spectrum_data
+                .iter()
+                .zip(right.transform.spectrum_data.iter())
+                .map(|(l, r)| (l + r) * gain_amplitude),
+            0.0,
+            hearing_threshold,
+            &mut self.masking,
+        );
 
         self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
 
@@ -336,7 +371,39 @@ impl BetterAnalysis {
                     }
                 }
             }
+
+            self.masking.clear();
+
+            for _ in 0..new_length {
+                self.masking.push(0.0);
+            }
         }
+
+        /*let flatness = if spectrum.len() > 128 {
+            0.0
+        } else {
+            map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0)
+        };*/
+
+        let hearing_threshold = normalization_volume.map(|listening_volume| {
+            center
+                .frequency_bands
+                .iter()
+                .map(move |(_, c, _)| approximate_hearing_threshold(*c) - listening_volume)
+        });
+
+        let gain_amplitude = dbfs_to_amplitude(gain);
+
+        center.masker.calculate_masking_threshold(
+            center
+                .transform
+                .spectrum_data
+                .iter()
+                .map(|c| *c * gain_amplitude),
+            0.0,
+            hearing_threshold,
+            &mut self.masking,
+        );
 
         self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
 
@@ -355,6 +422,7 @@ impl BetterSpectrogram {
                 BetterAnalysis {
                     duration: Duration::from_secs(1),
                     data: vec![(0.0, f32::NEG_INFINITY); slice_capacity],
+                    masking: vec![f64::NEG_INFINITY; slice_capacity],
                     mean: f32::NEG_INFINITY,
                     max: f32::NEG_INFINITY,
                 };
@@ -366,8 +434,10 @@ impl BetterSpectrogram {
         self.update_fn(|buffer| {
             if buffer.data.len() == analysis.data.len() {
                 buffer.data.copy_from_slice(&analysis.data);
+                buffer.masking.copy_from_slice(&analysis.masking);
             } else {
                 buffer.data.clone_from(&analysis.data);
+                buffer.masking.clone_from(&analysis.masking);
             }
             buffer.duration = analysis.duration;
             buffer.mean = analysis.mean;
@@ -394,7 +464,7 @@ fn spectral_flatness(spectrum: &[f64]) -> f64 {
     let (count, product, sum): (usize, f64, f64) = spectrum
         .iter()
         .filter(|v| v.is_finite())
-        .map(|v| dbfs_to_amplitude(*v) * 8192.0) // Helps with underflow/overflow issues
+        .map(|v| *v * 8192.0) // Helps with underflow/overflow issues
         .fold((0, 1.0, 0.0), |acc, v| (acc.0 + 1, acc.1 * v, acc.2 + v));
     let count = count as f64;
 
@@ -418,43 +488,39 @@ fn masking_threshold_offset(center_bark: f64, flatness: f64) -> f64 {
 // https://www.mp3-tech.org/programmer/docs/di042001.pdf
 // https://dn790006.ca.archive.org/0/items/05shlacpsychacousticsmodelsws201718gs/05_shl_AC_Psychacoustics_Models_WS-2017-18_gs.pdf
 
-pub struct Masker {
-    frequencies: Vec<f64>,
-    bark_frequencies: Vec<f64>,
+#[derive(Clone)]
+struct Masker {
+    frequency_set: Vec<(f64, f64)>,
 }
 
 impl Masker {
-    pub fn new(frequencies: Vec<f64>) -> Self {
-        Self {
-            bark_frequencies: frequencies
-                .iter()
-                .map(|f| FrequencyScale::Bark.scale(*f))
-                .collect(),
-            frequencies,
-        }
+    fn new(frequencies: impl Iterator<Item = f64>) -> Self {
+        let frequency_set = frequencies
+            .map(|f| (f, FrequencyScale::Bark.scale(f)))
+            .collect();
+
+        Self { frequency_set }
     }
-    pub fn calculate_masking_threshold(
-        &mut self,
-        spectrum: &[f64],
-        hearing_threshold: &[f64],
+    fn calculate_masking_threshold(
+        &self,
+        spectrum: impl Iterator<Item = f64>,
+        flatness: f64,
+        hearing_threshold: Option<impl Iterator<Item = f64>>,
         masking_threshold: &mut [f64],
     ) {
-        hearing_threshold
-            .iter()
-            .enumerate()
-            .for_each(|(i, h)| masking_threshold[i] = dbfs_to_amplitude(*h));
-
-        let flatness = if spectrum.len() > 128 {
-            0.0
+        if let Some(hearing_threshold) = hearing_threshold {
+            hearing_threshold.enumerate().for_each(|(i, t)| {
+                masking_threshold[i] = dbfs_to_amplitude(t);
+            });
         } else {
-            map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0)
-        };
+            masking_threshold.iter_mut().for_each(|s| *s = 0.0);
+        }
 
-        for (i, component) in spectrum.iter().enumerate() {
-            let amplitude = dbfs_to_amplitude(*component);
-            let amplitude_db = *component;
-            let frequency = self.frequencies[i];
-            let bark = self.bark_frequencies[i];
+        for (i, component) in spectrum.enumerate() {
+            let amplitude = component;
+            let amplitude_db = amplitude_to_dbfs(component);
+            let frequency = self.frequency_set[i].0;
+            let bark = self.frequency_set[i].1;
 
             let (lower_spread, upper_spread, simultaneous) = (
                 27.0,
@@ -467,7 +533,7 @@ impl Masker {
             masking_threshold
                 .iter_mut()
                 .enumerate()
-                .map(|(i, s)| (self.bark_frequencies[i], s))
+                .map(|(i, s)| (self.frequency_set[i].1, s))
                 .for_each(|(b, s)| {
                     *s += dbfs_to_amplitude(
                         if b > bark {
@@ -611,6 +677,27 @@ fn approximate_coefficients(frequency: f64) -> (f64, f64, f64) {
                 (L_U[ii] - L_U[i]) * k + L_U[i],
                 (T_F[ii] - T_F[i]) * k + T_F[i],
             );
+        }
+    }
+
+    panic!()
+}
+
+fn approximate_hearing_threshold(frequency: f64) -> f64 {
+    let frequency = frequency.clamp(MIN_NORM_FREQUENCY, MAX_NORM_FREQUENCY);
+
+    for i in 0..NORM_FREQUENCY_COUNT {
+        let ii = i + 1;
+
+        if NORM_FREQUENCIES[i] == frequency {
+            return T_F[i];
+        }
+
+        if NORM_FREQUENCIES[i] < frequency && frequency < NORM_FREQUENCIES[ii] {
+            let k =
+                (frequency - NORM_FREQUENCIES[i]) / (NORM_FREQUENCIES[ii] - NORM_FREQUENCIES[i]);
+
+            return (T_F[ii] - T_F[i]) * k + T_F[i];
         }
     }
 
