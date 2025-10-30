@@ -1615,6 +1615,7 @@ pub fn create(
                         {
                             if analysis_settings.output_midi {
                                 analysis_settings.internal_buffering = false;
+                                analysis_settings.normalize_amplitude = true;
                                 analysis_settings.masking = true;
                                 analysis_settings.erb_time_resolution = false;
                                 analysis_settings.q_time_resolution = 17.30993;
@@ -1650,6 +1651,19 @@ pub fn create(
                                 egui_ctx.request_discard("Changed setting");
                                 return;
                             };
+
+                            if analysis_settings.masking && analysis_settings.midi_max_simultaneous != 128 {
+                                if ui.add(
+                                    egui::Slider::new(&mut analysis_settings.midi_amplitude_bin_size, 0.0..=60.0)
+                                        .clamping(egui::SliderClamping::Never)
+                                        .suffix(" dB")
+                                        .text("MIDI amplitude prioritization bin size"),
+                                ).changed() {
+                                    update(&analysis_settings);
+                                    egui_ctx.request_discard("Changed setting");
+                                    return;
+                                };
+                            }
 
                             if !analysis_settings.midi_use_volume {
                                 if ui
