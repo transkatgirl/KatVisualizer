@@ -46,11 +46,9 @@ pub struct MyPlugin {
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     latency_samples: u32,
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
-    midi_poly_on: bool,
-    midi_notes_on: bool,
+    midi_on: bool,
     midi_notes: [bool; 128],
     midi_volume_changed: bool,
-    midi_needs_reset: bool,
     analysis_midi_output: Vec<AnalysisBufferMidi>,
     analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
     state_info: Arc<RwLock<Option<PluginStateInfo>>>,
@@ -78,11 +76,9 @@ impl Default for MyPlugin {
                     finished: Instant::now(),
                 },
             ))),
-            midi_poly_on: false,
-            midi_notes_on: false,
+            midi_on: false,
             midi_notes: [false; 128],
             midi_volume_changed: false,
-            midi_needs_reset: false,
             analysis_midi_output: Vec::with_capacity(SPECTROGRAM_SLICES * MAX_FREQUENCY_BINS * 2),
             analysis_frequencies: Arc::new(RwLock::new(Vec::with_capacity(MAX_FREQUENCY_BINS))),
             state_info: Arc::new(RwLock::new(None)),
@@ -225,11 +221,6 @@ impl Plugin for MyPlugin {
             buffer_config: *buffer_config,
         });
 
-        #[cfg(feature = "midi")]
-        {
-            self.midi_needs_reset = true;
-        }
-
         true
     }
 
@@ -255,34 +246,24 @@ impl Plugin for MyPlugin {
         }
 
         #[cfg(feature = "midi")]
-        if self.midi_needs_reset {
-            context.send_event(NoteEvent::MidiCC {
-                timing: 0,
-                channel: 0,
-                cc: RESET_ALL_CONTROLLERS,
-                value: 0.0,
-            });
-            self.midi_poly_on = false;
-            self.midi_volume_changed = false;
-            self.midi_needs_reset = false;
-        }
-
-        #[cfg(feature = "midi")]
-        if !self.midi_poly_on {
-            context.send_event(NoteEvent::MidiCC {
-                timing: 0,
-                channel: 0,
-                cc: POLY_MODE_ON,
-                value: 0.0,
-            });
-            self.midi_notes_on = false;
-            self.midi_notes = [false; 128];
-            self.midi_poly_on = true;
-        }
-
-        #[cfg(feature = "midi")]
         for buffer in &self.analysis_midi_output {
-            self.midi_notes_on = true;
+            if !self.midi_on {
+                context.send_event(NoteEvent::MidiCC {
+                    timing: 0,
+                    channel: 0,
+                    cc: RESET_ALL_CONTROLLERS,
+                    value: 0.0,
+                });
+                context.send_event(NoteEvent::MidiCC {
+                    timing: 0,
+                    channel: 0,
+                    cc: POLY_MODE_ON,
+                    value: 0.0,
+                });
+                self.midi_notes = [false; 128];
+                self.midi_on = true;
+                self.midi_volume_changed = false;
+            }
 
             if let Some(pressures) = buffer.pressures {
                 if self.midi_volume_changed {
@@ -397,15 +378,14 @@ impl Plugin for MyPlugin {
         }
 
         #[cfg(feature = "midi")]
-        if self.midi_notes_on && self.analysis_midi_output.is_empty() {
+        if self.midi_on && self.analysis_midi_output.is_empty() {
             context.send_event(NoteEvent::MidiCC {
                 timing: 0,
                 channel: 0,
                 cc: ALL_NOTES_OFF,
                 value: 0.0,
             });
-            self.midi_notes_on = false;
-            self.midi_notes = [false; 128];
+            self.midi_on = false;
         }
 
         self.analysis_midi_output.clear();
