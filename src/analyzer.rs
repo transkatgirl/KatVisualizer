@@ -280,6 +280,19 @@ impl BetterAnalysis {
             &mut self.masking,
         );
 
+        if let Some(listening_volume) = normalization_volume {
+            left.normalizers
+                .iter()
+                .enumerate()
+                .for_each(|(i, normalizer)| {
+                    self.masking[i] = normalizer
+                        .spl_to_phon(self.masking[i] + listening_volume)
+                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                        .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                        - listening_volume
+                });
+        }
+
         self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
 
         self.duration = duration;
@@ -405,6 +418,20 @@ impl BetterAnalysis {
             &mut self.masking,
         );
 
+        if let Some(listening_volume) = normalization_volume {
+            center
+                .normalizers
+                .iter()
+                .enumerate()
+                .for_each(|(i, normalizer)| {
+                    self.masking[i] = normalizer
+                        .spl_to_phon(self.masking[i] + listening_volume)
+                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                        .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                        - listening_volume
+                });
+        }
+
         self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
 
         self.duration = duration;
@@ -460,7 +487,7 @@ impl BetterSpectrogram {
 // ----- Below algorithms are taken from https://www.gammaelectronics.xyz/poda_6e_11b.html -----
 
 // Only recommended for use on small arrays (len <= 128) due to underflow/overflow issues
-fn spectral_flatness(spectrum: &[f64]) -> f64 {
+/*fn spectral_flatness(spectrum: &[f64]) -> f64 {
     let (count, product, sum): (usize, f64, f64) = spectrum
         .iter()
         .filter(|v| v.is_finite())
@@ -474,7 +501,7 @@ fn spectral_flatness(spectrum: &[f64]) -> f64 {
     let flatness = amplitude_to_dbfs(geometric_mean / arithmetic_mean);
 
     if flatness.is_normal() { flatness } else { 0.0 }
-}
+}*/
 
 fn masking_threshold_offset(center_bark: f64, flatness: f64) -> f64 {
     let tonal_masking_threshold = -6.025 - (0.275 * center_bark);
