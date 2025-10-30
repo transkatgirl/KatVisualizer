@@ -1136,7 +1136,7 @@ pub fn create(
                                 }
                             } else {
                                 ui.add(
-                                    egui::Slider::new(&mut render_settings.max_db, 0.0..=-100.0)
+                                    egui::Slider::new(&mut render_settings.max_db, -100.0..=0.0)
                                         .clamping(egui::SliderClamping::Never)
                                         .suffix("dB")
                                         .step_by(1.0)
@@ -1145,7 +1145,7 @@ pub fn create(
                                 );
 
                                 ui.add(
-                                    egui::Slider::new(&mut render_settings.min_db, 0.0..=-100.0)
+                                    egui::Slider::new(&mut render_settings.min_db, -100.0..=0.0)
                                         .clamping(egui::SliderClamping::Never)
                                         .suffix("dB")
                                         .step_by(1.0)
@@ -1246,7 +1246,7 @@ pub fn create(
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut analysis_settings.gain, 40.0..=-20.0)
+                                egui::Slider::new(&mut analysis_settings.gain, -20.0..=40.0)
                                     .clamping(egui::SliderClamping::Never)
                                     .suffix("dB")
                                     .step_by(1.0)
@@ -1315,7 +1315,7 @@ pub fn create(
 
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut analysis_settings.listening_volume, 120.0..=20.0)
+                                    egui::Slider::new(&mut analysis_settings.listening_volume, 20.0..=120.0)
                                         .clamping(egui::SliderClamping::Never)
                                         .suffix(" dB SPL")
                                         .step_by(1.0)
@@ -1703,7 +1703,7 @@ pub fn create(
                                                 .fixed_decimals(0)
                                                 .text("MIDI note pressure minimum amplitude"),
                                         )
-                                        .on_hover_text("")
+                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.")
                                         .changed()
                                     {
                                         analysis_settings.midi_pressure_min_amplitude =
@@ -1721,7 +1721,7 @@ pub fn create(
                                                 .fixed_decimals(0)
                                                 .text("MIDI note pressure maximum amplitude"),
                                         )
-                                        .on_hover_text("")
+                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
                                         .changed()
                                     {
                                         analysis_settings.midi_pressure_max_amplitude =
@@ -1734,7 +1734,7 @@ pub fn create(
                             } else {
                                 if ui
                                     .add(
-                                        egui::Slider::new(&mut analysis_settings.midi_amplitude_threshold, 0.0..=-100.0)
+                                        egui::Slider::new(&mut analysis_settings.midi_amplitude_threshold, -100.0..=0.0)
                                             .clamping(egui::SliderClamping::Never)
                                             .suffix("dB")
                                             .step_by(1.0)
@@ -1765,14 +1765,14 @@ pub fn create(
                                 if !analysis_settings.midi_use_volume {
                                     if ui
                                         .add(
-                                            egui::Slider::new(&mut analysis_settings.midi_pressure_min_amplitude, 0.0..=-100.0)
+                                            egui::Slider::new(&mut analysis_settings.midi_pressure_min_amplitude, -100.0..=0.0)
                                                 .clamping(egui::SliderClamping::Never)
                                                 .suffix("dB")
                                                 .step_by(1.0)
                                                 .fixed_decimals(0)
                                                 .text("MIDI note pressure minimum amplitude"),
                                         )
-                                        .on_hover_text("")
+                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.")
                                         .changed()
                                     {
                                         update(&analysis_settings);
@@ -1782,14 +1782,14 @@ pub fn create(
 
                                     if ui
                                         .add(
-                                            egui::Slider::new(&mut analysis_settings.midi_pressure_max_amplitude, 0.0..=-100.0)
+                                            egui::Slider::new(&mut analysis_settings.midi_pressure_max_amplitude, -100.0..=0.0)
                                                 .clamping(egui::SliderClamping::Never)
                                                 .suffix("dB")
                                                 .step_by(1.0)
                                                 .fixed_decimals(0)
                                                 .text("MIDI note pressure maximum amplitude"),
                                         )
-                                        .on_hover_text("")
+                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
                                         .changed()
                                     {
                                         update(&analysis_settings);
