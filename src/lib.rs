@@ -819,7 +819,7 @@ impl AnalysisChain {
             }
         }
 
-        let mut sorting_notes: [(f32, f32); 128] = [(0.0, 0.0); 128];
+        let mut sorting_notes: [(f32, f32, usize); 128] = [(0.0, 0.0, 0); 128];
 
         let mut analysis_midi = if !self.midi_use_volume {
             let mut notes: [(f32, f32); 128] = [(0.0, 0.0); 128];
@@ -831,7 +831,7 @@ impl AnalysisChain {
                 if items == 0.0 {
                     notes[i] = (0.0, f32::NEG_INFINITY);
                     pressures[i] = 0.0;
-                    sorting_notes[i] = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+                    sorting_notes[i] = (f32::NEG_INFINITY, f32::NEG_INFINITY, i);
                 } else {
                     let volume = volume_sum / items;
 
@@ -844,7 +844,7 @@ impl AnalysisChain {
                         1.0,
                     )
                     .clamp(0.0, 1.0);
-                    sorting_notes[i] = (sorting_volume_sum / items, masking_sum / items);
+                    sorting_notes[i] = (sorting_volume_sum / items, masking_sum / items, i);
                 }
             }
 
@@ -863,10 +863,10 @@ impl AnalysisChain {
             {
                 if items == 0.0 {
                     notes[i] = (0.0, f32::NEG_INFINITY);
-                    sorting_notes[i] = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+                    sorting_notes[i] = (f32::NEG_INFINITY, f32::NEG_INFINITY, i);
                 } else {
                     notes[i] = (pan_sum / items, volume_sum / items);
-                    sorting_notes[i] = (sorting_volume_sum / items, masking_sum / items);
+                    sorting_notes[i] = (sorting_volume_sum / items, masking_sum / items, i);
                 }
             }
 
@@ -880,25 +880,13 @@ impl AnalysisChain {
         };
 
         if self.midi_max_simultaneous != 128 {
-            let mut sorted_notes: [(f32, usize); 128] = [(0.0, 0); 128];
+            sorting_notes.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
 
-            if self.masking {
-                for (note, (volume, mask)) in sorting_notes.into_iter().enumerate() {
-                    sorted_notes[note] = (volume, note);
-                }
-            } else {
-                for (note, (volume, _)) in sorting_notes.into_iter().enumerate() {
-                    sorted_notes[note] = (volume, note);
-                }
-            }
-
-            sorted_notes.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
-
-            sorted_notes
+            sorting_notes
                 .into_iter()
                 .rev()
                 .skip(self.midi_max_simultaneous as usize)
-                .for_each(|(_, note)| {
+                .for_each(|(_, _, note)| {
                     analysis_midi.notes[note].1 = f32::NEG_INFINITY;
                 });
 
