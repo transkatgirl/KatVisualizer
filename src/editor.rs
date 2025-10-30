@@ -1365,7 +1365,7 @@ pub fn create(
                                 &mut analysis_settings.masking,
                                 "Apply simultaneous masking",
                             )
-                            .on_hover_text("If this is enabled, simultaneous masking thresholds are calculated and applied to the amplitude values.\nIf this is disabled, simultaneous masking thresholds are not calculated.")
+                            .on_hover_text("If this is enabled, simultaneous masking thresholds are calculated using a tone-masking-tone model and signals below the masking threshold are removed.\nIf this is disabled, simultaneous masking thresholds are not calculated.")
                             .changed()
                         {
                             update(&analysis_settings);

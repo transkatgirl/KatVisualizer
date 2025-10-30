@@ -65,6 +65,7 @@ If you're having performance or latency issues, enabling performance counters ca
 		- Bargraph height (setting this to 1 disables the spectrogram, setting this to 0 disables the bargraph)
 		- Automatic amplitude ranging
 		- Amplitude ranging duration
+		- Show simultaneous masking thresholds
 		- Update rate
 		- Resolution
 	- Affected by processing time

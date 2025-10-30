@@ -126,8 +126,6 @@ pub struct BetterAnalysis {
     pub max: f32,
 }
 
-// TODO: Apply masking thresholds to analysis output
-
 impl BetterAnalysis {
     pub fn new(capacity: usize) -> Self {
         Self {
@@ -313,11 +311,26 @@ impl BetterAnalysis {
                     }
                 }
             }
+        }
 
-            self.masking.clear();
-
-            for _ in 0..new_length {
-                self.masking.push(0.0);
+        if masking {
+            if let Some(listening_volume) = normalization_volume {
+                let minimum = (0.0 - listening_volume) as f32;
+                self.data.iter_mut().zip(self.masking.iter()).for_each(
+                    |((_, volume), threshold)| {
+                        if *volume < *threshold {
+                            *volume = minimum;
+                        }
+                    },
+                );
+            } else {
+                self.data.iter_mut().zip(self.masking.iter()).for_each(
+                    |((_, volume), threshold)| {
+                        if *volume < *threshold {
+                            *volume = f32::NEG_INFINITY;
+                        }
+                    },
+                );
             }
         }
 
@@ -475,6 +488,27 @@ impl BetterAnalysis {
                         self.max = volume;
                     }
                 }
+            }
+        }
+
+        if masking {
+            if let Some(listening_volume) = normalization_volume {
+                let minimum = (0.0 - listening_volume) as f32;
+                self.data.iter_mut().zip(self.masking.iter()).for_each(
+                    |((_, volume), threshold)| {
+                        if *volume < *threshold {
+                            *volume = minimum;
+                        }
+                    },
+                );
+            } else {
+                self.data.iter_mut().zip(self.masking.iter()).for_each(
+                    |((_, volume), threshold)| {
+                        if *volume < *threshold {
+                            *volume = f32::NEG_INFINITY;
+                        }
+                    },
+                );
             }
         }
 
