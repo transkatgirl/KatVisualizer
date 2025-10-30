@@ -1626,11 +1626,15 @@ pub fn create(
                                 }
                             }
 
-                            if ui.add(
-                                egui::Slider::new(&mut analysis_settings.midi_max_simultaneous, 1..=128)
-                                    .suffix(" notes")
-                                    .text("Maximum simultaneous MIDI events"),
-                            ).changed() {
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut analysis_settings.midi_max_simultaneous, 1..=128)
+                                        .suffix(" notes")
+                                        .text("Maximum simultaneous MIDI events"),
+                                )
+                                .on_hover_text("")
+                                .changed()
+                            {
                                 update(&analysis_settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
@@ -1659,13 +1663,17 @@ pub fn create(
                                 let mut midi_max_phon =
                                     (analysis_settings.midi_pressure_max_amplitude as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
 
-                                if ui.add(
-                                    egui::Slider::new(&mut midi_threshold_phon, 0.0..=100.0)
-                                        .suffix(" phon")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("MIDI note amplitude threshold"),
-                                ).changed() {
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut midi_threshold_phon, 0.0..=100.0)
+                                            .suffix(" phon")
+                                            .step_by(1.0)
+                                            .fixed_decimals(0)
+                                            .text("MIDI note amplitude threshold"),
+                                    )
+                                    .on_hover_text("")
+                                    .changed()
+                                {
                                     analysis_settings.midi_amplitude_threshold =
                                         (midi_threshold_phon - analysis_settings.listening_volume) as f32;
                                     update(&analysis_settings);
@@ -1687,13 +1695,17 @@ pub fn create(
                                 }
 
                                 if !analysis_settings.midi_use_volume {
-                                    if ui.add(
-                                        egui::Slider::new(&mut midi_min_phon, 0.0..=100.0)
-                                            .suffix(" phon")
-                                            .step_by(1.0)
-                                            .fixed_decimals(0)
-                                            .text("MIDI note pressure minimum amplitude"),
-                                    ).changed() {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut midi_min_phon, 0.0..=100.0)
+                                                .suffix(" phon")
+                                                .step_by(1.0)
+                                                .fixed_decimals(0)
+                                                .text("MIDI note pressure minimum amplitude"),
+                                        )
+                                        .on_hover_text("")
+                                        .changed()
+                                    {
                                         analysis_settings.midi_pressure_min_amplitude =
                                             (midi_min_phon - analysis_settings.listening_volume) as f32;
                                         update(&analysis_settings);
@@ -1701,13 +1713,17 @@ pub fn create(
                                         return;
                                     }
 
-                                    if ui.add(
-                                        egui::Slider::new(&mut midi_max_phon, 0.0..=100.0)
-                                            .suffix(" phon")
-                                            .step_by(1.0)
-                                            .fixed_decimals(0)
-                                            .text("MIDI note pressure maximum amplitude"),
-                                    ).changed() {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut midi_max_phon, 0.0..=100.0)
+                                                .suffix(" phon")
+                                                .step_by(1.0)
+                                                .fixed_decimals(0)
+                                                .text("MIDI note pressure maximum amplitude"),
+                                        )
+                                        .on_hover_text("")
+                                        .changed()
+                                    {
                                         analysis_settings.midi_pressure_max_amplitude =
                                             (midi_max_phon - analysis_settings.listening_volume) as f32;
                                         update(&analysis_settings);
@@ -1716,14 +1732,18 @@ pub fn create(
                                     }
                                 }
                             } else {
-                                if ui.add(
-                                    egui::Slider::new(&mut analysis_settings.midi_amplitude_threshold, 0.0..=-100.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix("dB")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("MIDI note amplitude threshold"),
-                                ).changed() {
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut analysis_settings.midi_amplitude_threshold, 0.0..=-100.0)
+                                            .clamping(egui::SliderClamping::Never)
+                                            .suffix("dB")
+                                            .step_by(1.0)
+                                            .fixed_decimals(0)
+                                            .text("MIDI note amplitude threshold"),
+                                    )
+                                    .on_hover_text("")
+                                    .changed()
+                                {
                                     update(&analysis_settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
@@ -1743,27 +1763,35 @@ pub fn create(
                                 }
 
                                 if !analysis_settings.midi_use_volume {
-                                    if ui.add(
-                                        egui::Slider::new(&mut analysis_settings.midi_pressure_min_amplitude, 0.0..=-100.0)
-                                            .clamping(egui::SliderClamping::Never)
-                                            .suffix("dB")
-                                            .step_by(1.0)
-                                            .fixed_decimals(0)
-                                            .text("MIDI note pressure minimum amplitude"),
-                                    ).changed() {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut analysis_settings.midi_pressure_min_amplitude, 0.0..=-100.0)
+                                                .clamping(egui::SliderClamping::Never)
+                                                .suffix("dB")
+                                                .step_by(1.0)
+                                                .fixed_decimals(0)
+                                                .text("MIDI note pressure minimum amplitude"),
+                                        )
+                                        .on_hover_text("")
+                                        .changed()
+                                    {
                                         update(&analysis_settings);
                                         egui_ctx.request_discard("Changed setting");
                                         return;
                                     };
 
-                                    if ui.add(
-                                        egui::Slider::new(&mut analysis_settings.midi_pressure_max_amplitude, 0.0..=-100.0)
-                                            .clamping(egui::SliderClamping::Never)
-                                            .suffix("dB")
-                                            .step_by(1.0)
-                                            .fixed_decimals(0)
-                                            .text("MIDI note pressure maximum amplitude"),
-                                    ).changed() {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut analysis_settings.midi_pressure_max_amplitude, 0.0..=-100.0)
+                                                .clamping(egui::SliderClamping::Never)
+                                                .suffix("dB")
+                                                .step_by(1.0)
+                                                .fixed_decimals(0)
+                                                .text("MIDI note pressure maximum amplitude"),
+                                        )
+                                        .on_hover_text("")
+                                        .changed()
+                                    {
                                         update(&analysis_settings);
                                         egui_ctx.request_discard("Changed setting");
                                         return;
