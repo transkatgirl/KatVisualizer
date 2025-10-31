@@ -37,40 +37,73 @@ fn calculate_volume_min_max(
     scratchpad.clear();
     let mut elapsed = Duration::ZERO;
 
-    let mut target_sum = 0.0;
+    if spectrogram.data[0].masking_mean.is_finite() {
+        let mut masking_sum = 0.0;
 
-    for row in &spectrogram.data {
-        elapsed += row.duration;
-        if elapsed > settings.agc_duration {
-            break;
+        for row in &spectrogram.data {
+            elapsed += row.duration;
+            if elapsed > settings.agc_duration {
+                break;
+            }
+
+            if row.masking_mean.is_finite() {
+                masking_sum += row.masking_mean as f64;
+                scratchpad.push(row.max);
+            }
         }
 
-        if row.mean.is_finite() {
-            target_sum += row.mean as f64;
-            scratchpad.push(row.max);
+        scratchpad.voracious_sort();
+
+        let rows = scratchpad.len() as f32;
+
+        let peak_index = (settings.agc_peak_percentile * rows)
+            .round()
+            .clamp(0.0, rows - 1.0) as usize;
+        let peak = scratchpad[peak_index];
+        let masking = (masking_sum / rows as f64) as f32;
+
+        (
+            (masking)
+                .max(peak - settings.agc_max_peak_range)
+                .max(settings.agc_minimum),
+            (masking + settings.agc_above_masking).max(peak),
+        )
+    } else {
+        let mut target_sum = 0.0;
+
+        for row in &spectrogram.data {
+            elapsed += row.duration;
+            if elapsed > settings.agc_duration {
+                break;
+            }
+
+            if row.mean.is_finite() {
+                target_sum += row.mean as f64;
+                scratchpad.push(row.max);
+            }
         }
+
+        if scratchpad.is_empty() {
+            return (settings.min_db, settings.max_db);
+        }
+
+        scratchpad.voracious_sort();
+
+        let rows = scratchpad.len() as f32;
+
+        let peak_index = (settings.agc_peak_percentile * rows)
+            .round()
+            .clamp(0.0, rows - 1.0) as usize;
+        let peak = scratchpad[peak_index];
+        let target = (target_sum / rows as f64) as f32;
+
+        (
+            (target - settings.agc_below_mean)
+                .max(peak - settings.agc_max_peak_range)
+                .max(settings.agc_minimum),
+            (target + settings.agc_above_mean).max(peak),
+        )
     }
-
-    if scratchpad.is_empty() {
-        return (settings.min_db, settings.max_db);
-    }
-
-    scratchpad.voracious_sort();
-
-    let rows = scratchpad.len() as f32;
-
-    let peak_index = (settings.agc_peak_percentile * rows)
-        .round()
-        .clamp(0.0, rows - 1.0) as usize;
-    let peak = scratchpad[peak_index];
-    let target = (target_sum / rows as f64) as f32;
-
-    (
-        (target - settings.agc_below_mean)
-            .max(peak - settings.agc_max_peak_range)
-            .max(settings.agc_minimum),
-        (target + settings.agc_above_mean).max(peak),
-    )
 }
 
 fn draw_bargraph(
@@ -413,6 +446,7 @@ struct RenderSettings {
     agc_duration: Duration,
     agc_peak_percentile: f32,
     agc_max_peak_range: f32,
+    agc_above_masking: f32,
     agc_above_mean: f32,
     agc_below_mean: f32,
     agc_minimum: f32,
@@ -439,6 +473,7 @@ impl Default for RenderSettings {
             agc_duration: Duration::from_secs_f64(3.0),
             agc_peak_percentile: 0.99,
             agc_max_peak_range: 60.0,
+            agc_above_masking: 40.0,
             agc_above_mean: 25.0,
             agc_below_mean: 15.0,
             agc_minimum: 0.0 - AnalysisChainConfig::default().listening_volume as f32,
@@ -1123,23 +1158,34 @@ pub fn create(
                                     .text("Maximum range below peak"),
                             );
 
-                            ui.add(
-                                egui::Slider::new(&mut render_settings.agc_above_mean, 0.0..=100.0)
-                                    .clamping(egui::SliderClamping::Never)
-                                    .suffix("dB")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Minimum range above mean"),
-                            );
+                            if analysis_settings.masking {
+                                ui.add(
+                                    egui::Slider::new(&mut render_settings.agc_above_masking, 0.0..=100.0)
+                                        .clamping(egui::SliderClamping::Never)
+                                        .suffix("dB")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("Minimum range above masking mean"),
+                                );
+                            } else {
+                                ui.add(
+                                    egui::Slider::new(&mut render_settings.agc_above_mean, 0.0..=100.0)
+                                        .clamping(egui::SliderClamping::Never)
+                                        .suffix("dB")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("Minimum range above mean"),
+                                );
 
-                            ui.add(
-                                egui::Slider::new(&mut render_settings.agc_below_mean, 0.0..=100.0)
-                                    .clamping(egui::SliderClamping::Never)
-                                    .suffix("dB")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Maximum range below mean"),
-                            );
+                                ui.add(
+                                    egui::Slider::new(&mut render_settings.agc_below_mean, 0.0..=100.0)
+                                        .clamping(egui::SliderClamping::Never)
+                                        .suffix("dB")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("Maximum range below mean"),
+                                );
+                            }
                         } else {
                             if analysis_settings.normalize_amplitude {
                                 let mut min_phon =
