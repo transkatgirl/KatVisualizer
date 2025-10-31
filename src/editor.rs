@@ -430,7 +430,7 @@ impl Default for RenderSettings {
             minimum_lightness: 0.13,
             maximum_lightness: 0.82,
             maximum_chroma: 0.09,
-            automatic_gain: false,
+            automatic_gain: true,
             agc_duration: Duration::from_secs_f64(3.0),
             agc_peak_percentile: 0.99,
             agc_max_peak_range: 60.0,
