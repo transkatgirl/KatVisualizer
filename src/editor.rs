@@ -64,8 +64,10 @@ fn calculate_volume_min_max(
     (
         (masking - settings.agc_below_masking)
             .max(peak - settings.agc_max_peak_range)
-            .max(settings.agc_minimum),
-        (masking + settings.agc_above_masking).max(peak),
+            .clamp(settings.agc_minimum, settings.agc_maximum),
+        (masking + settings.agc_above_masking)
+            .max(peak)
+            .clamp(settings.agc_minimum, settings.agc_maximum),
     )
 }
 
@@ -412,6 +414,7 @@ struct RenderSettings {
     agc_above_masking: f32,
     agc_below_masking: f32,
     agc_minimum: f32,
+    agc_maximum: f32,
     min_db: f32,
     max_db: f32,
     bargraph_height: f32,
@@ -437,7 +440,8 @@ impl Default for RenderSettings {
             agc_max_peak_range: 60.0,
             agc_above_masking: 40.0,
             agc_below_masking: 3.0,
-            agc_minimum: 0.0 - AnalysisChainConfig::default().listening_volume as f32,
+            agc_minimum: 3.0 - AnalysisChainConfig::default().listening_volume as f32,
+            agc_maximum: 100.0 - AnalysisChainConfig::default().listening_volume as f32,
             min_db: 20.0 - AnalysisChainConfig::default().listening_volume as f32,
             max_db: 80.0 - AnalysisChainConfig::default().listening_volume as f32,
             bargraph_height: 0.33,
@@ -1241,10 +1245,13 @@ pub fn create(
                                     (20.0 - analysis_settings.listening_volume) as f32;
                             if analysis_settings.normalize_amplitude {
                                 render_settings.agc_minimum =
-                                    (0.0 - analysis_settings.listening_volume) as f32;
+                                    (3.0 - analysis_settings.listening_volume) as f32;
+                                render_settings.agc_maximum =
+                                    (100.0 - analysis_settings.listening_volume) as f32;
                             } else {
                                 render_settings.agc_minimum =
                                     f32::NEG_INFINITY;
+                                render_settings.agc_maximum = f32::INFINITY;
                             }
                             shared_state.color_table.write().build(
                                 render_settings.left_hue,
@@ -1325,10 +1332,13 @@ pub fn create(
                             update(&analysis_settings);
                             if analysis_settings.normalize_amplitude {
                                 render_settings.agc_minimum =
-                                    (0.0 - analysis_settings.listening_volume) as f32;
+                                    (3.0 - analysis_settings.listening_volume) as f32;
+                                render_settings.agc_maximum =
+                                    (100.0 - analysis_settings.listening_volume) as f32;
                             } else {
                                 render_settings.agc_minimum =
                                     f32::NEG_INFINITY;
+                                render_settings.agc_maximum = f32::INFINITY;
                             }
                             egui_ctx.request_discard("Changed setting");
                             return;
@@ -1370,8 +1380,9 @@ pub fn create(
                                 render_settings.max_db =
                                     (old_max_phon - analysis_settings.listening_volume) as f32;
                                 render_settings.agc_minimum =
-                                    (0.0 - analysis_settings.listening_volume) as f32;
-
+                                    (3.0 - analysis_settings.listening_volume) as f32;
+                                render_settings.agc_maximum =
+                                    (100.0 - analysis_settings.listening_volume) as f32;
                                 egui_ctx.request_discard("Changed setting");
                                 return;
                             };
@@ -1808,7 +1819,9 @@ pub fn create(
                             render_settings.min_db =
                                 (20.0 - analysis_settings.listening_volume) as f32;
                             render_settings.agc_minimum =
-                                (0.0 - analysis_settings.listening_volume) as f32;
+                                (3.0 - analysis_settings.listening_volume) as f32;
+                            render_settings.agc_maximum =
+                                (100.0 - analysis_settings.listening_volume) as f32;
                             update_and_clear(&analysis_settings);
                         }
                     });
