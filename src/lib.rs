@@ -418,8 +418,6 @@ pub(crate) struct AnalysisChain {
     pub(crate) frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
 }
 
-// See: https://nih-plug.robbertvanderhelm.nl/nih_plug/util/fn.midi_note_to_freq.html
-
 struct AnalysisBufferMidi {
     timing: u32,
     use_aftertouch: bool,
