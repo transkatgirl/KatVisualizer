@@ -1368,7 +1368,7 @@ pub fn create(
                                 &mut analysis_settings.masking,
                                 "Perform simultaneous masking",
                             )
-                            .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, simultaneous masking thresholds are calculated using a tone-masking-tone model.\nIf this is disabled, simultaneous masking thresholds are not calculated.\n\nNote: In order to make realtime processing feasible, masking thresholds are calculated using the sum of the left and right channels.")
+                            .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, simultaneous masking thresholds are calculated using a tone-masking-tone model.\nIf this is disabled, simultaneous masking thresholds are not calculated.")
                             .changed()
                         {
                             update(&analysis_settings);
@@ -1613,7 +1613,7 @@ pub fn create(
                                 &mut analysis_settings.output_midi,
                                 "Output analysis as MIDI",
                             )
-                            .on_hover_text("If this is enabled, the plugin will use analysis data to generate a MIDI output, which can then be used as an input for alternative visualization methods.")
+                            .on_hover_text("If this is enabled, the plugin will use analysis data to generate a MIDI output, which can then be used as an input for alternative visualization methods.\n\nNote: In order to ensure accurate note timestamps, MIDI output requires internal buffering to be disabled. If you would like to change the minimum note length, you can do so by adjusting the plugin's buffer size.")
                             .changed()
                         {
                             if analysis_settings.output_midi {
