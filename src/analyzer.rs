@@ -132,7 +132,7 @@ impl BetterAnalysis {
         Self {
             duration: Duration::ZERO,
             data: Vec::with_capacity(capacity),
-            masking_scratchpad: Vec::with_capacity(capacity),
+            masking_scratchpad: vec![f64::NEG_INFINITY; capacity],
             masking: Vec::with_capacity(capacity),
             mean: f32::NEG_INFINITY,
             max: f32::NEG_INFINITY,
