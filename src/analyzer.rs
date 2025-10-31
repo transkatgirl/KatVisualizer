@@ -307,6 +307,8 @@ impl BetterAnalysis {
                     }
                 }
             } else {
+                let gain_amplitude = dbfs_to_amplitude(gain);
+
                 for (left, right) in left
                     .transform
                     .spectrum_data
@@ -316,7 +318,7 @@ impl BetterAnalysis {
                     let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
                     let volume = volume + gain;
 
-                    sum += dbfs_to_amplitude(volume);
+                    sum += (*left + *right) * gain_amplitude;
                     let volume = volume as f32;
 
                     self.data.push(((pan * 2.0) as f32, volume));
@@ -503,11 +505,13 @@ impl BetterAnalysis {
                     }
                 }
             } else {
-                for amplitude in center.transform.spectrum_data.iter() {
-                    let volume = amplitude_to_dbfs(*amplitude * 2.0) + gain;
+                let gain_amplitude = dbfs_to_amplitude(gain);
 
-                    sum += dbfs_to_amplitude(volume);
-                    let volume = volume as f32;
+                for amplitude in center.transform.spectrum_data.iter() {
+                    let amplitude = *amplitude * 2.0 * gain_amplitude;
+
+                    sum += amplitude;
+                    let volume = amplitude_to_dbfs(amplitude) as f32;
 
                     self.data.push((0.0, volume));
                     if volume > self.max {
