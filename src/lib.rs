@@ -671,7 +671,7 @@ impl AnalysisChain {
         if self.midi_max_simultaneous != 128 && self.midi_max_simultaneous != 0 {
             self.tone_scratchpad.clear();
 
-            for ((_, volume), (masking, (lower, center, upper))) in
+            for ((_, volume), ((_, masking), (lower, center, upper))) in
                 spectrogram.data[0].data.iter().copied().zip(
                     spectrogram.data[0]
                         .masking
@@ -770,7 +770,7 @@ impl AnalysisChain {
                     left[index] + right[index]
                 } * gain_amplitude;
 
-                if !volume.is_finite() || *volume < spectrogram.data[0].masking[index] {
+                if !volume.is_finite() || *volume < spectrogram.data[0].masking[index].1 {
                     continue;
                 }
 

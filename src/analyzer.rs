@@ -39,6 +39,7 @@ pub struct BetterAnalyzer {
     config: BetterAnalyzerConfiguration,
     transform: VQsDFT,
     masker: Masker,
+    masking: Vec<f64>,
     buffer_size: usize,
     frequency_bands: Vec<(f64, f64, f64)>,
     normalizers: Vec<PrecomputedNormalizer>,
@@ -91,6 +92,7 @@ impl BetterAnalyzer {
             config,
             buffer_size: transform.buffer.len(),
             masker: Masker::new(frequency_bands.iter().map(|(_, c, _)| *c)),
+            masking: vec![0.0; frequency_bands.len()],
             transform,
             frequency_bands,
             normalizers,
@@ -110,6 +112,18 @@ impl BetterAnalyzer {
     }
     pub fn analyze(&mut self, samples: impl Iterator<Item = f64>) {
         self.transform.analyze(samples);
+
+        /*let flatness = if spectrum.len() > 128 {
+            0.0
+        } else {
+            map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0)
+        };*/
+
+        self.masker.calculate_masking_threshold(
+            self.transform.spectrum_data.iter().copied(),
+            0.0,
+            &mut self.masking,
+        );
     }
     pub fn raw_analysis(&self) -> &[f64] {
         &self.transform.spectrum_data
@@ -120,8 +134,7 @@ impl BetterAnalyzer {
 pub struct BetterAnalysis {
     pub duration: Duration,
     pub data: Vec<(f32, f32)>,
-    masking_scratchpad: Vec<f64>,
-    pub masking: Vec<f32>,
+    pub masking: Vec<(f32, f32)>,
     pub mean: f32,
     pub max: f32,
     pub masking_mean: f32,
@@ -132,7 +145,6 @@ impl BetterAnalysis {
         Self {
             duration: Duration::ZERO,
             data: Vec::with_capacity(capacity),
-            masking_scratchpad: vec![f64::NEG_INFINITY; capacity],
             masking: Vec::with_capacity(capacity),
             mean: f32::NEG_INFINITY,
             max: f32::NEG_INFINITY,
@@ -163,58 +175,47 @@ impl BetterAnalysis {
                 self.masking.clear();
 
                 for _ in 0..new_length {
-                    self.masking.push(0.0);
+                    self.masking.push((0.0, 0.0));
                 }
             }
 
-            /*let flatness = if spectrum.len() > 128 {
-                0.0
-            } else {
-                map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0)
-            };*/
-
-            let hearing_threshold = normalization_volume.map(|listening_volume| {
-                left.frequency_bands
-                    .iter()
-                    .map(move |(_, c, _)| approximate_hearing_threshold(*c) - listening_volume)
-            });
-
-            let gain_amplitude = dbfs_to_amplitude(gain);
-
-            left.masker.calculate_masking_threshold(
-                left.transform
-                    .spectrum_data
-                    .iter()
-                    .zip(right.transform.spectrum_data.iter())
-                    .map(|(l, r)| (l + r) * gain_amplitude),
-                0.0,
-                hearing_threshold,
-                &mut self.masking_scratchpad,
-            );
+            let masking_data = left
+                .masking
+                .iter()
+                .zip(right.masking.iter())
+                .map(|(left, right)| calculate_pan_and_volume_from_amplitude(*left, *right));
 
             let mut masking_sum = 0.0;
 
             if let Some(listening_volume) = normalization_volume {
+                let hearing_threshold = left
+                    .frequency_bands
+                    .iter()
+                    .map(move |(_, c, _)| approximate_hearing_threshold(*c) - listening_volume);
+
                 left.normalizers
                     .iter()
+                    .zip(hearing_threshold.zip(masking_data))
                     .enumerate()
-                    .for_each(|(i, normalizer)| {
+                    .for_each(|(i, (normalizer, (threshold, (mask_pan, mask_volume))))| {
                         let masking_norm_db = normalizer
-                            .spl_to_phon(
-                                amplitude_to_dbfs(self.masking_scratchpad[i]) + listening_volume,
-                            )
+                            .spl_to_phon((mask_volume + gain).max(threshold) + listening_volume)
                             //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                             .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                             - listening_volume;
 
-                        self.masking[i] = masking_norm_db as f32;
+                        self.masking[i] = (mask_pan as f32, masking_norm_db as f32);
                         masking_sum += dbfs_to_amplitude(masking_norm_db);
                     });
             } else {
-                self.masking.iter_mut().enumerate().for_each(|(i, m)| {
-                    *m = amplitude_to_dbfs(self.masking_scratchpad[i]) as f32;
-                    masking_sum += self.masking_scratchpad[i];
-                });
+                masking_data
+                    .enumerate()
+                    .for_each(|(i, (mask_pan, mask_volume))| {
+                        let masking_norm_db = mask_volume + gain;
+
+                        self.masking[i] = (mask_pan as f32, masking_norm_db as f32);
+                        masking_sum += dbfs_to_amplitude(masking_norm_db);
+                    });
             }
 
             self.masking_mean = amplitude_to_dbfs(masking_sum / self.masking.len() as f64) as f32;
@@ -222,12 +223,14 @@ impl BetterAnalysis {
             self.masking.clear();
 
             for _ in 0..new_length {
-                self.masking.push(f32::NEG_INFINITY);
+                self.masking.push((0.0, f32::NEG_INFINITY));
             }
 
             self.masking_mean = f32::NEG_INFINITY;
         } else {
-            self.masking.iter_mut().for_each(|m| *m = f32::NEG_INFINITY);
+            self.masking
+                .iter_mut()
+                .for_each(|m| *m = (0.0, f32::NEG_INFINITY));
             self.masking_mean = f32::NEG_INFINITY;
         }
 
@@ -333,7 +336,7 @@ impl BetterAnalysis {
             if let Some(listening_volume) = normalization_volume {
                 let minimum = (0.0 - listening_volume) as f32;
                 self.data.iter_mut().zip(self.masking.iter()).for_each(
-                    |((_, volume), threshold)| {
+                    |((_, volume), (_, threshold))| {
                         if *volume < *threshold {
                             *volume = minimum;
                         }
@@ -341,7 +344,7 @@ impl BetterAnalysis {
                 );
             } else {
                 self.data.iter_mut().zip(self.masking.iter()).for_each(
-                    |((_, volume), threshold)| {
+                    |((_, volume), (_, threshold))| {
                         if *volume < *threshold {
                             *volume = f32::NEG_INFINITY;
                         }
@@ -372,60 +375,48 @@ impl BetterAnalysis {
                 self.masking.clear();
 
                 for _ in 0..new_length {
-                    self.masking.push(0.0);
+                    self.masking.push((0.0, 0.0));
                 }
             }
 
-            /*let flatness = if spectrum.len() > 128 {
-                0.0
-            } else {
-                map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0)
-            };*/
-
-            let hearing_threshold = normalization_volume.map(|listening_volume| {
-                center
-                    .frequency_bands
-                    .iter()
-                    .map(move |(_, c, _)| approximate_hearing_threshold(*c) - listening_volume)
-            });
+            let masking_data = center
+                .masking
+                .iter()
+                .map(|amplitude| (0.0, amplitude_to_dbfs(*amplitude * 2.0)));
 
             let gain_amplitude = dbfs_to_amplitude(gain);
-
-            center.masker.calculate_masking_threshold(
-                center
-                    .transform
-                    .spectrum_data
-                    .iter()
-                    .map(|c| *c * gain_amplitude * 2.0),
-                0.0,
-                hearing_threshold,
-                &mut self.masking_scratchpad,
-            );
-
             let mut masking_sum = 0.0;
 
             if let Some(listening_volume) = normalization_volume {
+                let hearing_threshold = center
+                    .frequency_bands
+                    .iter()
+                    .map(move |(_, c, _)| approximate_hearing_threshold(*c) - listening_volume);
+
                 center
                     .normalizers
                     .iter()
+                    .zip(hearing_threshold.zip(masking_data))
                     .enumerate()
-                    .for_each(|(i, normalizer)| {
+                    .for_each(|(i, (normalizer, (threshold, (mask_pan, mask_volume))))| {
                         let masking_norm_db = normalizer
-                            .spl_to_phon(
-                                amplitude_to_dbfs(self.masking_scratchpad[i]) + listening_volume,
-                            )
+                            .spl_to_phon((mask_volume + gain).max(threshold) + listening_volume)
                             //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                             .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                             - listening_volume;
 
-                        self.masking[i] = masking_norm_db as f32;
+                        self.masking[i] = (mask_pan as f32, masking_norm_db as f32);
                         masking_sum += dbfs_to_amplitude(masking_norm_db);
                     });
             } else {
-                self.masking.iter_mut().enumerate().for_each(|(i, m)| {
-                    *m = amplitude_to_dbfs(self.masking_scratchpad[i]) as f32;
-                    masking_sum += self.masking_scratchpad[i];
-                });
+                masking_data
+                    .enumerate()
+                    .for_each(|(i, (mask_pan, mask_volume))| {
+                        let masking_norm_db = mask_volume + gain;
+
+                        self.masking[i] = (mask_pan as f32, masking_norm_db as f32);
+                        masking_sum += dbfs_to_amplitude(masking_norm_db);
+                    });
             }
 
             self.masking_mean = amplitude_to_dbfs(masking_sum / self.masking.len() as f64) as f32;
@@ -433,12 +424,14 @@ impl BetterAnalysis {
             self.masking.clear();
 
             for _ in 0..new_length {
-                self.masking.push(f32::NEG_INFINITY);
+                self.masking.push((0.0, f32::NEG_INFINITY));
             }
 
             self.masking_mean = f32::NEG_INFINITY;
         } else {
-            self.masking.iter_mut().for_each(|m| *m = f32::NEG_INFINITY);
+            self.masking
+                .iter_mut()
+                .for_each(|m| *m = (0.0, f32::NEG_INFINITY));
             self.masking_mean = f32::NEG_INFINITY;
         }
 
@@ -525,7 +518,7 @@ impl BetterAnalysis {
             if let Some(listening_volume) = normalization_volume {
                 let minimum = (0.0 - listening_volume) as f32;
                 self.data.iter_mut().zip(self.masking.iter()).for_each(
-                    |((_, volume), threshold)| {
+                    |((_, volume), (_, threshold))| {
                         if *volume < *threshold {
                             *volume = minimum;
                         }
@@ -533,7 +526,7 @@ impl BetterAnalysis {
                 );
             } else {
                 self.data.iter_mut().zip(self.masking.iter()).for_each(
-                    |((_, volume), threshold)| {
+                    |((_, volume), (_, threshold))| {
                         if *volume < *threshold {
                             *volume = f32::NEG_INFINITY;
                         }
@@ -559,8 +552,7 @@ impl BetterSpectrogram {
                 BetterAnalysis {
                     duration: Duration::from_secs(1),
                     data: vec![(0.0, f32::NEG_INFINITY); slice_capacity],
-                    masking_scratchpad: vec![f64::NEG_INFINITY; slice_capacity],
-                    masking: vec![f32::NEG_INFINITY; slice_capacity],
+                    masking: vec![(0.0, f32::NEG_INFINITY); slice_capacity],
                     mean: f32::NEG_INFINITY,
                     max: f32::NEG_INFINITY,
                     masking_mean: f32::NEG_INFINITY,
@@ -661,16 +653,9 @@ impl Masker {
         &self,
         spectrum: impl Iterator<Item = f64>,
         flatness: f64,
-        hearing_threshold: Option<impl Iterator<Item = f64>>,
         masking_threshold: &mut [f64],
     ) {
-        if let Some(hearing_threshold) = hearing_threshold {
-            hearing_threshold.enumerate().for_each(|(i, t)| {
-                masking_threshold[i] = dbfs_to_amplitude(t);
-            });
-        } else {
-            masking_threshold.iter_mut().for_each(|s| *s = 0.0);
-        }
+        masking_threshold.iter_mut().for_each(|s| *s = 0.0);
 
         for (i, component) in spectrum.enumerate() {
             let amplitude = component;

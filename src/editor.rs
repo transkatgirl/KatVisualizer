@@ -110,10 +110,10 @@ fn draw_bargraph(
                         )
                     })
                     .fold((0.0, 0.0), |acc, (d, m)| {
-                        if d.1 >= m {
+                        if d.1 >= m.1 {
                             (acc.0 + d.0, acc.1 + d.1)
                         } else {
-                            (acc.0 + 0.0, acc.1 + m)
+                            (acc.0 + m.0, acc.1 + m.1)
                         }
                     });
 
@@ -139,7 +139,7 @@ fn draw_bargraph(
             .data
             .iter()
             .zip(front.masking.iter())
-            .map(|(d, m)| if d.1 >= *m { (d.0, d.1) } else { (0.0, *m) }),
+            .map(|(d, m)| if d.1 >= m.1 { (d.0, d.1) } else { (m.0, m.1) }),
         front.data.len(),
         bounds,
         color_table,
@@ -297,18 +297,18 @@ fn draw_spectrogram_image(
             break;
         }
 
-        for (x, ((pan, volume), masking)) in analysis
+        for (x, ((pan, volume), (masking_pan, masking_volume))) in analysis
             .data
             .iter()
             .zip(analysis.masking.iter())
             .enumerate()
         {
-            if volume >= masking {
+            if volume >= masking_volume {
                 let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
                 image.pixels[(image_width * y) + x] = color_table.lookup(*pan, intensity);
             } else {
-                let intensity = map_value_f32(*masking, min_db, max_db, 0.0, 1.0);
-                image.pixels[(image_width * y) + x] = color_table.lookup(0.0, intensity);
+                let intensity = map_value_f32(*masking_volume, min_db, max_db, 0.0, 1.0);
+                image.pixels[(image_width * y) + x] = color_table.lookup(*masking_pan, intensity);
             }
         }
     }
@@ -683,7 +683,7 @@ pub fn create(
                     if settings.show_masking {
                         draw_secondary_bargraph(
                             &mut bargraph_mesh,
-                            front.masking.iter().copied(),
+                            front.masking.iter().map(|(_, m)| *m),
                             front.masking.len(),
                             bargraph_bounds,
                             Color32::RED,
