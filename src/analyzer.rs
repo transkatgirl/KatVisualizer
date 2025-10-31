@@ -140,6 +140,17 @@ impl BetterAnalyzer {
     pub fn raw_analysis(&self) -> &[f64] {
         &self.transform.spectrum_data
     }
+    pub fn remove_masked_components(&mut self) {
+        self.transform
+            .spectrum_data
+            .iter_mut()
+            .zip(self.masking.iter())
+            .for_each(|(amplitude, masking_amplitude)| {
+                if masking_amplitude > amplitude {
+                    *amplitude = f64::NEG_INFINITY;
+                }
+            });
+    }
 }
 
 #[derive(Clone)]

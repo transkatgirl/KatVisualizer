@@ -1630,21 +1630,6 @@ pub fn create(
 
                         #[cfg(feature = "midi")]
                         if analysis_settings.output_midi {
-                            if analysis_settings.normalize_amplitude {
-                                if ui
-                                    .checkbox(
-                                        &mut analysis_settings.midi_use_unnormalized,
-                                        "Output unnormalized amplitudes",
-                                    )
-                                    .on_hover_text("If this is enabled, the MIDI output will be generated using the unnormalized amplitudes, which is what most programs expect.\nIf this is disabled, the MIDI output will be generated using the same psychoacoustic normalization used in the visualizer.")
-                                    .changed()
-                                {
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                }
-                            }
-
                             if ui
                                 .add(
                                     egui::Slider::new(&mut analysis_settings.midi_max_simultaneous, 1..=128)

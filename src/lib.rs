@@ -341,7 +341,6 @@ pub(crate) struct AnalysisChainConfig {
     latency_offset: Duration,
 
     output_midi: bool,
-    midi_use_unnormalized: bool,
     midi_max_simultaneous: u8,
     midi_amplitude_threshold: f32,
     midi_use_aftertouch: bool,
@@ -372,7 +371,6 @@ impl Default for AnalysisChainConfig {
             latency_offset: Duration::ZERO,
 
             output_midi: false,
-            midi_use_unnormalized: true,
             midi_max_simultaneous: 24,
             midi_amplitude_threshold: 30.0 - 86.0,
             midi_use_aftertouch: true,
@@ -400,7 +398,6 @@ pub(crate) struct AnalysisChain {
     output_midi: bool,
     tone_scratchpad: Vec<(f32, f32, (f32, f32, f32))>,
     midi_max_simultaneous: u8,
-    midi_use_unnormalized: bool,
     midi_amplitude_threshold: f32,
     midi_use_aftertouch: bool,
     midi_pressure_min_amplitude: f32,
@@ -465,7 +462,6 @@ impl AnalysisChain {
             internal_buffering: config.internal_buffering,
             output_midi: config.output_midi,
             tone_scratchpad: Vec::with_capacity(MAX_FREQUENCY_BINS),
-            midi_use_unnormalized: config.midi_use_unnormalized,
             midi_max_simultaneous: config.midi_max_simultaneous,
             midi_amplitude_threshold: config.midi_amplitude_threshold,
             midi_use_aftertouch: config.midi_use_aftertouch,
@@ -610,10 +606,10 @@ impl AnalysisChain {
             let (left_ref, right_ref) = (self.left_analyzer.clone(), self.right_analyzer.clone());
 
             self.pool.join();
-            let left_lock = left_ref.lock();
-            let right_lock = right_ref.lock();
-            let left_analyzer = &left_lock.1;
-            let right_analyzer = &right_lock.1;
+            let mut left_lock = left_ref.lock();
+            let mut right_lock = right_ref.lock();
+            let left_analyzer = &mut left_lock.1;
+            let right_analyzer = &mut right_lock.1;
 
             spectrogram.update_fn(|analysis_output| {
                 if self.single_input {
@@ -636,6 +632,11 @@ impl AnalysisChain {
 
             #[cfg(feature = "midi")]
             if self.output_midi {
+                if self.masking {
+                    left_analyzer.remove_masked_components();
+                    right_analyzer.remove_masked_components();
+                }
+
                 midi_output.push(self.generate_midi(
                     midi_timing,
                     spectrogram,
@@ -727,7 +728,7 @@ impl AnalysisChain {
                 }
             }
 
-            if note_count < self.midi_max_simultaneous {
+            /*if note_count < self.midi_max_simultaneous {
                 for (_, _, (_, center, _)) in self.tone_scratchpad.iter().rev() {
                     let note = freq_to_midi_note(*center).clamp(0.0, 127.0).round() as usize;
 
@@ -740,59 +741,40 @@ impl AnalysisChain {
                         }
                     }
                 }
-            }
+            }*/
         }
 
         let mut note_scratchpad: [(f64, f64); 128] = [(0.0, 0.0); 128];
 
-        if self.midi_use_unnormalized && self.listening_volume.is_some() {
-            let left = left_analyzer.raw_analysis();
-            let right = right_analyzer.raw_analysis();
+        let left = left_analyzer.raw_analysis();
+        let right = right_analyzer.raw_analysis();
 
-            let gain_amplitude = dbfs_to_amplitude(self.gain);
+        let gain_amplitude = dbfs_to_amplitude(self.gain);
 
-            for (index, ((_, volume), (_, center, _))) in spectrogram.data[0]
-                .data
-                .iter()
-                .zip(frequencies.iter())
-                .enumerate()
-            {
-                let note = freq_to_midi_note(*center).round() as usize;
+        for (index, ((_, volume), (_, center, _))) in spectrogram.data[0]
+            .data
+            .iter()
+            .zip(frequencies.iter())
+            .enumerate()
+        {
+            let note = freq_to_midi_note(*center).round() as usize;
 
-                if note > 127 {
-                    break;
-                }
-
-                let amplitude = if self.single_input {
-                    left[index]
-                } else {
-                    left[index] + right[index]
-                } * gain_amplitude;
-
-                if !volume.is_finite() || *volume < spectrogram.data[0].masking[index].1 {
-                    continue;
-                }
-
-                note_scratchpad[note].0 += 1.0;
-                note_scratchpad[note].1 += amplitude;
+            if note > 127 {
+                break;
             }
-        } else {
-            for ((_, volume), (_, center, _)) in
-                spectrogram.data[0].data.iter().zip(frequencies.iter())
-            {
-                let note = freq_to_midi_note(*center).round() as usize;
 
-                if note > 127 {
-                    break;
-                }
+            let amplitude = if self.single_input {
+                left[index]
+            } else {
+                left[index] + right[index]
+            } * gain_amplitude;
 
-                if !volume.is_finite() {
-                    continue;
-                }
-
-                note_scratchpad[note].0 += 1.0;
-                note_scratchpad[note].1 += dbfs_to_amplitude(*volume as f64);
+            if !volume.is_finite() || *volume < spectrogram.data[0].masking[index].1 {
+                continue;
             }
+
+            note_scratchpad[note].0 += 1.0;
+            note_scratchpad[note].1 += amplitude;
         }
 
         let mut notes: [f32; 128] = [0.0; 128];
@@ -841,7 +823,6 @@ impl AnalysisChain {
             masking: self.masking,
             internal_buffering: self.internal_buffering,
             output_midi: self.output_midi,
-            midi_use_unnormalized: self.midi_use_unnormalized,
             midi_max_simultaneous: self.midi_max_simultaneous,
             midi_amplitude_threshold: self.midi_amplitude_threshold,
             midi_use_aftertouch: self.midi_use_aftertouch,
@@ -873,7 +854,6 @@ impl AnalysisChain {
         let old_analyzer_config = old_left_analyzer.1.config();
 
         self.output_midi = config.output_midi;
-        self.midi_use_unnormalized = config.midi_use_unnormalized;
         self.midi_max_simultaneous = config.midi_max_simultaneous;
         self.midi_amplitude_threshold = config.midi_amplitude_threshold;
         self.midi_use_aftertouch = config.midi_use_aftertouch;
