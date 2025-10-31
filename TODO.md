@@ -1,0 +1,5 @@
+# Planned Features
+
+- [ ] Calculate stereo masking thresholds
+- [ ] Implement smoothing in MIDI note prioritization to allow for cleaner outputs
+- [ ] Allow outputting precise peaks in real time (using an algorithm similar to one used to generate MIDI notes) to allow visualization data to be better used in external software
