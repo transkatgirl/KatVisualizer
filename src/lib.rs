@@ -442,6 +442,7 @@ impl AnalysisChain {
             time_resolution_clamp: config.time_resolution_clamp,
             q_time_resolution: config.q_time_resolution,
             nc_method: config.nc_method,
+            masking: config.masking,
         });
 
         let mut chunker = StftHelper::new(2, sample_rate.ceil() as usize, 0);
@@ -548,7 +549,6 @@ impl AnalysisChain {
                                     left_analyzer,
                                     self.gain,
                                     self.listening_volume,
-                                    self.masking,
                                     self.chunk_duration,
                                 );
                             } else {
@@ -557,7 +557,6 @@ impl AnalysisChain {
                                     right_analyzer,
                                     self.gain,
                                     self.listening_volume,
-                                    self.masking,
                                     self.chunk_duration,
                                 );
                             }
@@ -622,7 +621,6 @@ impl AnalysisChain {
                         left_analyzer,
                         self.gain,
                         self.listening_volume,
-                        self.masking,
                         chunk_duration,
                     );
                 } else {
@@ -631,7 +629,6 @@ impl AnalysisChain {
                         right_analyzer,
                         self.gain,
                         self.listening_volume,
-                        self.masking,
                         chunk_duration,
                     );
                 }
@@ -915,6 +912,7 @@ impl AnalysisChain {
             || old_analyzer_config.erb_bandwidth_divisor != config.erb_bandwidth_divisor
             || old_analyzer_config.q_time_resolution != config.q_time_resolution
             || old_analyzer_config.nc_method != config.nc_method
+            || old_analyzer_config.masking != config.masking
         {
             let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
                 resolution: config.resolution,
@@ -927,6 +925,7 @@ impl AnalysisChain {
                 time_resolution_clamp: config.time_resolution_clamp,
                 q_time_resolution: config.q_time_resolution,
                 nc_method: config.nc_method,
+                masking: config.masking,
             });
             drop(old_left_analyzer);
 

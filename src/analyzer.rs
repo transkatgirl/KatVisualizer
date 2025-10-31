@@ -15,6 +15,8 @@ pub struct BetterAnalyzerConfiguration {
     pub erb_bandwidth_divisor: f64,
     pub time_resolution_clamp: (f64, f64),
     pub nc_method: bool,
+
+    pub masking: bool,
 }
 
 impl Default for BetterAnalyzerConfiguration {
@@ -30,6 +32,7 @@ impl Default for BetterAnalyzerConfiguration {
             erb_bandwidth_divisor: 2.0,
             time_resolution_clamp: (0.0, 37.0),
             nc_method: true,
+            masking: true,
         }
     }
 }
@@ -119,11 +122,20 @@ impl BetterAnalyzer {
             map_value_f64(spectral_flatness(spectrum), -60.0, 0.0, 0.0, 1.0)
         };*/
 
-        self.masker.calculate_masking_threshold(
-            self.transform.spectrum_data.iter().copied(),
-            0.0,
-            &mut self.masking,
-        );
+        if self.config.masking {
+            self.masker.calculate_masking_threshold(
+                self.transform.spectrum_data.iter().copied(),
+                0.0,
+                &mut self.masking,
+            );
+            self.transform
+                .spectrum_data
+                .iter_mut()
+                .zip(self.masking.iter())
+                .for_each(|(amplitude, masking_amplitude)| {
+                    *amplitude = amplitude.max(*masking_amplitude)
+                });
+        }
     }
     pub fn raw_analysis(&self) -> &[f64] {
         &self.transform.spectrum_data
@@ -157,7 +169,6 @@ impl BetterAnalysis {
         right: &BetterAnalyzer,
         gain: f64,
         normalization_volume: Option<f64>,
-        masking: bool,
         duration: Duration,
     ) {
         assert_eq!(
@@ -170,7 +181,7 @@ impl BetterAnalysis {
         let mut sum = 0.0;
         self.max = f32::NEG_INFINITY;
 
-        if masking {
+        if left.config.masking {
             if self.data.len() != new_length {
                 self.masking.clear();
 
@@ -332,27 +343,6 @@ impl BetterAnalysis {
             }
         }
 
-        if masking {
-            if let Some(listening_volume) = normalization_volume {
-                let minimum = (0.0 - listening_volume) as f32;
-                self.data.iter_mut().zip(self.masking.iter()).for_each(
-                    |((_, volume), (_, threshold))| {
-                        if *volume < *threshold {
-                            *volume = minimum;
-                        }
-                    },
-                );
-            } else {
-                self.data.iter_mut().zip(self.masking.iter()).for_each(
-                    |((_, volume), (_, threshold))| {
-                        if *volume < *threshold {
-                            *volume = f32::NEG_INFINITY;
-                        }
-                    },
-                );
-            }
-        }
-
         self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
 
         self.duration = duration;
@@ -362,7 +352,6 @@ impl BetterAnalysis {
         center: &BetterAnalyzer,
         gain: f64,
         normalization_volume: Option<f64>,
-        masking: bool,
         duration: Duration,
     ) {
         let new_length = center.transform.spectrum_data.len();
@@ -370,7 +359,7 @@ impl BetterAnalysis {
         let mut sum = 0.0;
         self.max = f32::NEG_INFINITY;
 
-        if masking {
+        if center.config.masking {
             if self.data.len() != new_length {
                 self.masking.clear();
 
@@ -509,27 +498,6 @@ impl BetterAnalysis {
                         self.max = volume;
                     }
                 }
-            }
-        }
-
-        if masking {
-            if let Some(listening_volume) = normalization_volume {
-                let minimum = (0.0 - listening_volume) as f32;
-                self.data.iter_mut().zip(self.masking.iter()).for_each(
-                    |((_, volume), (_, threshold))| {
-                        if *volume < *threshold {
-                            *volume = minimum;
-                        }
-                    },
-                );
-            } else {
-                self.data.iter_mut().zip(self.masking.iter()).for_each(
-                    |((_, volume), (_, threshold))| {
-                        if *volume < *threshold {
-                            *volume = f32::NEG_INFINITY;
-                        }
-                    },
-                );
             }
         }
 
