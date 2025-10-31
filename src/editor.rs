@@ -438,7 +438,7 @@ impl Default for RenderSettings {
             agc_duration: Duration::from_secs_f64(3.0),
             agc_peak_percentile: 0.99,
             agc_max_peak_range: 60.0,
-            agc_above_masking: 40.0,
+            agc_above_masking: 37.0,
             agc_below_masking: 3.0,
             agc_minimum: 3.0 - AnalysisChainConfig::default().listening_volume as f32,
             agc_maximum: 100.0 - AnalysisChainConfig::default().listening_volume as f32,
