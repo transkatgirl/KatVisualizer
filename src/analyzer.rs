@@ -124,6 +124,7 @@ pub struct BetterAnalysis {
     pub masking: Vec<f32>,
     pub mean: f32,
     pub max: f32,
+    pub masking_mean: f32,
 }
 
 impl BetterAnalysis {
@@ -135,6 +136,7 @@ impl BetterAnalysis {
             masking: Vec::with_capacity(capacity),
             mean: f32::NEG_INFINITY,
             max: f32::NEG_INFINITY,
+            masking_mean: f32::NEG_INFINITY,
         }
     }
     pub fn update_stereo(
@@ -190,31 +192,43 @@ impl BetterAnalysis {
                 &mut self.masking_scratchpad,
             );
 
+            let mut masking_sum = 0.0;
+
             if let Some(listening_volume) = normalization_volume {
                 left.normalizers
                     .iter()
                     .enumerate()
                     .for_each(|(i, normalizer)| {
-                        self.masking[i] = (normalizer
-                            .spl_to_phon(self.masking_scratchpad[i] + listening_volume)
+                        let masking_norm_db = normalizer
+                            .spl_to_phon(
+                                amplitude_to_dbfs(self.masking_scratchpad[i]) + listening_volume,
+                            )
                             //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                             .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                            - listening_volume) as f32
+                            - listening_volume;
+
+                        self.masking[i] = masking_norm_db as f32;
+                        masking_sum += dbfs_to_amplitude(masking_norm_db);
                     });
             } else {
-                self.masking
-                    .iter_mut()
-                    .enumerate()
-                    .for_each(|(i, m)| *m = self.masking_scratchpad[i] as f32);
+                self.masking.iter_mut().enumerate().for_each(|(i, m)| {
+                    *m = amplitude_to_dbfs(self.masking_scratchpad[i]) as f32;
+                    masking_sum += self.masking_scratchpad[i];
+                });
             }
+
+            self.masking_mean = amplitude_to_dbfs(masking_sum / self.masking.len() as f64) as f32;
         } else if self.data.len() != new_length {
             self.masking.clear();
 
             for _ in 0..new_length {
                 self.masking.push(f32::NEG_INFINITY);
             }
+
+            self.masking_mean = f32::NEG_INFINITY;
         } else {
             self.masking.iter_mut().for_each(|m| *m = f32::NEG_INFINITY);
+            self.masking_mean = f32::NEG_INFINITY;
         }
 
         if self.data.len() == new_length {
@@ -380,11 +394,13 @@ impl BetterAnalysis {
                     .transform
                     .spectrum_data
                     .iter()
-                    .map(|c| *c * gain_amplitude),
+                    .map(|c| *c * gain_amplitude * 2.0),
                 0.0,
                 hearing_threshold,
                 &mut self.masking_scratchpad,
             );
+
+            let mut masking_sum = 0.0;
 
             if let Some(listening_volume) = normalization_volume {
                 center
@@ -392,26 +408,36 @@ impl BetterAnalysis {
                     .iter()
                     .enumerate()
                     .for_each(|(i, normalizer)| {
-                        self.masking[i] = (normalizer
-                            .spl_to_phon(self.masking_scratchpad[i] + listening_volume)
+                        let masking_norm_db = normalizer
+                            .spl_to_phon(
+                                amplitude_to_dbfs(self.masking_scratchpad[i]) + listening_volume,
+                            )
                             //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                             .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                            - listening_volume) as f32
+                            - listening_volume;
+
+                        self.masking[i] = masking_norm_db as f32;
+                        masking_sum += dbfs_to_amplitude(masking_norm_db);
                     });
             } else {
-                self.masking
-                    .iter_mut()
-                    .enumerate()
-                    .for_each(|(i, m)| *m = self.masking_scratchpad[i] as f32);
+                self.masking.iter_mut().enumerate().for_each(|(i, m)| {
+                    *m = amplitude_to_dbfs(self.masking_scratchpad[i]) as f32;
+                    masking_sum += self.masking_scratchpad[i];
+                });
             }
+
+            self.masking_mean = amplitude_to_dbfs(masking_sum / self.masking.len() as f64) as f32;
         } else if self.data.len() != new_length {
             self.masking.clear();
 
             for _ in 0..new_length {
                 self.masking.push(f32::NEG_INFINITY);
             }
+
+            self.masking_mean = f32::NEG_INFINITY;
         } else {
             self.masking.iter_mut().for_each(|m| *m = f32::NEG_INFINITY);
+            self.masking_mean = f32::NEG_INFINITY;
         }
 
         if self.data.len() == new_length {
@@ -533,6 +559,7 @@ impl BetterSpectrogram {
                     masking: vec![f32::NEG_INFINITY; slice_capacity],
                     mean: f32::NEG_INFINITY,
                     max: f32::NEG_INFINITY,
+                    masking_mean: f32::NEG_INFINITY,
                 };
                 length
             ]),
@@ -550,6 +577,7 @@ impl BetterSpectrogram {
             buffer.duration = analysis.duration;
             buffer.mean = analysis.mean;
             buffer.max = analysis.max;
+            buffer.masking_mean = analysis.masking_mean;
         });
     }
     pub fn update_fn<F>(&mut self, callback: F)
@@ -680,10 +708,6 @@ impl Masker {
                         dbfs_to_amplitude(-upper_spread * (b - bark) + offset) * amplitude;
                 });
         }
-
-        masking_threshold
-            .iter_mut()
-            .for_each(|s| *s = amplitude_to_dbfs(*s));
     }
 }
 
