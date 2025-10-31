@@ -677,8 +677,10 @@ impl AnalysisChain {
                         .zip(frequencies.iter().copied()),
                 )
             {
-                self.tone_scratchpad
-                    .push((volume, volume - masking, (lower, center, upper)));
+                if volume > masking {
+                    self.tone_scratchpad
+                        .push((volume, volume - masking, (lower, center, upper)));
+                }
             }
 
             if self.masking {
