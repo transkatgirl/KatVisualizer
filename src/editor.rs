@@ -62,7 +62,7 @@ fn calculate_volume_min_max(
     let masking = (masking_sum / rows as f64) as f32;
 
     (
-        (masking)
+        (masking - settings.agc_below_masking)
             .max(peak - settings.agc_max_peak_range)
             .max(settings.agc_minimum),
         (masking + settings.agc_above_masking).max(peak),
@@ -410,6 +410,7 @@ struct RenderSettings {
     agc_peak_percentile: f32,
     agc_max_peak_range: f32,
     agc_above_masking: f32,
+    agc_below_masking: f32,
     agc_minimum: f32,
     min_db: f32,
     max_db: f32,
@@ -435,6 +436,7 @@ impl Default for RenderSettings {
             agc_peak_percentile: 0.99,
             agc_max_peak_range: 60.0,
             agc_above_masking: 40.0,
+            agc_below_masking: 3.0,
             agc_minimum: 0.0 - AnalysisChainConfig::default().listening_volume as f32,
             min_db: 20.0 - AnalysisChainConfig::default().listening_volume as f32,
             max_db: 80.0 - AnalysisChainConfig::default().listening_volume as f32,
@@ -1127,6 +1129,15 @@ pub fn create(
                                     .step_by(1.0)
                                     .fixed_decimals(0)
                                     .text("Minimum range above masking mean"),
+                            );
+
+                            ui.add(
+                                egui::Slider::new(&mut render_settings.agc_below_masking, -50.0..=50.0)
+                                    .clamping(egui::SliderClamping::Never)
+                                    .suffix("dB")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Maximum range below masking mean"),
                             );
                         } else {
                             if analysis_settings.normalize_amplitude {
