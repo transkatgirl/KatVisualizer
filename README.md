@@ -33,7 +33,7 @@ cargo build --release --features $channel_config,mute-output
 
 ## Usage
 
-The compiled plugin can be loaded into a DAW like any other metering plugin. It's recommended that you use a buffer size under 10ms long (unless you are using it to output MIDI; then a buffer size of 10-20ms is recommended) and avoid sample rates below 40kHz.
+The compiled plugin can be loaded into a DAW like any other metering plugin. It's recommended that you use a buffer size under 10ms long (unless you are using the plugin to output MIDI) and avoid sample rates below 40kHz.
 
 (If you don't already have a host for the plugin, [Element](https://github.com/Kushview/Element) seems to be the least-bad open source option. However, it doesn't support bluetooth latency compensation and you may run into weird edge cases from time to time.)
 
