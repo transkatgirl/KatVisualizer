@@ -56,7 +56,7 @@ If you're having performance or latency issues, enabling performance counters ca
 	- Affected by the following settings:
 		- Update rate
 		- Resolution
-		- Apply simultaneous masking
+		- Perform simultaneous masking
 		- Use NC method
 - rasterize = Proportion of the processing time taken up by the render thread.
 	- Affected by the following settings:
@@ -65,7 +65,7 @@ If you're having performance or latency issues, enabling performance counters ca
 		- Bargraph height (setting this to 1 disables the spectrogram, setting this to 0 disables the bargraph)
 		- Automatic amplitude ranging
 		- Amplitude ranging duration
-		- Show simultaneous masking thresholds
+		- Highlight simultaneous masking thresholds
 		- Update rate
 		- Resolution
 	- Affected by processing time
