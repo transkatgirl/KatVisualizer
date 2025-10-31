@@ -379,10 +379,7 @@ impl BetterAnalysis {
                 }
             }
 
-            let masking_data = center
-                .masking
-                .iter()
-                .map(|amplitude| (0.0, amplitude_to_dbfs(*amplitude * 2.0)));
+            let masking_data = center.masking.iter().map(|amplitude| *amplitude * 2.0);
 
             let gain_amplitude = dbfs_to_amplitude(gain);
             let mut masking_sum = 0.0;
@@ -398,25 +395,26 @@ impl BetterAnalysis {
                     .iter()
                     .zip(hearing_threshold.zip(masking_data))
                     .enumerate()
-                    .for_each(|(i, (normalizer, (threshold, (mask_pan, mask_volume))))| {
+                    .for_each(|(i, (normalizer, (threshold, mask_amplitude)))| {
                         let masking_norm_db = normalizer
-                            .spl_to_phon((mask_volume + gain).max(threshold) + listening_volume)
+                            .spl_to_phon(
+                                amplitude_to_dbfs(mask_amplitude * gain_amplitude).max(threshold)
+                                    + listening_volume,
+                            )
                             //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                             .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                             - listening_volume;
 
-                        self.masking[i] = (mask_pan as f32, masking_norm_db as f32);
+                        self.masking[i] = (0.0, masking_norm_db as f32);
                         masking_sum += dbfs_to_amplitude(masking_norm_db);
                     });
             } else {
-                masking_data
-                    .enumerate()
-                    .for_each(|(i, (mask_pan, mask_volume))| {
-                        let masking_norm_db = mask_volume + gain;
+                masking_data.enumerate().for_each(|(i, mask_amplitude)| {
+                    let masking_amplitude = mask_amplitude * gain_amplitude;
 
-                        self.masking[i] = (mask_pan as f32, masking_norm_db as f32);
-                        masking_sum += dbfs_to_amplitude(masking_norm_db);
-                    });
+                    self.masking[i] = (0.0, amplitude_to_dbfs(masking_amplitude) as f32);
+                    masking_sum += masking_amplitude;
+                });
             }
 
             self.masking_mean = amplitude_to_dbfs(masking_sum / self.masking.len() as f64) as f32;
