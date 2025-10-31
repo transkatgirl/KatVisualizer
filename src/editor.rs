@@ -30,80 +30,43 @@ fn calculate_volume_min_max(
     scratchpad: &mut Vec<f32>,
     spectrogram: &BetterSpectrogram,
 ) -> (f32, f32) {
-    if !settings.automatic_gain {
+    if !settings.automatic_gain || !spectrogram.data[0].masking_mean.is_finite() {
         return (settings.min_db, settings.max_db);
     }
 
     scratchpad.clear();
     let mut elapsed = Duration::ZERO;
 
-    if spectrogram.data[0].masking_mean.is_finite() {
-        let mut masking_sum = 0.0;
+    let mut masking_sum = 0.0;
 
-        for row in &spectrogram.data {
-            elapsed += row.duration;
-            if elapsed > settings.agc_duration {
-                break;
-            }
-
-            if row.masking_mean.is_finite() {
-                masking_sum += row.masking_mean as f64;
-                scratchpad.push(row.max);
-            }
+    for row in &spectrogram.data {
+        elapsed += row.duration;
+        if elapsed > settings.agc_duration {
+            break;
         }
 
-        scratchpad.voracious_sort();
-
-        let rows = scratchpad.len() as f32;
-
-        let peak_index = (settings.agc_peak_percentile * rows)
-            .round()
-            .clamp(0.0, rows - 1.0) as usize;
-        let peak = scratchpad[peak_index];
-        let masking = (masking_sum / rows as f64) as f32;
-
-        (
-            (masking)
-                .max(peak - settings.agc_max_peak_range)
-                .max(settings.agc_minimum),
-            (masking + settings.agc_above_masking).max(peak),
-        )
-    } else {
-        let mut target_sum = 0.0;
-
-        for row in &spectrogram.data {
-            elapsed += row.duration;
-            if elapsed > settings.agc_duration {
-                break;
-            }
-
-            if row.mean.is_finite() {
-                target_sum += row.mean as f64;
-                scratchpad.push(row.max);
-            }
+        if row.masking_mean.is_finite() {
+            masking_sum += row.masking_mean as f64;
+            scratchpad.push(row.max);
         }
-
-        if scratchpad.is_empty() {
-            return (settings.min_db, settings.max_db);
-        }
-
-        scratchpad.voracious_sort();
-
-        let rows = scratchpad.len() as f32;
-
-        let peak_index = (settings.agc_peak_percentile * rows)
-            .round()
-            .clamp(0.0, rows - 1.0) as usize;
-        let peak = scratchpad[peak_index];
-        let target = (target_sum / rows as f64) as f32;
-
-        (
-            (target - settings.agc_below_mean)
-                .max(peak - settings.agc_max_peak_range)
-                .max(settings.agc_minimum),
-            (target + settings.agc_above_mean).max(peak),
-        )
     }
+
+    scratchpad.voracious_sort();
+
+    let rows = scratchpad.len() as f32;
+
+    let peak_index = (settings.agc_peak_percentile * rows)
+        .round()
+        .clamp(0.0, rows - 1.0) as usize;
+    let peak = scratchpad[peak_index];
+    let masking = (masking_sum / rows as f64) as f32;
+
+    (
+        (masking)
+            .max(peak - settings.agc_max_peak_range)
+            .max(settings.agc_minimum),
+        (masking + settings.agc_above_masking).max(peak),
+    )
 }
 
 fn draw_bargraph(
@@ -447,8 +410,6 @@ struct RenderSettings {
     agc_peak_percentile: f32,
     agc_max_peak_range: f32,
     agc_above_masking: f32,
-    agc_above_mean: f32,
-    agc_below_mean: f32,
     agc_minimum: f32,
     min_db: f32,
     max_db: f32,
@@ -474,8 +435,6 @@ impl Default for RenderSettings {
             agc_peak_percentile: 0.99,
             agc_max_peak_range: 60.0,
             agc_above_masking: 40.0,
-            agc_above_mean: 25.0,
-            agc_below_mean: 15.0,
             agc_minimum: 0.0 - AnalysisChainConfig::default().listening_volume as f32,
             min_db: 20.0 - AnalysisChainConfig::default().listening_volume as f32,
             max_db: 80.0 - AnalysisChainConfig::default().listening_volume as f32,
@@ -1117,9 +1076,12 @@ pub fn create(
                             );
                         };
 
-                        ui.checkbox(&mut render_settings.automatic_gain, "Automatic amplitude ranging");
 
-                        if render_settings.automatic_gain {
+                        if analysis_settings.masking {
+                            ui.checkbox(&mut render_settings.automatic_gain, "Automatic amplitude ranging");
+                        }
+
+                        if render_settings.automatic_gain && analysis_settings.masking {
                             let percentile_duration = render_settings.agc_duration.as_secs_f64() * (1.0 - render_settings.agc_peak_percentile as f64);
 
                             let mut agc_duration = render_settings.agc_duration.as_secs_f64();
@@ -1158,34 +1120,14 @@ pub fn create(
                                     .text("Maximum range below peak"),
                             );
 
-                            if analysis_settings.masking {
-                                ui.add(
-                                    egui::Slider::new(&mut render_settings.agc_above_masking, 0.0..=100.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix("dB")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("Minimum range above masking mean"),
-                                );
-                            } else {
-                                ui.add(
-                                    egui::Slider::new(&mut render_settings.agc_above_mean, 0.0..=100.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix("dB")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("Minimum range above mean"),
-                                );
-
-                                ui.add(
-                                    egui::Slider::new(&mut render_settings.agc_below_mean, 0.0..=100.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix("dB")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("Maximum range below mean"),
-                                );
-                            }
+                            ui.add(
+                                egui::Slider::new(&mut render_settings.agc_above_masking, 0.0..=100.0)
+                                    .clamping(egui::SliderClamping::Never)
+                                    .suffix("dB")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Minimum range above masking mean"),
+                            );
                         } else {
                             if analysis_settings.normalize_amplitude {
                                 let mut min_phon =
@@ -1429,7 +1371,7 @@ pub fn create(
                                 &mut analysis_settings.masking,
                                 "Perform simultaneous masking",
                             )
-                            .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, simultaneous masking thresholds are calculated using a tone-masking-tone model.\nIf this is disabled, simultaneous masking thresholds are not calculated.")
+                            .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, simultaneous masking thresholds are calculated using a tone-masking-tone model.\nIf this is disabled, simultaneous masking thresholds are not calculated.\n\nNote: In order to make realtime processing feasible, masking thresholds are calculated using the sum of the left and right channels.")
                             .changed()
                         {
                             update(&analysis_settings);

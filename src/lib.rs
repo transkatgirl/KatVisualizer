@@ -365,7 +365,7 @@ impl Default for AnalysisChainConfig {
             gain: 0.0,
             listening_volume: 86.0,
             normalize_amplitude: true,
-            masking: false,
+            masking: true,
             internal_buffering: true,
             update_rate_hz: 1024.0,
             resolution: 512,
