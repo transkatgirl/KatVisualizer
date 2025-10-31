@@ -670,7 +670,7 @@ impl AnalysisChain {
 
         let mut enabled_notes = [false; 128];
 
-        if self.midi_max_simultaneous != 128 {
+        if self.midi_max_simultaneous != 128 && self.midi_max_simultaneous != 0 {
             self.tone_scratchpad.clear();
 
             for ((_, volume), (masking, (lower, center, upper))) in
