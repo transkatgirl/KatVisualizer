@@ -23,7 +23,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 use crate::analyzer::{
     BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram, amplitude_to_dbfs,
-    map_value_f32,
+    dbfs_to_amplitude, map_value_f32,
 };
 
 pub mod analyzer;
@@ -746,31 +746,38 @@ impl AnalysisChain {
             }
         }
 
-        let mut note_scratchpad: [(f32, f32); 128] = [(0.0, 0.0); 128];
+        let mut note_scratchpad: [(f64, f64); 128] = [(0.0, 0.0); 128];
 
         if self.midi_use_unnormalized && self.listening_volume.is_some() {
             let left = left_analyzer.raw_analysis();
             let right = right_analyzer.raw_analysis();
 
-            for (index, (_, center, _)) in frequencies.iter().enumerate() {
+            let gain_amplitude = dbfs_to_amplitude(self.gain);
+
+            for (index, ((_, volume), (_, center, _))) in spectrogram.data[0]
+                .data
+                .iter()
+                .zip(frequencies.iter())
+                .enumerate()
+            {
                 let note = freq_to_midi_note(*center).round() as usize;
 
                 if note > 127 {
                     break;
                 }
 
-                let volume = (if self.single_input {
-                    amplitude_to_dbfs(left[index])
+                let amplitude = if self.single_input {
+                    left[index]
                 } else {
-                    amplitude_to_dbfs(left[index] + right[index])
-                } + self.gain) as f32;
+                    left[index] + right[index]
+                } * gain_amplitude;
 
-                if !volume.is_finite() || volume < spectrogram.data[0].masking[index] {
+                if !volume.is_finite() || *volume < spectrogram.data[0].masking[index] {
                     continue;
                 }
 
                 note_scratchpad[note].0 += 1.0;
-                note_scratchpad[note].1 += volume;
+                note_scratchpad[note].1 += amplitude;
             }
         } else {
             for ((_, volume), (_, center, _)) in
@@ -787,17 +794,15 @@ impl AnalysisChain {
                 }
 
                 note_scratchpad[note].0 += 1.0;
-                note_scratchpad[note].1 += volume;
+                note_scratchpad[note].1 += dbfs_to_amplitude(*volume as f64);
             }
         }
 
         let mut notes: [f32; 128] = [0.0; 128];
 
         for (i, (items, volume_sum)) in note_scratchpad.into_iter().enumerate() {
-            if items == 0.0 {
-                notes[i] = 0.0;
-            } else {
-                let volume = volume_sum / items;
+            if items != 0.0 {
+                let volume = amplitude_to_dbfs(volume_sum / items) as f32;
 
                 if volume >= self.midi_amplitude_threshold {
                     notes[i] = map_value_f32(
