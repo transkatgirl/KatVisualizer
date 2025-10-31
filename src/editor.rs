@@ -103,19 +103,8 @@ fn draw_bargraph(
 
             let iterator = (0..target_len).map(move |i| {
                 let sum = (0..=max_index)
-                    .map(|ii| {
-                        (
-                            spectrogram.data[ii].data[i],
-                            spectrogram.data[ii].masking[i],
-                        )
-                    })
-                    .fold((0.0, 0.0), |acc, (d, m)| {
-                        if d.1 >= m.1 {
-                            (acc.0 + d.0, acc.1 + d.1)
-                        } else {
-                            (acc.0 + m.0, acc.1 + m.1)
-                        }
-                    });
+                    .map(|ii| spectrogram.data[ii].data[i])
+                    .fold((0.0, 0.0), |acc, d| (acc.0 + d.0, acc.1 + d.1));
 
                 (sum.0 / count, sum.1 / count)
             });
@@ -135,11 +124,7 @@ fn draw_bargraph(
 
     draw_bargraph_from_iter(
         mesh,
-        front
-            .data
-            .iter()
-            .zip(front.masking.iter())
-            .map(|(d, m)| if d.1 >= m.1 { (d.0, d.1) } else { (m.0, m.1) }),
+        front.data.iter().map(|d| (d.0, d.1)),
         front.data.len(),
         bounds,
         color_table,
@@ -297,19 +282,9 @@ fn draw_spectrogram_image(
             break;
         }
 
-        for (x, ((pan, volume), (masking_pan, masking_volume))) in analysis
-            .data
-            .iter()
-            .zip(analysis.masking.iter())
-            .enumerate()
-        {
-            if volume >= masking_volume {
-                let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
-                image.pixels[(image_width * y) + x] = color_table.lookup(*pan, intensity);
-            } else {
-                let intensity = map_value_f32(*masking_volume, min_db, max_db, 0.0, 1.0);
-                image.pixels[(image_width * y) + x] = color_table.lookup(*masking_pan, intensity);
-            }
+        for (x, (pan, volume)) in analysis.data.iter().enumerate() {
+            let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
+            image.pixels[(image_width * y) + x] = color_table.lookup(*pan, intensity);
         }
     }
 }
