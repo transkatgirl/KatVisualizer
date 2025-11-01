@@ -86,7 +86,7 @@ impl BetterAnalyzer {
                     .find(|i| frequency_bands[*i].low >= f.high)
                     .unwrap_or(band_count - 1);
 
-                (lower, upper)
+                ((lower + 1).min(i), upper.saturating_sub(1))
             })
             .collect();
 
@@ -724,7 +724,7 @@ impl Masker {
                     })
                     .unwrap_or(band_count - 1);
 
-                (lower, upper)
+                ((lower + 1).min(i), upper.saturating_sub(1))
             })
             .collect();
 
