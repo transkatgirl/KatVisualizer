@@ -543,6 +543,7 @@ impl BetterAnalysis {
     pub fn peaks(
         &mut self,
         volume_threshold: f32,
+        max_count: usize,
         analyzer: &BetterAnalyzer,
     ) -> impl Iterator<Item = usize> {
         self.sorting_scratchpad.clear();
@@ -579,19 +580,23 @@ impl BetterAnalysis {
             }
         }
 
-        Box::new(self.sorting_scratchpad.iter().rev().filter_map(|(_, i)| {
-            if !self.peak_scratchpad[*i] {
-                let (min, max) = analyzer.frequency_indices[*i];
+        self.sorting_scratchpad
+            .iter()
+            .rev()
+            .filter_map(|(_, i)| {
+                if !self.peak_scratchpad[*i] {
+                    let (min, max) = analyzer.frequency_indices[*i];
 
-                (min..=max).for_each(|i| {
-                    self.peak_scratchpad[i] = true;
-                });
+                    (min..=max).for_each(|i| {
+                        self.peak_scratchpad[i] = true;
+                    });
 
-                Some(*i)
-            } else {
-                None
-            }
-        }))
+                    Some(*i)
+                } else {
+                    None
+                }
+            })
+            .take(max_count)
     }
 }
 
