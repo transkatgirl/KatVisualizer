@@ -565,26 +565,14 @@ impl BetterAnalysis {
                 .zip(self.masking.iter())
                 .enumerate()
                 .for_each(|(i, ((_, a), (_, m)))| {
-                    if *a > min && *a > *m && self.peak_scratchpad[i] {
+                    if *a > min && *a > *m {
                         self.sorting_scratchpad.push((*a - *m, i));
-
-                        let (min, max) = analyzer.frequency_indices[i];
-
-                        (min..=max).for_each(|i| {
-                            self.peak_scratchpad[i] = false;
-                        });
                     }
                 });
         } else {
             self.data.iter().enumerate().for_each(|(i, (_, a))| {
-                if *a > min && self.peak_scratchpad[i] {
+                if *a > min {
                     self.sorting_scratchpad.push((*a, i));
-
-                    let (min, max) = analyzer.frequency_indices[i];
-
-                    (min..=max).for_each(|i| {
-                        self.peak_scratchpad[i] = false;
-                    });
                 }
             });
         }
@@ -598,7 +586,22 @@ impl BetterAnalysis {
             }
         });
 
-        self.sorting_scratchpad.iter().map(|(_, i)| *i)
+        self.sorting_scratchpad
+            .iter()
+            .copied()
+            .filter_map(|(_, i)| {
+                if self.peak_scratchpad[i] {
+                    let (min, max) = analyzer.frequency_indices[i];
+
+                    (min..=max).for_each(|i| {
+                        self.peak_scratchpad[i] = false;
+                    });
+
+                    Some(i)
+                } else {
+                    None
+                }
+            })
     }
 }
 
