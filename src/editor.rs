@@ -204,6 +204,7 @@ fn draw_secondary_bargraph(
     analysis_len: usize,
     bounds: Rect,
     color: Color32,
+    thickness: Option<f32>,
     (max_db, min_db): (f32, f32),
 ) {
     let width = bounds.max.x - bounds.min.x;
@@ -213,53 +214,104 @@ fn draw_secondary_bargraph(
 
     let band_width = width / analysis_len as f32;
 
-    for (i, volume) in analysis.enumerate() {
-        let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+    if let Some(thickness) = thickness {
+        for (i, volume) in analysis.enumerate() {
+            let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
 
-        let start_x = bounds.min.x + i as f32 * band_width;
+            let start_x = bounds.min.x + i as f32 * band_width;
 
-        let rect = Rect {
-            min: Pos2 {
-                x: start_x,
-                y: bounds.max.y - intensity * height,
-            },
-            max: Pos2 {
-                x: start_x + band_width,
-                y: bounds.max.y,
-            },
-        };
+            let rect = Rect {
+                min: Pos2 {
+                    x: start_x,
+                    y: bounds.max.y - intensity * height,
+                },
+                max: Pos2 {
+                    x: start_x + band_width,
+                    y: (bounds.max.y - (intensity - thickness) * height).min(bounds.max.y),
+                },
+            };
 
-        mesh.indices.extend_from_slice(&[
-            vertices,
-            vertices + 1,
-            vertices + 2,
-            vertices + 2,
-            vertices + 1,
-            vertices + 3,
-        ]);
-        mesh.vertices.extend_from_slice(&[
-            Vertex {
-                pos: rect.left_top(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.right_top(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.left_bottom(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.right_bottom(),
-                uv: WHITE_UV,
-                color,
-            },
-        ]);
-        vertices += 4;
+            mesh.indices.extend_from_slice(&[
+                vertices,
+                vertices + 1,
+                vertices + 2,
+                vertices + 2,
+                vertices + 1,
+                vertices + 3,
+            ]);
+            mesh.vertices.extend_from_slice(&[
+                Vertex {
+                    pos: rect.left_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.left_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+            ]);
+            vertices += 4;
+        }
+    } else {
+        for (i, volume) in analysis.enumerate() {
+            let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+
+            let start_x = bounds.min.x + i as f32 * band_width;
+
+            let rect = Rect {
+                min: Pos2 {
+                    x: start_x,
+                    y: bounds.max.y - intensity * height,
+                },
+                max: Pos2 {
+                    x: start_x + band_width,
+                    y: bounds.max.y,
+                },
+            };
+
+            mesh.indices.extend_from_slice(&[
+                vertices,
+                vertices + 1,
+                vertices + 2,
+                vertices + 2,
+                vertices + 1,
+                vertices + 3,
+            ]);
+            mesh.vertices.extend_from_slice(&[
+                Vertex {
+                    pos: rect.left_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.left_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+            ]);
+            vertices += 4;
+        }
     }
 }
 
@@ -399,6 +451,7 @@ struct RenderSettings {
     show_format: bool,
     show_hover: bool,
     show_masking: bool,
+    masking_color: Color32,
 }
 
 impl Default for RenderSettings {
@@ -425,7 +478,8 @@ impl Default for RenderSettings {
             show_performance: true,
             show_format: false,
             show_hover: true,
-            show_masking: false,
+            show_masking: true,
+            masking_color: Color32::from_rgb(61, 9, 17),
         }
     }
 }
@@ -661,7 +715,8 @@ pub fn create(
                             front.masking.iter().map(|(_, m)| *m),
                             front.masking.len(),
                             bargraph_bounds,
-                            Color32::RED,
+                            settings.masking_color,
+                            None,
                             (max_db, min_db),
                         );
                     }
@@ -1210,6 +1265,11 @@ pub fn create(
 
                         if analysis_settings.masking {
                             ui.checkbox(&mut render_settings.show_masking, "Highlight simultaneous masking thresholds");
+
+                            if render_settings.show_masking {
+                                ui.label("Masking threshold color:");
+                                ui.color_edit_button_srgba(&mut render_settings.masking_color);
+                            }
                         }
 
                         if ui.button("Reset Render Options").clicked() {
