@@ -185,7 +185,7 @@ pub struct BetterAnalysis {
     pub max: f32,
     pub masking_mean: f32,
     peak_scratchpad: Vec<bool>,
-    sorting_scratchpad: Vec<(f32, f32, usize)>,
+    sorting_scratchpad: Vec<(f32, usize)>,
 }
 
 impl BetterAnalysis {
@@ -540,12 +540,11 @@ impl BetterAnalysis {
 
         self.duration = duration;
     }
-    pub fn peaks<'a>(
-        &'a mut self,
+    pub fn peaks(
+        &mut self,
         volume_threshold: f32,
-        remove_overlapping: bool,
-        analyzer: &'a BetterAnalyzer,
-    ) -> Box<dyn Iterator<Item = usize> + 'a> {
+        analyzer: &BetterAnalyzer,
+    ) -> impl Iterator<Item = usize> {
         self.sorting_scratchpad.clear();
 
         let min = volume_threshold.max(self.min);
@@ -557,58 +556,42 @@ impl BetterAnalysis {
                 .enumerate()
                 .for_each(|(i, ((_, a), (_, m)))| {
                     if *a > min && *a > *m {
-                        self.sorting_scratchpad.push(((*a - *m).round(), *a, i));
+                        self.sorting_scratchpad.push((*a - *m, i));
                     }
                 });
-
-            self.sorting_scratchpad.sort_unstable_by(|a, b| {
-                a.0.total_cmp(&b.0)
-                    .then(a.1.total_cmp(&b.1))
-                    .then(a.2.cmp(&b.2))
-            });
         } else {
             self.data.iter().enumerate().for_each(|(i, (_, a))| {
                 if *a > min {
-                    self.sorting_scratchpad.push((*a, 0.0, i));
+                    self.sorting_scratchpad.push((*a, i));
                 }
             });
-
-            self.sorting_scratchpad
-                .sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.2.cmp(&b.2)));
         }
+        self.sorting_scratchpad
+            .sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
 
-        if remove_overlapping {
-            if self.peak_scratchpad.len() == self.data.len() {
-                self.peak_scratchpad.fill(false);
-            } else {
-                self.peak_scratchpad.clear();
-
-                for _ in 0..self.data.len() {
-                    self.peak_scratchpad.push(false);
-                }
-            }
-
-            Box::new(
-                self.sorting_scratchpad
-                    .iter()
-                    .rev()
-                    .filter_map(|(_, _, i)| {
-                        if !self.peak_scratchpad[*i] {
-                            let (min, max) = analyzer.frequency_indices[*i];
-
-                            (min..=max).for_each(|i| {
-                                self.peak_scratchpad[i] = true;
-                            });
-
-                            Some(*i)
-                        } else {
-                            None
-                        }
-                    }),
-            )
+        if self.peak_scratchpad.len() == self.data.len() {
+            self.peak_scratchpad.fill(false);
         } else {
-            Box::new(self.sorting_scratchpad.iter().rev().map(|(_, _, i)| *i))
+            self.peak_scratchpad.clear();
+
+            for _ in 0..self.data.len() {
+                self.peak_scratchpad.push(false);
+            }
         }
+
+        Box::new(self.sorting_scratchpad.iter().rev().filter_map(|(_, i)| {
+            if !self.peak_scratchpad[*i] {
+                let (min, max) = analyzer.frequency_indices[*i];
+
+                (min..=max).for_each(|i| {
+                    self.peak_scratchpad[i] = true;
+                });
+
+                Some(*i)
+            } else {
+                None
+            }
+        }))
     }
 }
 
@@ -628,10 +611,7 @@ impl BetterSpectrogram {
                     //mean: f32::NEG_INFINITY,
                     max: f32::NEG_INFINITY,
                     masking_mean: f32::NEG_INFINITY,
-                    sorting_scratchpad: vec![
-                        (f32::NEG_INFINITY, f32::NEG_INFINITY, 0);
-                        slice_capacity
-                    ],
+                    sorting_scratchpad: vec![(f32::NEG_INFINITY, 0); slice_capacity],
                     peak_scratchpad: vec![false; slice_capacity]
                 };
                 length
