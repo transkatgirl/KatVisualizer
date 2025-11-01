@@ -83,7 +83,6 @@ impl BetterAnalyzer {
                     .find(|i| frequency_bands[*i].high <= f.low)
                     .unwrap_or(0);
                 let upper = (i..band_count)
-                    .rev()
                     .find(|i| frequency_bands[*i].low >= f.high)
                     .unwrap_or(band_count - 1);
 
@@ -723,7 +722,6 @@ impl Masker {
                     })
                     .unwrap_or(0);
                 let upper = (i..band_count)
-                    .rev()
                     .find(|i| {
                         FrequencyScale::Bark.scale(frequency_bands[*i].low)
                             >= (center_bark + bark_spread)
