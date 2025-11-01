@@ -76,6 +76,7 @@ fn draw_bargraph(
     spectrogram: &BetterSpectrogram,
     bounds: Rect,
     color_table: &ColorTable,
+    masking_color: Option<Color32>,
     (max_db, min_db): (f32, f32),
     averaging: Duration,
 ) {
@@ -118,6 +119,25 @@ fn draw_bargraph(
                 (max_db, min_db),
             );
 
+            if let Some(masking_color) = masking_color {
+                let masking_iterator = (0..target_len).map(move |i| {
+                    let sum = (0..=max_index)
+                        .map(|ii| spectrogram.data[ii].masking[i])
+                        .fold(0.0, |acc, d| acc + d.1);
+
+                    sum / count
+                });
+                draw_secondary_bargraph_from_iter(
+                    mesh,
+                    masking_iterator,
+                    front.masking.len(),
+                    bounds,
+                    masking_color,
+                    None,
+                    (max_db, min_db),
+                );
+            }
+
             return;
         }
     }
@@ -130,6 +150,17 @@ fn draw_bargraph(
         color_table,
         (max_db, min_db),
     );
+    if let Some(masking_color) = masking_color {
+        draw_secondary_bargraph_from_iter(
+            mesh,
+            front.masking.iter().map(|(_, m)| *m),
+            front.masking.len(),
+            bounds,
+            masking_color,
+            None,
+            (max_db, min_db),
+        );
+    }
 }
 
 fn draw_bargraph_from_iter(
@@ -198,7 +229,7 @@ fn draw_bargraph_from_iter(
     }
 }
 
-fn draw_secondary_bargraph(
+fn draw_secondary_bargraph_from_iter(
     mesh: &mut Mesh,
     analysis: impl Iterator<Item = f32>,
     analysis_len: usize,
@@ -701,23 +732,25 @@ pub fn create(
                     calculate_volume_min_max(&settings, &mut agc_scratchpad, spectrogram);
 
                 if settings.bargraph_height != 0.0 {
-                    draw_bargraph(
-                        &mut bargraph_mesh,
-                        spectrogram,
-                        bargraph_bounds,
-                        color_table,
-                        (max_db, min_db),
-                        settings.bargraph_averaging,
-                    );
                     if settings.show_masking {
-                        draw_secondary_bargraph(
+                        draw_bargraph(
                             &mut bargraph_mesh,
-                            front.masking.iter().map(|(_, m)| *m),
-                            front.masking.len(),
+                            spectrogram,
                             bargraph_bounds,
-                            settings.masking_color,
+                            color_table,
+                            Some(settings.masking_color),
+                            (max_db, min_db),
+                            settings.bargraph_averaging,
+                        );
+                    } else {
+                        draw_bargraph(
+                            &mut bargraph_mesh,
+                            spectrogram,
+                            bargraph_bounds,
+                            color_table,
                             None,
                             (max_db, min_db),
+                            settings.bargraph_averaging,
                         );
                     }
                 }
