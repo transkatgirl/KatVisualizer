@@ -665,7 +665,7 @@ impl AnalysisChain {
         let mut enabled_notes = [false; 128];
 
         if self.midi_max_simultaneous != 128 && self.midi_max_simultaneous != 0 {
-            /*let mut note_count = 0;
+            let mut note_count = 0;
             let mut occupied_notes = [false; 128];
 
             for peak_index in
@@ -680,65 +680,6 @@ impl AnalysisChain {
 
                     let lower_note = freq_to_midi_note(lower).clamp(0.0, 127.0).round() as usize;
                     let upper_note = freq_to_midi_note(upper).clamp(0.0, 127.0).round() as usize;
-
-                    occupied_notes
-                        .iter_mut()
-                        .take(upper_note + 1)
-                        .skip(lower_note)
-                        .for_each(|o| *o = true);
-
-                    if note_count == self.midi_max_simultaneous {
-                        break;
-                    }
-                }
-            }*/
-
-            let mut tone_scratchpad = Vec::with_capacity(spectrogram.data[0].data.len());
-
-            for ((_, volume), ((_, masking), (lower, center, upper))) in
-                spectrogram.data[0].data.iter().copied().zip(
-                    spectrogram.data[0]
-                        .masking
-                        .iter()
-                        .copied()
-                        .zip(frequencies.iter().copied()),
-                )
-            {
-                if volume > masking {
-                    tone_scratchpad.push((volume, volume - masking, (lower, center, upper)));
-                }
-            }
-
-            if self.masking {
-                tone_scratchpad.sort_unstable_by(|a, b| {
-                    if a.0 >= self.midi_amplitude_threshold && b.0 >= self.midi_amplitude_threshold
-                    {
-                        a.1.total_cmp(&b.1)
-                    } else if a.0 >= self.midi_amplitude_threshold {
-                        Ordering::Greater
-                    } else if b.0 >= self.midi_amplitude_threshold {
-                        Ordering::Less
-                    } else {
-                        a.0.total_cmp(&b.0)
-                    }
-                });
-            } else {
-                tone_scratchpad.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
-            }
-
-            let mut note_count: u8 = 0;
-
-            let mut occupied_notes = [false; 128];
-
-            for (_, _, (lower, center, upper)) in tone_scratchpad.iter().rev() {
-                let note = freq_to_midi_note(*center).clamp(0.0, 127.0).round() as usize;
-
-                if !occupied_notes[note] {
-                    note_count += 1;
-                    enabled_notes[note] = true;
-
-                    let lower_note = freq_to_midi_note(*lower).clamp(0.0, 127.0).round() as usize;
-                    let upper_note = freq_to_midi_note(*upper).clamp(0.0, 127.0).round() as usize;
 
                     occupied_notes
                         .iter_mut()

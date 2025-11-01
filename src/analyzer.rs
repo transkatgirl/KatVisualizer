@@ -588,21 +588,26 @@ impl BetterAnalysis {
                 }
             }
 
-            Box::new(self.sorting_scratchpad.iter().filter_map(|(_, _, i)| {
-                if !self.peak_scratchpad[*i] {
-                    let (min, max) = analyzer.frequency_indices[*i];
+            Box::new(
+                self.sorting_scratchpad
+                    .iter()
+                    .rev()
+                    .filter_map(|(_, _, i)| {
+                        if !self.peak_scratchpad[*i] {
+                            let (min, max) = analyzer.frequency_indices[*i];
 
-                    (min..=max).for_each(|i| {
-                        self.peak_scratchpad[i] = true;
-                    });
+                            (min..=max).for_each(|i| {
+                                self.peak_scratchpad[i] = true;
+                            });
 
-                    Some(*i)
-                } else {
-                    None
-                }
-            }))
+                            Some(*i)
+                        } else {
+                            None
+                        }
+                    }),
+            )
         } else {
-            Box::new(self.sorting_scratchpad.iter().map(|(_, _, i)| *i))
+            Box::new(self.sorting_scratchpad.iter().rev().map(|(_, _, i)| *i))
         }
     }
 }
