@@ -479,7 +479,7 @@ impl Default for RenderSettings {
             show_format: false,
             show_hover: true,
             show_masking: true,
-            masking_color: Color32::from_rgb(61, 9, 17),
+            masking_color: Color32::from_rgb(33, 0, 4),
         }
     }
 }
