@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, f64::consts::PI, time::Duration};
+use std::{cmp::Ordering, collections::VecDeque, f64::consts::PI, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
@@ -45,6 +45,7 @@ pub struct BetterAnalyzer {
     masking: Vec<f64>,
     buffer_size: usize,
     frequency_bands: Vec<(f64, f64, f64)>,
+    frequency_indices: Vec<(usize, usize)>,
     normalizers: Vec<PrecomputedNormalizer>,
 }
 
@@ -71,6 +72,25 @@ impl BetterAnalyzer {
             },
         );
 
+        let band_count = frequency_bands.len();
+
+        let frequency_indices = frequency_bands
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let lower = (0..i.saturating_sub(1))
+                    .rev()
+                    .find(|i| frequency_bands[*i].high <= f.low)
+                    .unwrap_or(0);
+                let upper = (i..band_count)
+                    .rev()
+                    .find(|i| frequency_bands[*i].low >= f.high)
+                    .unwrap_or(band_count - 1);
+
+                (lower, upper)
+            })
+            .collect();
+
         let normalizers: Vec<_> = frequency_bands
             .iter()
             .map(|band| PrecomputedNormalizer::new(band.center))
@@ -86,6 +106,8 @@ impl BetterAnalyzer {
             config.nc_method,
         );
 
+        let masker = Masker::new(&frequency_bands);
+
         let frequency_bands: Vec<_> = frequency_bands
             .iter()
             .map(|band| (band.low, band.center, band.high))
@@ -94,10 +116,11 @@ impl BetterAnalyzer {
         Self {
             config,
             buffer_size: transform.buffer.len(),
-            masker: Masker::new(frequency_bands.iter().map(|(_, c, _)| *c)),
+            masker,
             masking: vec![0.0; frequency_bands.len()],
             transform,
             frequency_bands,
+            frequency_indices,
             normalizers,
         }
     }
@@ -158,9 +181,12 @@ pub struct BetterAnalysis {
     pub duration: Duration,
     pub data: Vec<(f32, f32)>,
     pub masking: Vec<(f32, f32)>,
-    pub mean: f32,
+    pub min: f32,
+    //pub mean: f32,
     pub max: f32,
     pub masking_mean: f32,
+    peak_scratchpad: Vec<bool>,
+    sorting_scratchpad: Vec<(f32, usize)>,
 }
 
 impl BetterAnalysis {
@@ -169,9 +195,12 @@ impl BetterAnalysis {
             duration: Duration::ZERO,
             data: Vec::with_capacity(capacity),
             masking: Vec::with_capacity(capacity),
-            mean: f32::NEG_INFINITY,
+            min: f32::NEG_INFINITY,
+            //mean: f32::NEG_INFINITY,
             max: f32::NEG_INFINITY,
             masking_mean: f32::NEG_INFINITY,
+            sorting_scratchpad: Vec::with_capacity(capacity),
+            peak_scratchpad: Vec::with_capacity(capacity),
         }
     }
     pub fn update_stereo(
@@ -189,7 +218,7 @@ impl BetterAnalysis {
 
         let new_length = left.transform.spectrum_data.len();
 
-        let mut sum = 0.0;
+        //let mut sum = 0.0;
         self.max = f32::NEG_INFINITY;
 
         if left.config.masking {
@@ -274,13 +303,11 @@ impl BetterAnalysis {
                         .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                         - listening_volume;
 
-                    sum += dbfs_to_amplitude(volume);
+                    //sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
                     self.data[index] = ((pan * 2.0) as f32, volume);
-                    if volume > self.max {
-                        self.max = volume;
-                    }
+                    self.max = self.max.max(volume);
                 }
             } else {
                 for (index, (left, right)) in left
@@ -293,13 +320,11 @@ impl BetterAnalysis {
                     let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
                     let volume = volume + gain;
 
-                    sum += dbfs_to_amplitude(volume);
+                    //sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
                     self.data[index] = ((pan * 2.0) as f32, volume);
-                    if volume > self.max {
-                        self.max = volume;
-                    }
+                    self.max = self.max.max(volume);
                 }
             }
         } else {
@@ -323,16 +348,14 @@ impl BetterAnalysis {
                         .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                         - listening_volume;
 
-                    sum += dbfs_to_amplitude(volume);
+                    //sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
                     self.data.push(((pan * 2.0) as f32, volume));
-                    if volume > self.max {
-                        self.max = volume;
-                    }
+                    self.max = self.max.max(volume);
                 }
             } else {
-                let gain_amplitude = dbfs_to_amplitude(gain);
+                //let gain_amplitude = dbfs_to_amplitude(gain);
 
                 for (left, right) in left
                     .transform
@@ -343,18 +366,22 @@ impl BetterAnalysis {
                     let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
                     let volume = volume + gain;
 
-                    sum += (*left + *right) * gain_amplitude;
+                    //sum += (*left + *right) * gain_amplitude;
                     let volume = volume as f32;
 
                     self.data.push(((pan * 2.0) as f32, volume));
-                    if volume > self.max {
-                        self.max = volume;
-                    }
+                    self.max = self.max.max(volume);
                 }
             }
         }
 
-        self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
+        if let Some(listening_volume) = normalization_volume {
+            self.min = (3.0 - listening_volume) as f32;
+        } else {
+            self.min = f32::NEG_INFINITY;
+        }
+
+        //self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
 
         self.duration = duration;
     }
@@ -367,7 +394,7 @@ impl BetterAnalysis {
     ) {
         let new_length = center.transform.spectrum_data.len();
 
-        let mut sum = 0.0;
+        //let mut sum = 0.0;
         self.max = f32::NEG_INFINITY;
 
         if center.config.masking {
@@ -448,25 +475,21 @@ impl BetterAnalysis {
                         .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                         - listening_volume;
 
-                    sum += dbfs_to_amplitude(volume);
+                    //sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
                     self.data[index] = (0.0, volume);
-                    if volume > self.max {
-                        self.max = volume;
-                    }
+                    self.max = self.max.max(volume);
                 }
             } else {
                 for (index, amplitude) in center.transform.spectrum_data.iter().enumerate() {
                     let volume = amplitude_to_dbfs(*amplitude * 2.0) + gain;
 
-                    sum += dbfs_to_amplitude(volume);
+                    //sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
                     self.data[index] = (0.0, volume);
-                    if volume > self.max {
-                        self.max = volume;
-                    }
+                    self.max = self.max.max(volume);
                 }
             }
         } else {
@@ -487,13 +510,11 @@ impl BetterAnalysis {
                         .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                         - listening_volume;
 
-                    sum += dbfs_to_amplitude(volume);
+                    //sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
                     self.data.push((0.0, volume));
-                    if volume > self.max {
-                        self.max = volume;
-                    }
+                    self.max = self.max.max(volume);
                 }
             } else {
                 let gain_amplitude = dbfs_to_amplitude(gain);
@@ -501,20 +522,88 @@ impl BetterAnalysis {
                 for amplitude in center.transform.spectrum_data.iter() {
                     let amplitude = *amplitude * 2.0 * gain_amplitude;
 
-                    sum += amplitude;
+                    //sum += amplitude;
                     let volume = amplitude_to_dbfs(amplitude) as f32;
 
                     self.data.push((0.0, volume));
-                    if volume > self.max {
-                        self.max = volume;
-                    }
+                    self.max = self.max.max(volume);
                 }
             }
         }
 
-        self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
+        if let Some(listening_volume) = normalization_volume {
+            self.min = (3.0 - listening_volume) as f32;
+        } else {
+            self.min = f32::NEG_INFINITY;
+        }
+
+        //self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
 
         self.duration = duration;
+    }
+    pub fn peaks(
+        &mut self,
+        max_count: usize,
+        min_volume: f32,
+        analyzer: &BetterAnalyzer,
+    ) -> impl Iterator<Item = usize> {
+        self.sorting_scratchpad.clear();
+
+        if self.peak_scratchpad.len() == self.data.len() {
+            self.peak_scratchpad.fill(true);
+        } else {
+            self.peak_scratchpad.clear();
+
+            for _ in 0..self.data.len() {
+                self.peak_scratchpad.push(true);
+            }
+        }
+
+        let min = min_volume.max(self.min);
+
+        if self.masking_mean.is_finite() {
+            self.data
+                .iter()
+                .zip(self.masking.iter())
+                .enumerate()
+                .for_each(|(i, ((_, a), (_, m)))| {
+                    if *a > min && *a > *m && self.peak_scratchpad[i] {
+                        self.sorting_scratchpad.push((*a - *m, i));
+
+                        let (min, max) = analyzer.frequency_indices[i];
+
+                        (min..=max).for_each(|i| {
+                            self.peak_scratchpad[i] = false;
+                        });
+                    }
+                });
+        } else {
+            self.data.iter().enumerate().for_each(|(i, (_, a))| {
+                if *a > min && self.peak_scratchpad[i] {
+                    self.sorting_scratchpad.push((*a, i));
+
+                    let (min, max) = analyzer.frequency_indices[i];
+
+                    (min..=max).for_each(|i| {
+                        self.peak_scratchpad[i] = false;
+                    });
+                }
+            });
+        }
+        self.sorting_scratchpad.sort_unstable_by(|a, b| {
+            let cmp = a.0.total_cmp(&b.0);
+
+            if cmp == Ordering::Equal {
+                a.1.cmp(&b.1)
+            } else {
+                cmp
+            }
+        });
+
+        self.sorting_scratchpad
+            .iter()
+            .take(max_count)
+            .map(|(_, i)| *i)
     }
 }
 
@@ -530,9 +619,12 @@ impl BetterSpectrogram {
                     duration: Duration::from_secs(1),
                     data: vec![(0.0, f32::NEG_INFINITY); slice_capacity],
                     masking: vec![(0.0, f32::NEG_INFINITY); slice_capacity],
-                    mean: f32::NEG_INFINITY,
+                    min: f32::NEG_INFINITY,
+                    //mean: f32::NEG_INFINITY,
                     max: f32::NEG_INFINITY,
                     masking_mean: f32::NEG_INFINITY,
+                    sorting_scratchpad: vec![(f32::NEG_INFINITY, 0); slice_capacity],
+                    peak_scratchpad: vec![true; slice_capacity]
                 };
                 length
             ]),
@@ -548,7 +640,8 @@ impl BetterSpectrogram {
                 buffer.masking.clone_from(&analysis.masking);
             }
             buffer.duration = analysis.duration;
-            buffer.mean = analysis.mean;
+            buffer.min = analysis.min;
+            //buffer.mean = analysis.mean;
             buffer.max = analysis.max;
             buffer.masking_mean = analysis.masking_mean;
         });
@@ -602,28 +695,48 @@ const MAX_MASKING_DYNAMIC_RANGE: f64 = 100.0;
 #[derive(Clone)]
 struct Masker {
     frequency_set: Vec<(f64, f64)>,
-    max_bark_stride: f64,
+    range_indices: Vec<(usize, usize)>,
 }
 
 impl Masker {
-    fn new(frequencies: impl Iterator<Item = f64>) -> Self {
-        let frequency_set: Vec<(f64, f64)> = frequencies
-            .map(|f| (f, FrequencyScale::Bark.scale(f)))
+    fn new(frequency_bands: &[FrequencyBand]) -> Self {
+        let frequency_set: Vec<(f64, f64)> = frequency_bands
+            .iter()
+            .map(|f| (f.center, FrequencyScale::Bark.scale(f.center)))
             .collect();
 
-        let mut max_bark_stride = 1.0;
+        let band_count = frequency_bands.len();
+        let range_indices = frequency_bands
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let center_bark = FrequencyScale::Bark.scale(f.center);
 
-        for i in 1..frequency_set.len() {
-            let bark_stride = 1.0 / (frequency_set[i].1 - frequency_set[i - 1].1);
+                let min_masking_spread = (22.0 + (230.0 / f.center).min(10.0)).min(27.0);
+                let bark_spread = MAX_MASKING_DYNAMIC_RANGE / min_masking_spread;
 
-            if bark_stride > max_bark_stride {
-                max_bark_stride = bark_stride;
-            }
-        }
+                let lower = (0..i.saturating_sub(1))
+                    .rev()
+                    .find(|i| {
+                        FrequencyScale::Bark.scale(frequency_bands[*i].high)
+                            <= (center_bark - bark_spread)
+                    })
+                    .unwrap_or(0);
+                let upper = (i..band_count)
+                    .rev()
+                    .find(|i| {
+                        FrequencyScale::Bark.scale(frequency_bands[*i].low)
+                            >= (center_bark + bark_spread)
+                    })
+                    .unwrap_or(band_count - 1);
+
+                (lower, upper)
+            })
+            .collect();
 
         Self {
-            max_bark_stride,
             frequency_set,
+            range_indices,
         }
     }
     fn calculate_masking_threshold(
@@ -652,11 +765,8 @@ impl Masker {
 
             let threshold_offset = masking_threshold_offset(bark, flatness);
             let offset = threshold_offset - simultaneous;
-            let stride = ((MAX_MASKING_DYNAMIC_RANGE + threshold_offset) / lower_spread)
-                * self.max_bark_stride;
 
-            let min = i.saturating_sub(stride.floor() as usize);
-            let max = (i + stride.ceil() as usize).min(self.frequency_set.len());
+            let (min, max) = self.range_indices[i];
 
             (min..i)
                 .map(|i| (i, self.frequency_set[i].1))
@@ -667,7 +777,7 @@ impl Masker {
 
             masking_threshold[i] += dbfs_to_amplitude(offset) * amplitude;
 
-            (i..max)
+            (i..=max)
                 .map(|i| (i, self.frequency_set[i].1))
                 .for_each(|(i, b)| {
                     masking_threshold[i] +=
