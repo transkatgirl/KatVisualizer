@@ -670,9 +670,10 @@ impl AnalysisChain {
                 left_analyzer,
             ) {
                 let (_, center, _) = frequencies[peak_index];
-                let note = freq_to_midi_note(center).clamp(0.0, 127.0).round() as usize;
-
-                enabled_notes[note] = true;
+                let note = freq_to_midi_note(center).clamp(0.0, 128.0).round() as usize;
+                if note != 128 {
+                    enabled_notes[note] = true;
+                }
             }
         }
 
