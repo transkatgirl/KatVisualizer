@@ -540,22 +540,13 @@ impl BetterAnalysis {
 
         self.duration = duration;
     }
-    pub fn peaks(
-        &mut self,
+    pub fn peaks<'a>(
+        &'a mut self,
         min_volume: f32,
-        analyzer: &BetterAnalyzer,
-    ) -> impl Iterator<Item = usize> {
+        remove_overlapping: bool,
+        analyzer: &'a BetterAnalyzer,
+    ) -> Box<dyn Iterator<Item = usize> + 'a> {
         self.sorting_scratchpad.clear();
-
-        if self.peak_scratchpad.len() == self.data.len() {
-            self.peak_scratchpad.fill(true);
-        } else {
-            self.peak_scratchpad.clear();
-
-            for _ in 0..self.data.len() {
-                self.peak_scratchpad.push(true);
-            }
-        }
 
         let min = min_volume.max(self.min);
 
@@ -586,22 +577,38 @@ impl BetterAnalysis {
             }
         });
 
-        self.sorting_scratchpad
-            .iter()
-            .copied()
-            .filter_map(|(_, i)| {
-                if self.peak_scratchpad[i] {
-                    let (min, max) = analyzer.frequency_indices[i];
+        if remove_overlapping {
+            if self.peak_scratchpad.len() == self.data.len() {
+                self.peak_scratchpad.fill(false);
+            } else {
+                self.peak_scratchpad.clear();
 
-                    (min..=max).for_each(|i| {
-                        self.peak_scratchpad[i] = false;
-                    });
-
-                    Some(i)
-                } else {
-                    None
+                for _ in 0..self.data.len() {
+                    self.peak_scratchpad.push(false);
                 }
-            })
+            }
+
+            Box::new(
+                self.sorting_scratchpad
+                    .iter()
+                    .copied()
+                    .filter_map(|(_, i)| {
+                        if !self.peak_scratchpad[i] {
+                            let (min, max) = analyzer.frequency_indices[i];
+
+                            (min..=max).for_each(|i| {
+                                self.peak_scratchpad[i] = true;
+                            });
+
+                            Some(i)
+                        } else {
+                            None
+                        }
+                    }),
+            )
+        } else {
+            Box::new(self.sorting_scratchpad.iter().copied().map(|(_, i)| i))
+        }
     }
 }
 
@@ -622,7 +629,7 @@ impl BetterSpectrogram {
                     max: f32::NEG_INFINITY,
                     masking_mean: f32::NEG_INFINITY,
                     sorting_scratchpad: vec![(f32::NEG_INFINITY, 0); slice_capacity],
-                    peak_scratchpad: vec![true; slice_capacity]
+                    peak_scratchpad: vec![false; slice_capacity]
                 };
                 length
             ]),

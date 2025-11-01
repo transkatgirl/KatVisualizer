@@ -668,7 +668,7 @@ impl AnalysisChain {
             let mut occupied_notes = [false; 128];
 
             for peak_index in
-                spectrogram.data[0].peaks(self.midi_amplitude_threshold, left_analyzer)
+                spectrogram.data[0].peaks(self.midi_amplitude_threshold, false, left_analyzer)
             {
                 let (lower, center, upper) = frequencies[peak_index];
                 let note = freq_to_midi_note(center).clamp(0.0, 127.0).round() as usize;
