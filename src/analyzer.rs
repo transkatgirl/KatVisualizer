@@ -569,7 +569,7 @@ impl BetterAnalysis {
         } else {
             self.data.iter().enumerate().for_each(|(i, (_, a))| {
                 if *a > min {
-                    self.sorting_scratchpad.push((*a, *a, i));
+                    self.sorting_scratchpad.push((*a, 0.0, i));
                 }
             });
 
