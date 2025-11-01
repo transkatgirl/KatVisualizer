@@ -542,7 +542,6 @@ impl BetterAnalysis {
     }
     pub fn peaks(
         &mut self,
-        max_count: usize,
         min_volume: f32,
         analyzer: &BetterAnalyzer,
     ) -> impl Iterator<Item = usize> {
@@ -599,10 +598,7 @@ impl BetterAnalysis {
             }
         });
 
-        self.sorting_scratchpad
-            .iter()
-            .take(max_count)
-            .map(|(_, i)| *i)
+        self.sorting_scratchpad.iter().map(|(_, i)| *i)
     }
 }
 

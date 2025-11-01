@@ -664,14 +664,32 @@ impl AnalysisChain {
         let mut enabled_notes = [false; 128];
 
         if self.midi_max_simultaneous != 128 && self.midi_max_simultaneous != 0 {
-            for peak_index in spectrogram.data[0].peaks(
-                self.midi_max_simultaneous as usize,
-                self.midi_amplitude_threshold,
-                left_analyzer,
-            ) {
-                let center = frequencies[peak_index].1;
+            let mut note_count = 0;
+            let mut occupied_notes = [false; 128];
+
+            for peak_index in
+                spectrogram.data[0].peaks(self.midi_amplitude_threshold, left_analyzer)
+            {
+                let (lower, center, upper) = frequencies[peak_index];
                 let note = freq_to_midi_note(center).clamp(0.0, 127.0).round() as usize;
-                enabled_notes[note] = true;
+
+                if !occupied_notes[note] {
+                    note_count += 1;
+                    enabled_notes[note] = true;
+
+                    let lower_note = freq_to_midi_note(lower).clamp(0.0, 127.0).round() as usize;
+                    let upper_note = freq_to_midi_note(upper).clamp(0.0, 127.0).round() as usize;
+
+                    occupied_notes
+                        .iter_mut()
+                        .take(upper_note + 1)
+                        .skip(lower_note)
+                        .for_each(|o| *o = true);
+
+                    if note_count == self.midi_max_simultaneous {
+                        break;
+                    }
+                }
             }
         }
 
