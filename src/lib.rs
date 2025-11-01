@@ -10,7 +10,6 @@ use nih_plug::{
 use nih_plug_egui::EguiState;
 use parking_lot::{FairMutex, Mutex, RwLock};
 use std::{
-    cmp::Ordering,
     num::NonZero,
     sync::Arc,
     time::{Duration, Instant},
@@ -396,7 +395,6 @@ pub(crate) struct AnalysisChain {
     gain: f64,
     internal_buffering: bool,
     output_midi: bool,
-    tone_scratchpad: Vec<(f32, f32, (f32, f32, f32))>,
     midi_max_simultaneous: u8,
     midi_amplitude_threshold: f32,
     midi_use_aftertouch: bool,
@@ -461,7 +459,6 @@ impl AnalysisChain {
             sample_rate,
             internal_buffering: config.internal_buffering,
             output_midi: config.output_midi,
-            tone_scratchpad: Vec::with_capacity(MAX_FREQUENCY_BINS),
             midi_max_simultaneous: config.midi_max_simultaneous,
             midi_amplitude_threshold: config.midi_amplitude_threshold,
             midi_use_aftertouch: config.midi_use_aftertouch,
@@ -667,8 +664,6 @@ impl AnalysisChain {
         let mut enabled_notes = [false; 128];
 
         if self.midi_max_simultaneous != 128 && self.midi_max_simultaneous != 0 {
-            self.tone_scratchpad.clear();
-
             for peak_index in spectrogram.data[0].peaks(
                 self.midi_max_simultaneous as usize,
                 self.midi_amplitude_threshold,
