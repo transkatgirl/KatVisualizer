@@ -1,4 +1,5 @@
 # Planned Features
 
-- [ ] Allow outputting precise peaks in real time (using an algorithm similar to one used to generate MIDI notes) via OSC
+- [ ] Add support for [MIDI tuning](https://midi.org/midi-tuning-updated-specification) to allow for precise frequency output
+- [ ] Allow outputting precise peaks & normalized amplitudes via OSC
 	- [ ] Allow normalizing output values using automatic ranging, using the same algorithm used in the UI
