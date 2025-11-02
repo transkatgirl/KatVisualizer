@@ -362,7 +362,7 @@ impl Default for AnalysisChainConfig {
             output_max_simultaneous_peaks: 24,
             output_osc: false,
             osc_socket_address: "127.0.0.1:8000".to_string(),
-            osc_resource_address: "/katvisualizer_output".to_string(),
+            osc_resource_address: "/katvisualizer/tones".to_string(),
             output_midi: false,
             midi_amplitude_threshold: 30.0 - 86.0,
             midi_pressure_min_amplitude: 30.0 - 86.0,
