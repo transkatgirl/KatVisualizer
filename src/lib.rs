@@ -635,8 +635,10 @@ impl AnalysisChain {
         left_analyzer: &mut BetterAnalyzer,
         right_analyzer: &mut BetterAnalyzer,
     ) {
+        // TODO: Move this functionality to a separate crate module
         // TODO: Add support for MIDI over OSC
         // TODO: Add output of analysis masking average & maximum volume via OSC
+        //      TODO: Add support for outputting averages, medians, and percentiles of these values, similar to editor AGC
 
         if !self.output_osc && !self.output_midi {
             return;
