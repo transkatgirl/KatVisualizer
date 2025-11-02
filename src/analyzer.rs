@@ -748,7 +748,7 @@ impl Masker {
         masking_threshold.iter_mut().for_each(|s| *s = 0.0);
 
         let amplitude_correction_offset = if let Some(listening_volume) = listening_volume {
-            86.0 - listening_volume // Assume the spreading function was calculated for -0dBFS = 86dBSPL
+            listening_volume - 86.0 // Assume the spreading function was calculated for -0dBFS = 86dBSPL
         } else {
             0.0
         };
