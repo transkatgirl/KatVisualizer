@@ -256,8 +256,8 @@ impl Plugin for MyPlugin {
                             });
                             self.midi_notes = [false; 128];
                             self.midi_on = true;
-                            midi_on = true;
                         }
+                        midi_on = true;
 
                         if !self.midi_notes[note] {
                             context.send_event(NoteEvent::NoteOn {
