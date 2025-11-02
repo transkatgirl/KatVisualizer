@@ -639,9 +639,6 @@ impl AnalysisChain {
         left_analyzer: &mut BetterAnalyzer,
         right_analyzer: &mut BetterAnalyzer,
     ) {
-        // TODO: Move this functionality to a separate crate module
-        // TODO: Add support for MIDI over OSC
-
         if !self.output_osc && !self.output_midi {
             return;
         }
