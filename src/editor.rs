@@ -14,6 +14,7 @@ use nih_plug_egui::{
 };
 use parking_lot::{FairMutex, Mutex, RwLock};
 use std::{
+    net::SocketAddr,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -23,6 +24,7 @@ use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS, MAX_PEAK_OUTPUTS,
     MyPlugin, PluginParams, PluginStateInfo, SPECTROGRAM_SLICES,
     analyzer::{BetterSpectrogram, map_value_f32},
+    get_osc_packet_size,
 };
 
 fn calculate_volume_min_max(
@@ -1415,10 +1417,6 @@ pub fn create(
                         if analysis_settings.normalize_amplitude {
                             let old_tone_threshold_phon =
                                 (analysis_settings.output_tone_amplitude_threshold as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
-                            let old_midi_min_phon =
-                                (analysis_settings.midi_pressure_min_amplitude as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
-                            let old_midi_max_phon =
-                                (analysis_settings.midi_pressure_max_amplitude as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
                             let old_min_phon =
                                 (render_settings.min_db as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
                             let old_max_phon =
@@ -1439,10 +1437,6 @@ pub fn create(
                                 update_and_clear(&analysis_settings);
                                 analysis_settings.output_tone_amplitude_threshold =
                                     (old_tone_threshold_phon - analysis_settings.listening_volume) as f32;
-                                analysis_settings.midi_pressure_min_amplitude =
-                                    (old_midi_min_phon - analysis_settings.listening_volume) as f32;
-                                analysis_settings.midi_pressure_max_amplitude =
-                                    (old_midi_max_phon - analysis_settings.listening_volume) as f32;
                                 render_settings.min_db =
                                     (old_min_phon - analysis_settings.listening_volume) as f32;
                                 render_settings.max_db =
@@ -1790,8 +1784,25 @@ pub fn create(
                             }
 
                             if analysis_settings.output_osc {
+                                let packet_size = get_osc_packet_size(&analysis_settings.osc_resource_address_stats, &analysis_settings.osc_resource_address_tones, analysis_settings.output_max_simultaneous_tones);
+                                if packet_size > 1500 {
+                                    if  analysis_settings.osc_socket_address.parse::<SocketAddr>().map(|addr| addr.ip().is_loopback()).unwrap_or(true) {
+                                        ui.colored_label(
+                                            Color32::YELLOW,
+                                            format!("Maximum OSC packet size: {} bytes", packet_size),
+                                        );
+                                    } else {
+                                        ui.colored_label(
+                                            Color32::YELLOW,
+                                            format!("Maximum OSC packet size: {} bytes\nOSC messages may be dropped if your network's MTU is not high enough!", packet_size),
+                                        );
+                                    }
+                                } else {
+                                    ui.label(format!("Maximum OSC packet size: {} bytes", packet_size));
+                                }
+
                                 let address_label = ui
-                                    .label("OSC Server UDP/IP Address:")
+                                    .label("OSC server UDP/IP address:")
                                     .on_hover_text("The UDP/IP address of the OSC server that analysis output will be sent to.");
 
                                 if ui.
@@ -1806,7 +1817,7 @@ pub fn create(
                                 }
 
                                 let message_label_1 = ui
-                                    .label("Tone Data OSC Message Address:")
+                                    .label("Tone data OSC message address:")
                                     .on_hover_text("The OSC address pattern that tone data will be sent under.\n\nThe message format for tone data is [(frequency, pan, volume, signalToMaskRatio)], with tones being listed in order of priority. Frequencies are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), pan ranges from -1 to 1, and signalToMaskRatio is in dB.");
 
                                 if ui.
@@ -1821,8 +1832,8 @@ pub fn create(
                                 }
 
                                 let message_label_2 = ui
-                                    .label("Analysis Statistics Data OSC Message Address:")
-                                    .on_hover_text("The OSC address pattern that analysis statistics data will be sent under.\n\nThe message format for analysis statistics data is (average_masking, average_volume, maximum_volume), with amplitude values being in phon (or dBFS if amplitude normalization is disabled). Analysis statistics are only applicable for the most recent slice of tone data.");
+                                    .label("Analysis statistics OSC message address:")
+                                    .on_hover_text("The OSC address pattern that analysis statistics will be sent under.\n\nThe message format for analysis statistics is (average_masking, average_volume, maximum_volume), with amplitude values being in phon (or dBFS if amplitude normalization is disabled). Analysis statistics are only applicable for the most recent slice of tone data.");
 
                                 if ui.
                                     text_edit_singleline(&mut analysis_settings.osc_resource_address_stats)
@@ -1859,80 +1870,43 @@ pub fn create(
 
                             #[cfg(feature = "midi")]
                             if analysis_settings.output_midi {
-                                if analysis_settings.normalize_amplitude {
-                                    let mut midi_min_phon =
-                                        (analysis_settings.midi_pressure_min_amplitude as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
-                                    let mut midi_max_phon =
-                                        (analysis_settings.midi_pressure_max_amplitude as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
+                                ui.colored_label(
+                                    Color32::YELLOW,
+                                    "Some MIDI software may struggle to handle this plugin's outputs. If you encounter issues, try lowering the number of simultaneous tones or increasing the plugin's buffer size.",
+                                );
 
-                                    if ui
-                                        .add(
-                                            egui::Slider::new(&mut midi_min_phon, 0.0..=100.0)
-                                                .suffix(" phon")
-                                                .step_by(1.0)
-                                                .fixed_decimals(0)
-                                                .text("MIDI note pressure minimum amplitude"),
-                                        )
-                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
-                                        .changed()
-                                    {
-                                        analysis_settings.midi_pressure_min_amplitude =
-                                            (midi_min_phon - analysis_settings.listening_volume) as f32;
-                                        update(&analysis_settings);
-                                        egui_ctx.request_discard("Changed setting");
-                                        return;
-                                    }
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut analysis_settings.midi_pressure_min_amplitude, -100.0..=0.0)
+                                            .clamping(egui::SliderClamping::Never)
+                                            .suffix("dB")
+                                            .step_by(1.0)
+                                            .fixed_decimals(0)
+                                            .text("MIDI note pressure minimum amplitude"),
+                                    )
+                                    .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
+                                    .changed()
+                                {
+                                    update(&analysis_settings);
+                                    egui_ctx.request_discard("Changed setting");
+                                    return;
+                                };
 
-                                    if ui
-                                        .add(
-                                            egui::Slider::new(&mut midi_max_phon, 0.0..=100.0)
-                                                .suffix(" phon")
-                                                .step_by(1.0)
-                                                .fixed_decimals(0)
-                                                .text("MIDI note pressure maximum amplitude"),
-                                        )
-                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
-                                        .changed()
-                                    {
-                                        analysis_settings.midi_pressure_max_amplitude =
-                                            (midi_max_phon - analysis_settings.listening_volume) as f32;
-                                        update(&analysis_settings);
-                                        egui_ctx.request_discard("Changed setting");
-                                    }
-                                } else {
-                                    if ui
-                                        .add(
-                                            egui::Slider::new(&mut analysis_settings.midi_pressure_min_amplitude, -100.0..=0.0)
-                                                .clamping(egui::SliderClamping::Never)
-                                                .suffix("dB")
-                                                .step_by(1.0)
-                                                .fixed_decimals(0)
-                                                .text("MIDI note pressure minimum amplitude"),
-                                        )
-                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
-                                        .changed()
-                                    {
-                                        update(&analysis_settings);
-                                        egui_ctx.request_discard("Changed setting");
-                                        return;
-                                    };
-
-                                    if ui
-                                        .add(
-                                            egui::Slider::new(&mut analysis_settings.midi_pressure_max_amplitude, -100.0..=0.0)
-                                                .clamping(egui::SliderClamping::Never)
-                                                .suffix("dB")
-                                                .step_by(1.0)
-                                                .fixed_decimals(0)
-                                                .text("MIDI note pressure maximum amplitude"),
-                                        )
-                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
-                                        .changed()
-                                    {
-                                        update(&analysis_settings);
-                                        egui_ctx.request_discard("Changed setting");
-                                    };
-                                }
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut analysis_settings.midi_pressure_max_amplitude, -100.0..=0.0)
+                                            .clamping(egui::SliderClamping::Never)
+                                            .suffix("dB")
+                                            .step_by(1.0)
+                                            .fixed_decimals(0)
+                                            .text("MIDI note pressure maximum amplitude"),
+                                    )
+                                    .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
+                                    .changed()
+                                {
+                                    update(&analysis_settings);
+                                    egui_ctx.request_discard("Changed setting");
+                                };
                             }
                         });
 

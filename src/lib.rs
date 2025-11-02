@@ -1018,6 +1018,44 @@ impl AnalysisChain {
     }
 }
 
+fn get_osc_packet_size(stats_address: &str, tones_address: &str, notes: usize) -> usize {
+    let message_data = (0..=notes)
+        .map(|_| {
+            OscType::Array(OscArray {
+                content: vec![
+                    OscType::Float(0.0),
+                    OscType::Float(0.0),
+                    OscType::Float(0.0),
+                    OscType::Float(0.0),
+                ],
+            })
+        })
+        .collect();
+    let packet = OscPacket::Bundle(OscBundle {
+        timetag: OscTime {
+            seconds: 0,
+            fractional: 0,
+        },
+        content: vec![
+            OscPacket::Message(OscMessage {
+                addr: stats_address.to_string(),
+                args: vec![
+                    OscType::Float(0.0),
+                    OscType::Float(0.0),
+                    OscType::Float(0.0),
+                ],
+            }),
+            OscPacket::Message(OscMessage {
+                addr: tones_address.to_string(),
+                args: vec![OscType::Array(OscArray {
+                    content: message_data,
+                })],
+            }),
+        ],
+    });
+    encoder::encode(&packet).unwrap().len()
+}
+
 impl ClapPlugin for MyPlugin {
     const CLAP_ID: &'static str = "com.transkatgirl.katvisualizer";
     const CLAP_DESCRIPTION: Option<&'static str> = None;
