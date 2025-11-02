@@ -686,15 +686,15 @@ impl AnalysisChain {
                                 if addr.ip().is_loopback() {
                                     *addr.ip()
                                 } else {
-                                    Ipv4Addr::new(0, 0, 0, 0)
+                                    Ipv4Addr::UNSPECIFIED
                                 },
                                 0,
                             )),
                             SocketAddr::V6(addr) => SocketAddr::V6(SocketAddrV6::new(
                                 if addr.ip().is_loopback() {
-                                    Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)
+                                    Ipv6Addr::LOCALHOST
                                 } else {
-                                    Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)
+                                    Ipv6Addr::UNSPECIFIED
                                 },
                                 0,
                                 0,
@@ -705,24 +705,25 @@ impl AnalysisChain {
                     };
 
                     if let Some(active_socket) = &mut *socket {
-                        if let Ok(socket_address) = active_socket.local_addr() {
-                            match socket_address {
-                                SocketAddr::V4(addr) => {
-                                    if !socket_address.is_ipv4()
-                                        || socket_address.ip().is_loopback()
-                                            != addr.ip().is_loopback()
-                                        || (addr.ip().is_loopback()
-                                            && socket_address.ip() != *addr.ip())
-                                    {
-                                        *socket = new_socket();
+                        if let Ok(active_address) = active_socket.local_addr() {
+                            if socket_address.ip().is_loopback()
+                                != active_address.ip().is_loopback()
+                            {
+                                *socket = new_socket();
+                            } else {
+                                match socket_address {
+                                    SocketAddr::V4(addr) => {
+                                        if !socket_address.is_ipv4()
+                                            || (addr.ip().is_loopback()
+                                                && socket_address.ip() != *addr.ip())
+                                        {
+                                            *socket = new_socket();
+                                        }
                                     }
-                                }
-                                SocketAddr::V6(addr) => {
-                                    if !socket_address.is_ipv6()
-                                        || socket_address.ip().is_loopback()
-                                            != addr.ip().is_loopback()
-                                    {
-                                        *socket = new_socket();
+                                    SocketAddr::V6(_) => {
+                                        if !socket_address.is_ipv6() {
+                                            *socket = new_socket();
+                                        }
                                     }
                                 }
                             }
