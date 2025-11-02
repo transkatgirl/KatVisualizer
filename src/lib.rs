@@ -62,6 +62,7 @@ pub struct PluginParams {
 
 const MAX_FREQUENCY_BINS: usize = 2048;
 const SPECTROGRAM_SLICES: usize = 8192;
+const MAX_PEAK_OUTPUTS: usize = 512;
 
 impl Default for MyPlugin {
     fn default() -> Self {
@@ -479,7 +480,7 @@ impl AnalysisChain {
             single_input: layout.main_input_channels == NonZero::new(1),
             analyzer_pool: ThreadPool::new(2),
             osc_pool: ThreadPool::new(1),
-            osc_output: Arc::new(Mutex::new(Vec::with_capacity(MAX_FREQUENCY_BINS))),
+            osc_output: Arc::new(Mutex::new(Vec::with_capacity(MAX_PEAK_OUTPUTS))),
             osc_socket: Arc::new(Mutex::new(None)),
         }
     }

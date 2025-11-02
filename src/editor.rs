@@ -20,8 +20,8 @@ use std::{
 use voracious_radix_sort::RadixSort;
 
 use crate::{
-    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS, MyPlugin,
-    PluginParams, PluginStateInfo, SPECTROGRAM_SLICES,
+    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS, MAX_PEAK_OUTPUTS,
+    MyPlugin, PluginParams, PluginStateInfo, SPECTROGRAM_SLICES,
     analyzer::{BetterSpectrogram, map_value_f32},
 };
 
@@ -1701,7 +1701,7 @@ pub fn create(
                             return;
                         }
 
-                        ui.collapsing("Output Options", |ui| {
+                        ui.collapsing("External Outputs", |ui| {
                             ui.colored_label(
                                 Color32::YELLOW,
                                 "Enabling external output requires internal buffering to be disabled.",
@@ -1710,7 +1710,7 @@ pub fn create(
                             if analysis_settings.output_osc || analysis_settings.output_midi {
                                 if ui
                                     .add(
-                                        egui::Slider::new(&mut analysis_settings.output_max_simultaneous_peaks, 1..=512)
+                                        egui::Slider::new(&mut analysis_settings.output_max_simultaneous_peaks, 1..=MAX_PEAK_OUTPUTS)
                                             .suffix(" notes")
                                             .logarithmic(true)
                                             .text("Maximum simultaneous tones"),
