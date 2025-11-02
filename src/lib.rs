@@ -709,7 +709,7 @@ impl AnalysisChain {
                         if socket_address.ip().is_loopback() != active_address.ip().is_loopback() {
                             *socket = new_socket();
                         } else {
-                            match socket_address {
+                            match active_address {
                                 SocketAddr::V4(addr) => {
                                     if !socket_address.is_ipv4()
                                         || (addr.ip().is_loopback()
