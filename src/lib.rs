@@ -650,6 +650,7 @@ impl AnalysisChain {
         );
 
         let mut osc_output = self.osc_output.lock();
+        osc_output.clear();
 
         #[cfg(feature = "midi")]
         let mut enabled_midi_notes = [false; 128];
