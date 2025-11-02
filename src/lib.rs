@@ -9,10 +9,12 @@ use nih_plug::{
 };
 use nih_plug_egui::EguiState;
 use parking_lot::{FairMutex, Mutex, RwLock};
+use rosc::{OscArray, OscBundle, OscMessage, OscPacket, OscTime, OscType, encoder};
 use std::{
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, UdpSocket},
     num::NonZero,
     sync::Arc,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 use threadpool::ThreadPool;
 
@@ -47,7 +49,7 @@ pub struct MyPlugin {
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
     midi_on: bool,
     midi_notes: [bool; 128],
-    analysis_midi_output: Vec<AnalysisBufferMidi>,
+    midi_output: [f32; 128],
     analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
     state_info: Arc<RwLock<Option<PluginStateInfo>>>,
 }
@@ -76,7 +78,7 @@ impl Default for MyPlugin {
             ))),
             midi_on: false,
             midi_notes: [false; 128],
-            analysis_midi_output: Vec::with_capacity(SPECTROGRAM_SLICES * MAX_FREQUENCY_BINS * 2),
+            midi_output: [0.0; 128],
             analysis_frequencies: Arc::new(RwLock::new(Vec::with_capacity(MAX_FREQUENCY_BINS))),
             state_info: Arc::new(RwLock::new(None)),
         }
@@ -235,16 +237,12 @@ impl Plugin for MyPlugin {
                 self.latency_samples = analysis_chain.latency_samples;
             }
 
-            analysis_chain.analyze(
-                buffer,
-                &self.analysis_output,
-                &mut self.analysis_midi_output,
-            );
+            analysis_chain.analyze(buffer, &self.analysis_output, &mut self.midi_output);
 
             drop(lock);
 
             #[cfg(feature = "midi")]
-            for buffer in &self.analysis_midi_output {
+            {
                 if !self.midi_on {
                     context.send_event(NoteEvent::MidiCC {
                         timing: 0,
@@ -256,44 +254,32 @@ impl Plugin for MyPlugin {
                     self.midi_on = true;
                 }
 
-                for (note, pressure) in buffer.notes.iter().enumerate() {
+                let mut midi_on = false;
+                for (note, pressure) in self.midi_output.iter().enumerate() {
                     if *pressure > 0.0 {
+                        midi_on = true;
+
                         if !self.midi_notes[note] {
                             context.send_event(NoteEvent::NoteOn {
-                                timing: buffer.timing,
+                                timing: 0,
                                 voice_id: Some(note as i32),
                                 channel: 0,
                                 note: note as u8,
                                 velocity: *pressure,
                             });
                             self.midi_notes[note] = true;
-                        } else if buffer.use_aftertouch {
+                        } else {
                             context.send_event(NoteEvent::PolyPressure {
-                                timing: buffer.timing,
+                                timing: 0,
                                 voice_id: Some(note as i32),
                                 channel: 0,
                                 note: note as u8,
                                 pressure: *pressure,
                             });
-                        } else {
-                            context.send_event(NoteEvent::NoteOff {
-                                timing: buffer.timing,
-                                voice_id: Some(note as i32),
-                                channel: 0,
-                                note: note as u8,
-                                velocity: 1.0 - *pressure,
-                            });
-                            context.send_event(NoteEvent::NoteOn {
-                                timing: buffer.timing,
-                                voice_id: Some(note as i32),
-                                channel: 0,
-                                note: note as u8,
-                                velocity: *pressure,
-                            });
                         }
                     } else if self.midi_notes[note] {
                         context.send_event(NoteEvent::NoteOff {
-                            timing: buffer.timing,
+                            timing: 0,
                             voice_id: Some(note as i32),
                             channel: 0,
                             note: note as u8,
@@ -302,20 +288,17 @@ impl Plugin for MyPlugin {
                         self.midi_notes[note] = false;
                     }
                 }
-            }
 
-            #[cfg(feature = "midi")]
-            if self.midi_on && self.analysis_midi_output.is_empty() {
-                context.send_event(NoteEvent::MidiCC {
-                    timing: 0,
-                    channel: 0,
-                    cc: ALL_NOTES_OFF,
-                    value: 0.0,
-                });
-                self.midi_on = false;
+                if self.midi_on && !midi_on {
+                    context.send_event(NoteEvent::MidiCC {
+                        timing: 0,
+                        channel: 0,
+                        cc: ALL_NOTES_OFF,
+                        value: 0.0,
+                    });
+                    self.midi_on = false;
+                }
             }
-
-            self.analysis_midi_output.clear();
         }
 
         #[cfg(feature = "mute-output")]
@@ -329,7 +312,7 @@ impl Plugin for MyPlugin {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct AnalysisChainConfig {
     gain: f64,
     listening_volume: f64,
@@ -339,10 +322,12 @@ pub(crate) struct AnalysisChainConfig {
     update_rate_hz: f64,
     latency_offset: Duration,
 
+    output_max_simultaneous_peaks: usize,
+    output_osc: bool,
+    osc_socket_address: String,
+    osc_resource_address: String,
     output_midi: bool,
-    midi_max_simultaneous: u8,
     midi_amplitude_threshold: f32,
-    midi_use_aftertouch: bool,
     midi_pressure_min_amplitude: f32,
     midi_pressure_max_amplitude: f32,
 
@@ -369,10 +354,12 @@ impl Default for AnalysisChainConfig {
             resolution: 512,
             latency_offset: Duration::ZERO,
 
+            output_max_simultaneous_peaks: 24,
+            output_osc: false,
+            osc_socket_address: "127.0.0.1:8000".to_string(),
+            osc_resource_address: "/katvisualizer_output".to_string(),
             output_midi: false,
-            midi_max_simultaneous: 24,
             midi_amplitude_threshold: 30.0 - 86.0,
-            midi_use_aftertouch: true,
             midi_pressure_min_amplitude: 30.0 - 86.0,
             midi_pressure_max_amplitude: 70.0 - 86.0,
 
@@ -394,10 +381,12 @@ pub(crate) struct AnalysisChain {
     right_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
     gain: f64,
     internal_buffering: bool,
+    output_max_simultaneous_peaks: usize,
+    output_osc: bool,
+    osc_socket_address: Arc<String>,
+    osc_resource_address: Arc<String>,
     output_midi: bool,
-    midi_max_simultaneous: u8,
     midi_amplitude_threshold: f32,
-    midi_use_aftertouch: bool,
     midi_pressure_min_amplitude: f32,
     midi_pressure_max_amplitude: f32,
     update_rate: f64,
@@ -409,14 +398,11 @@ pub(crate) struct AnalysisChain {
     chunk_size: usize,
     chunk_duration: Duration,
     single_input: bool,
-    pool: ThreadPool,
+    analyzer_pool: ThreadPool,
+    osc_pool: ThreadPool,
     pub(crate) frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
-}
-
-struct AnalysisBufferMidi {
-    timing: u32,
-    use_aftertouch: bool,
-    notes: [f32; 128],
+    osc_socket: Arc<Mutex<Option<UdpSocket>>>,
+    osc_output: Arc<Mutex<Vec<(f32, f32, f32)>>>,
 }
 
 impl AnalysisChain {
@@ -458,10 +444,12 @@ impl AnalysisChain {
         Self {
             sample_rate,
             internal_buffering: config.internal_buffering,
+            output_max_simultaneous_peaks: config.output_max_simultaneous_peaks,
+            output_osc: config.output_osc,
+            osc_socket_address: Arc::new(config.osc_socket_address.clone()),
+            osc_resource_address: Arc::new(config.osc_resource_address.clone()),
             output_midi: config.output_midi,
-            midi_max_simultaneous: config.midi_max_simultaneous,
             midi_amplitude_threshold: config.midi_amplitude_threshold,
-            midi_use_aftertouch: config.midi_use_aftertouch,
             midi_pressure_min_amplitude: config.midi_pressure_min_amplitude,
             midi_pressure_max_amplitude: config.midi_pressure_max_amplitude,
             latency_samples: if config.internal_buffering {
@@ -485,18 +473,20 @@ impl AnalysisChain {
             chunk_size,
             chunk_duration: Duration::from_secs_f64(chunk_size as f64 / sample_rate as f64),
             single_input: layout.main_input_channels == NonZero::new(1),
-            pool: ThreadPool::new(2),
+            analyzer_pool: ThreadPool::new(2),
+            osc_pool: ThreadPool::new(1),
+            osc_output: Arc::new(Mutex::new(Vec::with_capacity(MAX_FREQUENCY_BINS))),
+            osc_socket: Arc::new(Mutex::new(None)),
         }
     }
     fn analyze(
         &mut self,
         buffer: &mut Buffer,
         output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
-        midi_output: &mut Vec<AnalysisBufferMidi>,
+        midi_output: &mut [f32; 128],
+        //osc_output: &mut (Option<SocketAddr>, Vec<(f32, f32, f32)>),
     ) {
         let mut finished = Instant::now();
-
-        let mut midi_timing = 0;
 
         if self.internal_buffering {
             self.chunker
@@ -519,7 +509,7 @@ impl AnalysisChain {
 
                         analyzer.lock().0.copy_from_slice(buffer);
 
-                        self.pool.execute(move || {
+                        self.analyzer_pool.execute(move || {
                             let mut lock = analyzer.lock();
                             let (ref mut buffer, ref mut analyzer) = *lock;
 
@@ -530,7 +520,7 @@ impl AnalysisChain {
                     if channel_idx == 1 || (channel_idx == 0 && self.single_input) {
                         let (ref mut spectrogram, ref mut metrics) = *output.lock();
 
-                        self.pool.join();
+                        self.analyzer_pool.join();
                         let left_lock = self.left_analyzer.lock();
                         let right_lock = self.right_analyzer.lock();
                         let left_analyzer = &left_lock.1;
@@ -586,7 +576,7 @@ impl AnalysisChain {
                         }
                     }
 
-                    self.pool.execute(move || {
+                    self.analyzer_pool.execute(move || {
                         let mut lock = analyzer.lock();
                         let (ref mut buffer, ref mut analyzer) = *lock;
 
@@ -602,7 +592,7 @@ impl AnalysisChain {
 
             let (left_ref, right_ref) = (self.left_analyzer.clone(), self.right_analyzer.clone());
 
-            self.pool.join();
+            self.analyzer_pool.join();
             let mut left_lock = left_ref.lock();
             let mut right_lock = right_ref.lock();
             let left_analyzer = &mut left_lock.1;
@@ -627,120 +617,209 @@ impl AnalysisChain {
                 }
             });
 
-            #[cfg(feature = "midi")]
-            if self.output_midi {
-                if self.masking {
-                    left_analyzer.remove_masked_components();
-                    right_analyzer.remove_masked_components();
-                }
-
-                midi_output.push(self.generate_midi(
-                    midi_timing,
-                    spectrogram,
-                    left_analyzer,
-                    right_analyzer,
-                ));
-
-                #[allow(unused_assignments)]
-                {
-                    midi_timing += buffer.samples() as u32;
-                }
-            }
+            self.generate_external_output(midi_output, spectrogram, left_analyzer, right_analyzer);
 
             let now = Instant::now();
             metrics.processing = now.duration_since(finished);
             metrics.finished = now;
         }
     }
-    fn generate_midi(
+    fn generate_external_output(
         &mut self,
-        timing: u32,
+        midi_output: &mut [f32; 128],
         spectrogram: &mut BetterSpectrogram,
-        left_analyzer: &BetterAnalyzer,
-        right_analyzer: &BetterAnalyzer,
-    ) -> AnalysisBufferMidi {
+        left_analyzer: &mut BetterAnalyzer,
+        right_analyzer: &mut BetterAnalyzer,
+    ) {
+        if !self.output_osc && !self.output_midi {
+            return;
+        }
+
+        if self.masking {
+            left_analyzer.remove_masked_components();
+            right_analyzer.remove_masked_components();
+        }
+
+        let timestamp = Instant::now();
         let frequencies = self.frequencies.read();
+        let peaks = spectrogram.data[0].peaks(
+            self.midi_amplitude_threshold,
+            self.output_max_simultaneous_peaks,
+            left_analyzer,
+        );
 
-        let mut enabled_notes = [false; 128];
+        let mut osc_output = self.osc_output.lock();
 
-        if self.midi_max_simultaneous != 128 && self.midi_max_simultaneous != 0 {
-            for peak_index in spectrogram.data[0].peaks(
-                self.midi_amplitude_threshold,
-                self.midi_max_simultaneous as usize,
-                left_analyzer,
-            ) {
-                let (_, center, _) = frequencies[peak_index];
-                let note = freq_to_midi_note(center).clamp(0.0, 128.0).round() as usize;
+        #[cfg(feature = "midi")]
+        let mut enabled_midi_notes = [false; 128];
+
+        for (frequency, pan, volume) in peaks {
+            osc_output.push((frequency, pan, volume));
+
+            #[cfg(feature = "midi")]
+            {
+                let note = freq_to_midi_note(frequency).clamp(0.0, 128.0).round() as usize;
                 if note != 128 {
-                    enabled_notes[note] = true;
+                    enabled_midi_notes[note] = true;
                 }
             }
         }
 
-        let mut note_scratchpad: [(f64, f64); 128] = [(0.0, 0.0); 128];
+        drop(osc_output);
 
-        let left = left_analyzer.raw_analysis();
-        let right = right_analyzer.raw_analysis();
+        if self.output_osc {
+            let osc_socket_address = self.osc_socket_address.clone();
+            let osc_resource_address = self.osc_resource_address.clone();
+            let osc_socket = self.osc_socket.clone();
+            let osc_output = self.osc_output.clone();
 
-        let gain_amplitude = dbfs_to_amplitude(self.gain);
+            self.osc_pool.execute(move || {
+                let mut socket = osc_socket.lock();
 
-        for (index, ((_, volume), (_, center, _))) in spectrogram.data[0]
-            .data
-            .iter()
-            .zip(frequencies.iter())
-            .enumerate()
-        {
-            let note = freq_to_midi_note(*center).round() as usize;
+                if let Ok(socket_address) = osc_socket_address.parse() {
+                    let new_socket = || {
+                        UdpSocket::bind(match socket_address {
+                            SocketAddr::V4(addr) => SocketAddr::V4(SocketAddrV4::new(
+                                if addr.ip().is_loopback() {
+                                    *addr.ip()
+                                } else {
+                                    Ipv4Addr::new(0, 0, 0, 0)
+                                },
+                                0,
+                            )),
+                            SocketAddr::V6(addr) => SocketAddr::V6(SocketAddrV6::new(
+                                if addr.ip().is_loopback() {
+                                    Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)
+                                } else {
+                                    Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)
+                                },
+                                0,
+                                0,
+                                0,
+                            )),
+                        })
+                        .ok()
+                    };
 
-            if note > 127 {
-                break;
-            }
+                    if let Some(active_socket) = &mut *socket {
+                        if let Ok(socket_address) = active_socket.local_addr() {
+                            match socket_address {
+                                SocketAddr::V4(addr) => {
+                                    if !socket_address.is_ipv4()
+                                        || socket_address.ip().is_loopback()
+                                            != addr.ip().is_loopback()
+                                        || (addr.ip().is_loopback()
+                                            && socket_address.ip() != *addr.ip())
+                                    {
+                                        *socket = new_socket();
+                                    }
+                                }
+                                SocketAddr::V6(addr) => {
+                                    if !socket_address.is_ipv6()
+                                        || socket_address.ip().is_loopback()
+                                            != addr.ip().is_loopback()
+                                    {
+                                        *socket = new_socket();
+                                    }
+                                }
+                            }
+                        } else {
+                            *socket = new_socket();
+                        }
+                    } else {
+                        *socket = new_socket();
+                    }
 
-            let amplitude = if self.single_input {
-                left[index]
-            } else {
-                left[index] + right[index]
-            } * gain_amplitude;
-
-            if !volume.is_finite() || *volume < spectrogram.data[0].masking[index].1 {
-                continue;
-            }
-
-            note_scratchpad[note].0 += 1.0;
-            note_scratchpad[note].1 += amplitude;
+                    if let Some(socket) = &mut *socket {
+                        let data = osc_output.lock();
+                        let time = SystemTime::now() - timestamp.elapsed();
+                        let packet = OscPacket::Bundle(OscBundle {
+                            timetag: OscTime::try_from(time).unwrap_or(OscTime {
+                                seconds: 0,
+                                fractional: 0,
+                            }),
+                            content: vec![OscPacket::Message(OscMessage {
+                                addr: osc_resource_address.to_string(),
+                                args: vec![OscType::Array(OscArray {
+                                    content: data
+                                        .iter()
+                                        .map(|(f, p, v)| {
+                                            OscType::Array(OscArray {
+                                                content: vec![
+                                                    OscType::Float(*f),
+                                                    OscType::Float(*p),
+                                                    OscType::Float(*v),
+                                                ],
+                                            })
+                                        })
+                                        .collect(),
+                                })],
+                            })],
+                        });
+                        let buf = encoder::encode(&packet).unwrap();
+                        let _ = socket.send_to(&buf, socket_address);
+                    }
+                }
+            });
         }
 
-        let mut notes: [f32; 128] = [0.0; 128];
+        #[cfg(feature = "midi")]
+        if self.output_midi {
+            let mut note_scratchpad: [(f64, f64); 128] = [(0.0, 0.0); 128];
 
-        for (i, (items, volume_sum)) in note_scratchpad.into_iter().enumerate() {
-            if items != 0.0 {
-                let volume = amplitude_to_dbfs(volume_sum / items) as f32;
+            let left = left_analyzer.raw_analysis();
+            let right = right_analyzer.raw_analysis();
 
-                if volume >= self.midi_amplitude_threshold {
-                    notes[i] = map_value_f32(
-                        volume,
-                        self.midi_pressure_min_amplitude,
-                        self.midi_pressure_max_amplitude,
-                        0.0,
-                        1.0,
-                    )
-                    .clamp(0.0, 1.0);
+            let gain_amplitude = dbfs_to_amplitude(self.gain);
+
+            for (index, ((_, volume), (_, center, _))) in spectrogram.data[0]
+                .data
+                .iter()
+                .zip(frequencies.iter())
+                .enumerate()
+            {
+                let note = freq_to_midi_note(*center).round() as usize;
+
+                if note > 127 {
+                    break;
+                }
+
+                let amplitude = if self.single_input {
+                    left[index]
+                } else {
+                    left[index] + right[index]
+                } * gain_amplitude;
+
+                if !volume.is_finite() || *volume < spectrogram.data[0].masking[index].1 {
+                    continue;
+                }
+
+                note_scratchpad[note].0 += 1.0;
+                note_scratchpad[note].1 += amplitude;
+            }
+
+            for (i, (items, volume_sum)) in note_scratchpad.into_iter().enumerate() {
+                if items != 0.0 {
+                    let volume = amplitude_to_dbfs(volume_sum / items) as f32;
+
+                    if volume >= self.midi_amplitude_threshold {
+                        midi_output[i] = map_value_f32(
+                            volume,
+                            self.midi_pressure_min_amplitude,
+                            self.midi_pressure_max_amplitude,
+                            0.0,
+                            1.0,
+                        )
+                        .clamp(0.0, 1.0);
+                    }
                 }
             }
-        }
 
-        if self.midi_max_simultaneous != 128 {
-            for (index, enabled) in enabled_notes.into_iter().enumerate() {
+            for (index, enabled) in enabled_midi_notes.into_iter().enumerate() {
                 if !enabled {
-                    notes[index] = 0.0;
+                    midi_output[index] = 0.0;
                 }
             }
-        }
-
-        AnalysisBufferMidi {
-            timing,
-            use_aftertouch: self.midi_use_aftertouch,
-            notes,
         }
     }
     pub(crate) fn config(&self) -> AnalysisChainConfig {
@@ -755,10 +834,12 @@ impl AnalysisChain {
             normalize_amplitude: self.listening_volume.is_some(),
             masking: self.masking,
             internal_buffering: self.internal_buffering,
+            output_max_simultaneous_peaks: self.output_max_simultaneous_peaks,
+            output_osc: self.output_osc,
+            osc_socket_address: self.osc_socket_address.to_string(),
+            osc_resource_address: self.osc_resource_address.to_string(),
             output_midi: self.output_midi,
-            midi_max_simultaneous: self.midi_max_simultaneous,
             midi_amplitude_threshold: self.midi_amplitude_threshold,
-            midi_use_aftertouch: self.midi_use_aftertouch,
             midi_pressure_min_amplitude: self.midi_pressure_min_amplitude,
             midi_pressure_max_amplitude: self.midi_pressure_max_amplitude,
             update_rate_hz: self.update_rate,
@@ -786,13 +867,16 @@ impl AnalysisChain {
         let old_left_analyzer = self.left_analyzer.lock();
         let old_analyzer_config = old_left_analyzer.1.config();
 
+        self.output_max_simultaneous_peaks = config.output_max_simultaneous_peaks;
+        self.output_osc = config.output_osc;
+        self.osc_socket_address = Arc::new(config.osc_socket_address.clone());
+        self.osc_resource_address = Arc::new(config.osc_resource_address.clone());
         self.output_midi = config.output_midi;
-        self.midi_max_simultaneous = config.midi_max_simultaneous;
         self.midi_amplitude_threshold = config.midi_amplitude_threshold;
-        self.midi_use_aftertouch = config.midi_use_aftertouch;
         self.midi_pressure_min_amplitude = config.midi_pressure_min_amplitude;
         self.midi_pressure_max_amplitude = config.midi_pressure_max_amplitude;
         if config.internal_buffering {
+            self.output_osc = false;
             self.output_midi = false;
         }
 

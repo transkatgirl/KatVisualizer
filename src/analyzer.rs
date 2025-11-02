@@ -545,7 +545,7 @@ impl BetterAnalysis {
         volume_threshold: f32,
         max_count: usize,
         analyzer: &BetterAnalyzer,
-    ) -> impl Iterator<Item = usize> {
+    ) -> impl Iterator<Item = (f32, f32, f32)> {
         self.sorting_scratchpad.clear();
 
         let min = volume_threshold.max(self.min);
@@ -591,7 +591,11 @@ impl BetterAnalysis {
                         self.peak_scratchpad[i] = true;
                     });
 
-                    Some(*i)
+                    Some((
+                        analyzer.frequency_bands[*i].1 as f32,
+                        self.data[*i].0,
+                        self.data[*i].1,
+                    ))
                 } else {
                     None
                 }

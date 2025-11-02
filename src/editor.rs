@@ -1300,8 +1300,8 @@ pub fn create(
                             ui.checkbox(&mut render_settings.show_masking, "Highlight simultaneous masking thresholds");
 
                             if render_settings.show_masking {
-                                ui.label("Masking threshold color:");
-                                ui.color_edit_button_srgba(&mut render_settings.masking_color);
+                                let label = ui.label("Masking threshold color:");
+                                ui.color_edit_button_srgba(&mut render_settings.masking_color).labelled_by(label.id);
                             }
                         }
 
@@ -1531,7 +1531,7 @@ pub fn create(
                         {
                             let ui = &mut frame.content_ui;
 
-                            ui.label("Frequency range");
+                            let label = ui.label("Frequency range");
 
                             if ui
                                 .add(
@@ -1539,6 +1539,7 @@ pub fn create(
                                         .suffix("hz")
                                         .fixed_decimals(0),
                                 )
+                                .labelled_by(label.id)
                                 .changed()
                             {
                                 if analysis_settings.start_frequency < 0.0 {
@@ -1561,6 +1562,7 @@ pub fn create(
                                         .suffix("hz")
                                         .fixed_decimals(0),
                                 )
+                                .labelled_by(label.id)
                                 .changed()
                             {
                                 if analysis_settings.start_frequency < 0.0 {
@@ -1700,170 +1702,205 @@ pub fn create(
                             return;
                         }
 
-                        #[cfg(feature = "midi")]
-                        if ui
-                            .checkbox(
-                                &mut analysis_settings.output_midi,
-                                "Output analysis as MIDI",
-                            )
-                            .on_hover_text("If this is enabled, the plugin will use analysis data to generate a MIDI output, which can then be used as an input for alternative visualization methods.\n\nNote: In order to ensure accurate note timestamps, MIDI output requires internal buffering to be disabled. If you would like to change the minimum note length, you can do so by adjusting the plugin's buffer size.")
-                            .changed()
-                        {
-                            if analysis_settings.output_midi {
-                                analysis_settings.internal_buffering = false;
-                                analysis_settings.normalize_amplitude = true;
-                                analysis_settings.masking = true;
-                                analysis_settings.erb_time_resolution = false;
-                                analysis_settings.q_time_resolution = 17.30993;
+                        ui.collapsing("Output Options", |ui| {
+                            if analysis_settings.output_osc || analysis_settings.output_midi {
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut analysis_settings.output_max_simultaneous_peaks, 1..=128)
+                                            .suffix(" notes")
+                                            .text("Maximum simultaneous tones"),
+                                    )
+                                    .on_hover_text("This setting adjusts the maximum number of simultaneous tones output by the plugin.\nValid tones are prioritized by their distance from the masking threshold, or if masking data is not available, their perceptual amplitude. If amplitude normalization is also disabled, notes will then be prioritized based on absolute amplitude.")
+                                    .changed()
+                                {
+                                    update(&analysis_settings);
+                                    egui_ctx.request_discard("Changed setting");
+                                    return;
+                                };
                             }
-                            update(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        }
-
-                        #[cfg(feature = "midi")]
-                        if analysis_settings.output_midi {
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut analysis_settings.midi_max_simultaneous, 1..=128)
-                                        .suffix(" notes")
-                                        .text("Maximum simultaneous MIDI events"),
-                                )
-                                .on_hover_text("This setting adjusts the maximum number of simultaneous MIDI notes output by the plugin.\nValid notes are prioritized by their distance from the masking threshold, or if masking data is not available, their perceptual amplitude. If amplitude normalization is also disabled, notes will then be prioritized based on absolute amplitude.")
-                                .changed()
-                            {
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            };
 
                             if ui
                                 .checkbox(
-                                    &mut analysis_settings.midi_use_aftertouch,
-                                    "Use MIDI aftertouch events",
+                                    &mut analysis_settings.output_osc,
+                                    "Output analysis via OSC",
                                 )
-                                .on_hover_text("If this is enabled, this plugin will output MIDI aftertouch events when an active note's amplitude is updated.\nIf this is disabled, active notes will always be toggled when new amplitude data is available.")
+                                .on_hover_text("If this is enabled, the plugin will output analysis data via OSC, which can then be used as an input for alternative visualization methods.\n\nNote: In order to ensure accurate timestamps, external output requires internal buffering to be disabled. If you would like to change the update frequency, you can do so by adjusting the plugin's buffer size.")
                                 .changed()
                             {
+                                if analysis_settings.output_osc {
+                                    analysis_settings.internal_buffering = false;
+                                    analysis_settings.normalize_amplitude = true;
+                                    analysis_settings.masking = true;
+                                }
                                 update(&analysis_settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
                             }
 
-                            if analysis_settings.normalize_amplitude {
-                                let mut midi_threshold_phon =
-                                    (analysis_settings.midi_amplitude_threshold as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
-                                let mut midi_min_phon =
-                                    (analysis_settings.midi_pressure_min_amplitude as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
-                                let mut midi_max_phon =
-                                    (analysis_settings.midi_pressure_max_amplitude as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
+                            if analysis_settings.output_osc {
+                                let address_label = ui.label("OSC Server UDP/IP Address:");
 
-                                if ui
-                                    .add(
-                                        egui::Slider::new(&mut midi_threshold_phon, 0.0..=100.0)
-                                            .suffix(" phon")
-                                            .step_by(1.0)
-                                            .fixed_decimals(0)
-                                            .text("MIDI note amplitude threshold"),
-                                    )
-                                    .on_hover_text("This setting adjusts the minimum amplitude necessary for a note to be considered valid. Notes with an amplitude below this threshold will always be considered inactive, regardless of the note limit.")
+                                if ui.
+                                    text_edit_singleline(&mut analysis_settings.osc_socket_address)
+                                    .labelled_by(address_label.id)
+                                    .on_hover_text("The UDP/IP address of the OSC server that analysis output will be sent to.")
                                     .changed()
                                 {
-                                    analysis_settings.midi_amplitude_threshold =
-                                        (midi_threshold_phon - analysis_settings.listening_volume) as f32;
                                     update(&analysis_settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
                                 }
 
-                                if ui
-                                    .add(
-                                        egui::Slider::new(&mut midi_min_phon, 0.0..=100.0)
-                                            .suffix(" phon")
-                                            .step_by(1.0)
-                                            .fixed_decimals(0)
-                                            .text("MIDI note pressure minimum amplitude"),
-                                    )
-                                    .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
+                                let message_label = ui.label("OSC Message Address:");
+
+                                if ui.
+                                    text_edit_singleline(&mut analysis_settings.osc_resource_address)
+                                    .labelled_by(message_label.id)
+                                    .on_hover_text("The OSC address pattern that analysis output will be sent under.")
                                     .changed()
                                 {
-                                    analysis_settings.midi_pressure_min_amplitude =
-                                        (midi_min_phon - analysis_settings.listening_volume) as f32;
                                     update(&analysis_settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
                                 }
-
-                                if ui
-                                    .add(
-                                        egui::Slider::new(&mut midi_max_phon, 0.0..=100.0)
-                                            .suffix(" phon")
-                                            .step_by(1.0)
-                                            .fixed_decimals(0)
-                                            .text("MIDI note pressure maximum amplitude"),
-                                    )
-                                    .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
-                                    .changed()
-                                {
-                                    analysis_settings.midi_pressure_max_amplitude =
-                                        (midi_max_phon - analysis_settings.listening_volume) as f32;
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                }
-                            } else {
-                                if ui
-                                    .add(
-                                        egui::Slider::new(&mut analysis_settings.midi_amplitude_threshold, -100.0..=0.0)
-                                            .clamping(egui::SliderClamping::Never)
-                                            .suffix("dB")
-                                            .step_by(1.0)
-                                            .fixed_decimals(0)
-                                            .text("MIDI note amplitude threshold"),
-                                    )
-                                    .on_hover_text("This setting adjusts the minimum amplitude necessary for a note to be considered valid. Notes with an amplitude below this threshold will always be considered inactive, regardless of the note limit.")
-                                    .changed()
-                                {
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                };
-
-                                if ui
-                                    .add(
-                                        egui::Slider::new(&mut analysis_settings.midi_pressure_min_amplitude, -100.0..=0.0)
-                                            .clamping(egui::SliderClamping::Never)
-                                            .suffix("dB")
-                                            .step_by(1.0)
-                                            .fixed_decimals(0)
-                                            .text("MIDI note pressure minimum amplitude"),
-                                    )
-                                    .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
-                                    .changed()
-                                {
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                };
-
-                                if ui
-                                    .add(
-                                        egui::Slider::new(&mut analysis_settings.midi_pressure_max_amplitude, -100.0..=0.0)
-                                            .clamping(egui::SliderClamping::Never)
-                                            .suffix("dB")
-                                            .step_by(1.0)
-                                            .fixed_decimals(0)
-                                            .text("MIDI note pressure maximum amplitude"),
-                                    )
-                                    .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
-                                    .changed()
-                                {
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                };
                             }
-                        }
+
+                            #[cfg(feature = "midi")]
+                            if ui
+                                .checkbox(
+                                    &mut analysis_settings.output_midi,
+                                    "Output analysis as MIDI",
+                                )
+                                .on_hover_text("If this is enabled, the plugin will use analysis data to generate a MIDI output, which can then be used as an input for alternative visualization methods.\n\nNote: In order to ensure accurate timestamps, external output requires internal buffering to be disabled. If you would like to change the update frequency, you can do so by adjusting the plugin's buffer size.")
+                                .changed()
+                            {
+                                if analysis_settings.output_midi {
+                                    analysis_settings.internal_buffering = false;
+                                    analysis_settings.normalize_amplitude = true;
+                                    analysis_settings.masking = true;
+                                    analysis_settings.erb_time_resolution = false;
+                                    analysis_settings.q_time_resolution = 17.30993;
+                                }
+                                update(&analysis_settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            }
+
+                            #[cfg(feature = "midi")]
+                            if analysis_settings.output_midi {
+                                if analysis_settings.normalize_amplitude {
+                                    let mut midi_threshold_phon =
+                                        (analysis_settings.midi_amplitude_threshold as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
+                                    let mut midi_min_phon =
+                                        (analysis_settings.midi_pressure_min_amplitude as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
+                                    let mut midi_max_phon =
+                                        (analysis_settings.midi_pressure_max_amplitude as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
+
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut midi_threshold_phon, 0.0..=100.0)
+                                                .suffix(" phon")
+                                                .step_by(1.0)
+                                                .fixed_decimals(0)
+                                                .text("MIDI note amplitude threshold"),
+                                        )
+                                        .on_hover_text("This setting adjusts the minimum amplitude necessary for a note to be considered valid. Notes with an amplitude below this threshold will always be considered inactive, regardless of the note limit.")
+                                        .changed()
+                                    {
+                                        analysis_settings.midi_amplitude_threshold =
+                                            (midi_threshold_phon - analysis_settings.listening_volume) as f32;
+                                        update(&analysis_settings);
+                                        egui_ctx.request_discard("Changed setting");
+                                        return;
+                                    }
+
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut midi_min_phon, 0.0..=100.0)
+                                                .suffix(" phon")
+                                                .step_by(1.0)
+                                                .fixed_decimals(0)
+                                                .text("MIDI note pressure minimum amplitude"),
+                                        )
+                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
+                                        .changed()
+                                    {
+                                        analysis_settings.midi_pressure_min_amplitude =
+                                            (midi_min_phon - analysis_settings.listening_volume) as f32;
+                                        update(&analysis_settings);
+                                        egui_ctx.request_discard("Changed setting");
+                                        return;
+                                    }
+
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut midi_max_phon, 0.0..=100.0)
+                                                .suffix(" phon")
+                                                .step_by(1.0)
+                                                .fixed_decimals(0)
+                                                .text("MIDI note pressure maximum amplitude"),
+                                        )
+                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
+                                        .changed()
+                                    {
+                                        analysis_settings.midi_pressure_max_amplitude =
+                                            (midi_max_phon - analysis_settings.listening_volume) as f32;
+                                        update(&analysis_settings);
+                                        egui_ctx.request_discard("Changed setting");
+                                    }
+                                } else {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut analysis_settings.midi_amplitude_threshold, -100.0..=0.0)
+                                                .clamping(egui::SliderClamping::Never)
+                                                .suffix("dB")
+                                                .step_by(1.0)
+                                                .fixed_decimals(0)
+                                                .text("MIDI note amplitude threshold"),
+                                        )
+                                        .on_hover_text("This setting adjusts the minimum amplitude necessary for a note to be considered valid. Notes with an amplitude below this threshold will always be considered inactive, regardless of the note limit.")
+                                        .changed()
+                                    {
+                                        update(&analysis_settings);
+                                        egui_ctx.request_discard("Changed setting");
+                                        return;
+                                    };
+
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut analysis_settings.midi_pressure_min_amplitude, -100.0..=0.0)
+                                                .clamping(egui::SliderClamping::Never)
+                                                .suffix("dB")
+                                                .step_by(1.0)
+                                                .fixed_decimals(0)
+                                                .text("MIDI note pressure minimum amplitude"),
+                                        )
+                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
+                                        .changed()
+                                    {
+                                        update(&analysis_settings);
+                                        egui_ctx.request_discard("Changed setting");
+                                        return;
+                                    };
+
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut analysis_settings.midi_pressure_max_amplitude, -100.0..=0.0)
+                                                .clamping(egui::SliderClamping::Never)
+                                                .suffix("dB")
+                                                .step_by(1.0)
+                                                .fixed_decimals(0)
+                                                .text("MIDI note pressure maximum amplitude"),
+                                        )
+                                        .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
+                                        .changed()
+                                    {
+                                        update(&analysis_settings);
+                                        egui_ctx.request_discard("Changed setting");
+                                    };
+                                }
+                            }
+                        });
 
                         if ui.button("Reset Analysis Options").clicked() {
                             *analysis_settings = AnalysisChainConfig::default();
@@ -1878,6 +1915,8 @@ pub fn create(
                             update_and_clear(&analysis_settings);
                         }
                     });
+
+
                 });
 
             *shared_state.last_frame.lock() = Instant::now();
