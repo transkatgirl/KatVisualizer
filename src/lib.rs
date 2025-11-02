@@ -639,7 +639,6 @@ impl AnalysisChain {
         // TODO: Add support for MIDI over OSC
         // TODO: Add output of analysis masking average & maximum volume via OSC
         // TODO: Add OSC output AGC
-        // TODO: Add support for outputting full analysis slice via OSC?
 
         if !self.output_osc && !self.output_midi {
             return;
