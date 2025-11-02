@@ -1738,7 +1738,9 @@ pub fn create(
                             }
 
                             if analysis_settings.output_osc {
-                                let address_label = ui.label("OSC Server UDP/IP Address:");
+                                let address_label = ui
+                                    .label("OSC Server UDP/IP Address:")
+                                    .on_hover_text("The UDP/IP address of the OSC server that analysis output will be sent to.");
 
                                 if ui.
                                     text_edit_singleline(&mut analysis_settings.osc_socket_address)
@@ -1751,7 +1753,9 @@ pub fn create(
                                     return;
                                 }
 
-                                let message_label = ui.label("OSC Message Address:");
+                                let message_label = ui
+                                    .label("OSC Message Address:")
+                                    .on_hover_text("The OSC address pattern that analysis output will be sent under.");
 
                                 if ui.
                                     text_edit_singleline(&mut analysis_settings.osc_resource_address)
@@ -1769,7 +1773,7 @@ pub fn create(
                             if ui
                                 .checkbox(
                                     &mut analysis_settings.output_midi,
-                                    "Output analysis as MIDI",
+                                    "Output analysis via MIDI",
                                 )
                                 .on_hover_text("If this is enabled, the plugin will use analysis data to generate a MIDI output, which can then be used as an input for alternative visualization methods.\n\nNote: In order to ensure accurate timestamps, external output requires internal buffering to be disabled. If you would like to change the update frequency, you can do so by adjusting the plugin's buffer size.")
                                 .changed()
