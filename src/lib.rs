@@ -384,7 +384,7 @@ pub(crate) struct AnalysisChain {
     internal_buffering: bool,
     output_max_simultaneous_peaks: usize,
     output_osc: bool,
-    osc_socket_address: Arc<String>,
+    osc_socket_address: String,
     osc_resource_address: Arc<String>,
     output_midi: bool,
     midi_amplitude_threshold: f32,
@@ -447,7 +447,7 @@ impl AnalysisChain {
             internal_buffering: config.internal_buffering,
             output_max_simultaneous_peaks: config.output_max_simultaneous_peaks,
             output_osc: config.output_osc,
-            osc_socket_address: Arc::new(config.osc_socket_address.clone()),
+            osc_socket_address: config.osc_socket_address.clone(),
             osc_resource_address: Arc::new(config.osc_resource_address.clone()),
             output_midi: config.output_midi,
             midi_amplitude_threshold: config.midi_amplitude_threshold,
@@ -669,114 +669,111 @@ impl AnalysisChain {
 
         drop(osc_output);
 
-        if self.output_osc {
-            let listening_volume = self.listening_volume.map(|l| l as f32);
-            let osc_socket_address = self.osc_socket_address.clone();
+        if self.output_osc
+            && let Ok(socket_address) = self.osc_socket_address.parse()
+        {
             let osc_resource_address = self.osc_resource_address.clone();
             let osc_socket = self.osc_socket.clone();
             let osc_output = self.osc_output.clone();
+            let listening_volume = self.listening_volume.map(|l| l as f32);
 
             self.osc_pool.execute(move || {
                 let mut socket = osc_socket.lock();
 
-                if let Ok(socket_address) = osc_socket_address.parse() {
-                    let new_socket = || {
-                        UdpSocket::bind(match socket_address {
-                            SocketAddr::V4(addr) => SocketAddr::V4(SocketAddrV4::new(
-                                if addr.ip().is_loopback() {
-                                    *addr.ip()
-                                } else {
-                                    Ipv4Addr::UNSPECIFIED
-                                },
-                                0,
-                            )),
-                            SocketAddr::V6(addr) => SocketAddr::V6(SocketAddrV6::new(
-                                if addr.ip().is_loopback() {
-                                    Ipv6Addr::LOCALHOST
-                                } else {
-                                    Ipv6Addr::UNSPECIFIED
-                                },
-                                0,
-                                0,
-                                0,
-                            )),
-                        })
-                        .ok()
-                    };
-
-                    if let Some(active_socket) = &mut *socket {
-                        if let Ok(active_address) = active_socket.local_addr() {
-                            if socket_address.ip().is_loopback()
-                                != active_address.ip().is_loopback()
-                            {
-                                *socket = new_socket();
+                let new_socket = || {
+                    UdpSocket::bind(match socket_address {
+                        SocketAddr::V4(addr) => SocketAddr::V4(SocketAddrV4::new(
+                            if addr.ip().is_loopback() {
+                                *addr.ip()
                             } else {
-                                match socket_address {
-                                    SocketAddr::V4(addr) => {
-                                        if !socket_address.is_ipv4()
-                                            || (addr.ip().is_loopback()
-                                                && socket_address.ip() != *addr.ip())
-                                        {
-                                            *socket = new_socket();
-                                        }
+                                Ipv4Addr::UNSPECIFIED
+                            },
+                            0,
+                        )),
+                        SocketAddr::V6(addr) => SocketAddr::V6(SocketAddrV6::new(
+                            if addr.ip().is_loopback() {
+                                Ipv6Addr::LOCALHOST
+                            } else {
+                                Ipv6Addr::UNSPECIFIED
+                            },
+                            0,
+                            0,
+                            0,
+                        )),
+                    })
+                    .ok()
+                };
+
+                if let Some(active_socket) = &mut *socket {
+                    if let Ok(active_address) = active_socket.local_addr() {
+                        if socket_address.ip().is_loopback() != active_address.ip().is_loopback() {
+                            *socket = new_socket();
+                        } else {
+                            match socket_address {
+                                SocketAddr::V4(addr) => {
+                                    if !socket_address.is_ipv4()
+                                        || (addr.ip().is_loopback()
+                                            && socket_address.ip() != *addr.ip())
+                                    {
+                                        *socket = new_socket();
                                     }
-                                    SocketAddr::V6(_) => {
-                                        if !socket_address.is_ipv6() {
-                                            *socket = new_socket();
-                                        }
+                                }
+                                SocketAddr::V6(_) => {
+                                    if !socket_address.is_ipv6() {
+                                        *socket = new_socket();
                                     }
                                 }
                             }
-                        } else {
-                            *socket = new_socket();
                         }
                     } else {
                         *socket = new_socket();
                     }
+                } else {
+                    *socket = new_socket();
+                }
 
-                    if let Some(socket) = &mut *socket {
-                        let data = osc_output.lock();
-                        let time = SystemTime::now() - timestamp.elapsed();
-                        let message_data = if let Some(listening_volume) = listening_volume {
-                            data.iter()
-                                .map(|(f, p, v)| {
-                                    OscType::Array(OscArray {
-                                        content: vec![
-                                            OscType::Float(*f),
-                                            OscType::Float(*p),
-                                            OscType::Float(*v + listening_volume),
-                                        ],
-                                    })
+                if let Some(socket) = &mut *socket {
+                    let data = osc_output.lock();
+                    let time = SystemTime::now() - timestamp.elapsed();
+                    let message_data = if let Some(listening_volume) = listening_volume {
+                        data.iter()
+                            .map(|(f, p, v)| {
+                                OscType::Array(OscArray {
+                                    content: vec![
+                                        OscType::Float(*f),
+                                        OscType::Float(*p),
+                                        OscType::Float(*v + listening_volume),
+                                    ],
                                 })
-                                .collect()
-                        } else {
-                            data.iter()
-                                .map(|(f, p, v)| {
-                                    OscType::Array(OscArray {
-                                        content: vec![
-                                            OscType::Float(*f),
-                                            OscType::Float(*p),
-                                            OscType::Float(*v),
-                                        ],
-                                    })
+                            })
+                            .collect()
+                    } else {
+                        data.iter()
+                            .map(|(f, p, v)| {
+                                OscType::Array(OscArray {
+                                    content: vec![
+                                        OscType::Float(*f),
+                                        OscType::Float(*p),
+                                        OscType::Float(*v),
+                                    ],
                                 })
-                                .collect()
-                        };
-                        let packet = OscPacket::Bundle(OscBundle {
-                            timetag: OscTime::try_from(time).unwrap_or(OscTime {
-                                seconds: 0,
-                                fractional: 0,
-                            }),
-                            content: vec![OscPacket::Message(OscMessage {
-                                addr: osc_resource_address.to_string(),
-                                args: vec![OscType::Array(OscArray {
-                                    content: message_data,
-                                })],
+                            })
+                            .collect()
+                    };
+                    let packet = OscPacket::Bundle(OscBundle {
+                        timetag: OscTime::try_from(time).unwrap_or(OscTime {
+                            seconds: 0,
+                            fractional: 0,
+                        }),
+                        content: vec![OscPacket::Message(OscMessage {
+                            addr: osc_resource_address.to_string(),
+                            args: vec![OscType::Array(OscArray {
+                                content: message_data,
                             })],
-                        });
-                        let buf = encoder::encode(&packet).unwrap();
-                        let _ = socket.send_to(&buf, socket_address);
-                    }
+                        })],
+                    });
+                    let buf = encoder::encode(&packet).unwrap();
+                    let _ = socket.send_to(&buf, socket_address);
                 }
             });
         }
@@ -887,7 +884,7 @@ impl AnalysisChain {
 
         self.output_max_simultaneous_peaks = config.output_max_simultaneous_peaks;
         self.output_osc = config.output_osc;
-        self.osc_socket_address = Arc::new(config.osc_socket_address.clone());
+        self.osc_socket_address = config.osc_socket_address.clone();
         self.osc_resource_address = Arc::new(config.osc_resource_address.clone());
         self.output_midi = config.output_midi;
         self.midi_amplitude_threshold = config.midi_amplitude_threshold;
