@@ -136,7 +136,7 @@ impl BetterAnalyzer {
     pub fn clear_buffers(&mut self) {
         self.transform.reset();
     }
-    pub fn analyze(&mut self, samples: impl Iterator<Item = f64>) {
+    pub fn analyze(&mut self, samples: impl Iterator<Item = f64>, listening_volume: Option<f64>) {
         self.transform.analyze(samples);
 
         /*let flatness = if spectrum.len() > 128 {
@@ -148,6 +148,7 @@ impl BetterAnalyzer {
         if self.config.masking {
             self.masker.calculate_masking_threshold(
                 self.transform.spectrum_data.iter().copied(),
+                listening_volume,
                 0.0,
                 &mut self.masking,
             );
@@ -740,10 +741,17 @@ impl Masker {
     fn calculate_masking_threshold(
         &self,
         spectrum: impl Iterator<Item = f64>,
+        listening_volume: Option<f64>,
         flatness: f64,
         masking_threshold: &mut [f64],
     ) {
         masking_threshold.iter_mut().for_each(|s| *s = 0.0);
+
+        let amplitude_correction_offset = if let Some(listening_volume) = listening_volume {
+            86.0 - listening_volume // Assume the spreading function was calculated for -0dBFS = 86dBSPL
+        } else {
+            0.0
+        };
 
         for (i, component) in spectrum.enumerate() {
             let amplitude = component;
@@ -757,7 +765,8 @@ impl Masker {
 
             let (lower_spread, upper_spread, simultaneous) = (
                 27.0,
-                22.0 + (230.0 / frequency).min(10.0) - 0.2 * amplitude_db,
+                22.0 + (230.0 / frequency).min(10.0)
+                    - 0.2 * (amplitude_db + amplitude_correction_offset),
                 27.0,
             );
 

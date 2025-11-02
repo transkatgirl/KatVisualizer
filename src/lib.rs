@@ -514,13 +514,14 @@ impl AnalysisChain {
                         let mut lock = self.left_analyzer.lock();
                         let (ref _buffer, ref mut analyzer) = *lock;
 
-                        analyzer.analyze(buffer.iter().map(|s| *s as f64));
+                        analyzer.analyze(buffer.iter().map(|s| *s as f64), self.listening_volume);
                     } else {
                         let analyzer = if channel_idx == 0 {
                             self.left_analyzer.clone()
                         } else {
                             self.right_analyzer.clone()
                         };
+                        let listening_volume = self.listening_volume;
 
                         analyzer.lock().0.copy_from_slice(buffer);
 
@@ -528,7 +529,7 @@ impl AnalysisChain {
                             let mut lock = analyzer.lock();
                             let (ref mut buffer, ref mut analyzer) = *lock;
 
-                            analyzer.analyze(buffer.iter().map(|s| *s as f64));
+                            analyzer.analyze(buffer.iter().map(|s| *s as f64), listening_volume);
                         });
                     }
 
@@ -572,7 +573,10 @@ impl AnalysisChain {
                 let mut lock = self.left_analyzer.lock();
                 let (ref _buffer, ref mut analyzer) = *lock;
 
-                analyzer.analyze(buffer.as_slice()[0].iter().map(|s| *s as f64));
+                analyzer.analyze(
+                    buffer.as_slice()[0].iter().map(|s| *s as f64),
+                    self.listening_volume,
+                );
             } else {
                 for (channel_idx, buffer) in buffer.as_slice().iter().enumerate() {
                     let analyzer = if channel_idx == 0 {
@@ -591,11 +595,13 @@ impl AnalysisChain {
                         }
                     }
 
+                    let listening_volume = self.listening_volume;
+
                     self.analyzer_pool.execute(move || {
                         let mut lock = analyzer.lock();
                         let (ref mut buffer, ref mut analyzer) = *lock;
 
-                        analyzer.analyze(buffer.iter().map(|s| *s as f64));
+                        analyzer.analyze(buffer.iter().map(|s| *s as f64), listening_volume);
                     });
                 }
             }
