@@ -1702,11 +1702,17 @@ pub fn create(
                         }
 
                         ui.collapsing("Output Options", |ui| {
+                            ui.colored_label(
+                                Color32::YELLOW,
+                                "Enabling external output requires internal buffering to be disabled.",
+                            );
+
                             if analysis_settings.output_osc || analysis_settings.output_midi {
                                 if ui
                                     .add(
-                                        egui::Slider::new(&mut analysis_settings.output_max_simultaneous_peaks, 1..=128)
+                                        egui::Slider::new(&mut analysis_settings.output_max_simultaneous_peaks, 1..=512)
                                             .suffix(" notes")
+                                            .logarithmic(true)
                                             .text("Maximum simultaneous tones"),
                                     )
                                     .on_hover_text("This setting adjusts the maximum number of simultaneous tones output by the plugin.\nValid tones are prioritized by their distance from the masking threshold, or if masking data is not available, their perceptual amplitude. If amplitude normalization is also disabled, notes will then be prioritized based on absolute amplitude.")
@@ -1723,7 +1729,7 @@ pub fn create(
                                     &mut analysis_settings.output_osc,
                                     "Output analysis via OSC",
                                 )
-                                .on_hover_text("If this is enabled, the plugin will output analysis data via OSC, which can then be used as an input for alternative visualization methods.\n\nNote: In order to ensure accurate timestamps, external output requires internal buffering to be disabled. If you would like to change the update frequency, you can do so by adjusting the plugin's buffer size.")
+                                .on_hover_text("If this is enabled, the plugin will output analysis data via OSC, which can then be used as an input for alternative visualization methods.\n\nThe message output format is [(frequency, pan, volume)], with tones being listed in order of priority. Frequencies are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), and pan ranges from -1 to 1.")
                                 .changed()
                             {
                                 if analysis_settings.output_osc {
@@ -1774,7 +1780,7 @@ pub fn create(
                                     &mut analysis_settings.output_midi,
                                     "Output analysis via MIDI",
                                 )
-                                .on_hover_text("If this is enabled, the plugin will use analysis data to generate a MIDI output, which can then be used as an input for alternative visualization methods.\n\nNote: In order to ensure accurate timestamps, external output requires internal buffering to be disabled. If you would like to change the update frequency, you can do so by adjusting the plugin's buffer size.")
+                                .on_hover_text("If this is enabled, the plugin will use analysis data to generate a MIDI output, which can then be used as an input for alternative visualization methods.")
                                 .changed()
                             {
                                 if analysis_settings.output_midi {

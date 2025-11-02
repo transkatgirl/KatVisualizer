@@ -670,6 +670,7 @@ impl AnalysisChain {
         drop(osc_output);
 
         if self.output_osc {
+            let listening_volume = self.listening_volume.map(|l| l as f32);
             let osc_socket_address = self.osc_socket_address.clone();
             let osc_resource_address = self.osc_resource_address.clone();
             let osc_socket = self.osc_socket.clone();
@@ -735,6 +736,31 @@ impl AnalysisChain {
                     if let Some(socket) = &mut *socket {
                         let data = osc_output.lock();
                         let time = SystemTime::now() - timestamp.elapsed();
+                        let message_data = if let Some(listening_volume) = listening_volume {
+                            data.iter()
+                                .map(|(f, p, v)| {
+                                    OscType::Array(OscArray {
+                                        content: vec![
+                                            OscType::Float(*f),
+                                            OscType::Float(*p),
+                                            OscType::Float(*v + listening_volume),
+                                        ],
+                                    })
+                                })
+                                .collect()
+                        } else {
+                            data.iter()
+                                .map(|(f, p, v)| {
+                                    OscType::Array(OscArray {
+                                        content: vec![
+                                            OscType::Float(*f),
+                                            OscType::Float(*p),
+                                            OscType::Float(*v),
+                                        ],
+                                    })
+                                })
+                                .collect()
+                        };
                         let packet = OscPacket::Bundle(OscBundle {
                             timetag: OscTime::try_from(time).unwrap_or(OscTime {
                                 seconds: 0,
@@ -743,18 +769,7 @@ impl AnalysisChain {
                             content: vec![OscPacket::Message(OscMessage {
                                 addr: osc_resource_address.to_string(),
                                 args: vec![OscType::Array(OscArray {
-                                    content: data
-                                        .iter()
-                                        .map(|(f, p, v)| {
-                                            OscType::Array(OscArray {
-                                                content: vec![
-                                                    OscType::Float(*f),
-                                                    OscType::Float(*p),
-                                                    OscType::Float(*v),
-                                                ],
-                                            })
-                                        })
-                                        .collect(),
+                                    content: message_data,
                                 })],
                             })],
                         });
