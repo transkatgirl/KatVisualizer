@@ -635,6 +635,9 @@ impl AnalysisChain {
         left_analyzer: &mut BetterAnalyzer,
         right_analyzer: &mut BetterAnalyzer,
     ) {
+        // TODO: Add support for MIDI over OSC
+        // TODO: Add output of analysis masking average & maximum volume via OSC
+
         if !self.output_osc && !self.output_midi {
             return;
         }
