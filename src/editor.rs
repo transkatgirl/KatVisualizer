@@ -1477,9 +1477,8 @@ pub fn create(
                             .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows.\nIf this is enabled, the plugin maintains its own buffer of samples, allowing the number of overlapping windows per second to be changed by the user. This adds a small amount of latency, which is reported to the plugin's host so that it can be compensated for.\nIf this is disabled, the number of overlapping windows per second is determined by the buffer size set by the host.")
                             .changed()
                         {
-                            if analysis_settings.output_midi {
-                                analysis_settings.output_midi = false;
-                            }
+                            analysis_settings.output_osc = false;
+                            analysis_settings.output_midi = false;
                             update(&analysis_settings);
                             egui_ctx.request_discard("Changed setting");
                             return;
