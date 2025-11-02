@@ -1807,12 +1807,12 @@ pub fn create(
 
                                 let message_label_1 = ui
                                     .label("Tone Data OSC Message Address:")
-                                    .on_hover_text("The OSC address pattern that tone data will be sent under.\n\nThe message format for tone data is [(frequency, pan, volume)], with tones being listed in order of priority. Frequencies are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), and pan ranges from -1 to 1.");
+                                    .on_hover_text("The OSC address pattern that tone data will be sent under.\n\nThe message format for tone data is [(frequency, pan, volume, signalToMaskRatio)], with tones being listed in order of priority. Frequencies are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), pan ranges from -1 to 1, and signalToMaskRatio is in dB.");
 
                                 if ui.
                                     text_edit_singleline(&mut analysis_settings.osc_resource_address_tones)
                                     .labelled_by(message_label_1.id)
-                                    .on_hover_text("The OSC address pattern that tone data will be sent under.\n\nThe message format for tone data is [(frequency, pan, volume)], with tones being listed in order of priority. Frequencies are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), and pan ranges from -1 to 1.")
+                                    .on_hover_text("The OSC address pattern that tone data will be sent under.\n\nThe message format for tone data is [(frequency, pan, volume, signalToMaskRatio)], with tones being listed in order of priority. Frequencies are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), pan ranges from -1 to 1, and signalToMaskRatio is in dB.")
                                     .changed()
                                 {
                                     update(&analysis_settings);

@@ -364,8 +364,14 @@ impl Default for AnalysisChainConfig {
             output_max_simultaneous_tones: 24,
             output_osc: false,
             osc_socket_address: "127.0.0.1:8000".to_string(),
-            osc_resource_address_tones: "/katvisualizer/tones".to_string(),
-            osc_resource_address_stats: "/katvisualizer/stats".to_string(),
+            osc_resource_address_tones: format!(
+                "/katvisualizer/v{}/tones",
+                env!("CARGO_PKG_VERSION")
+            ),
+            osc_resource_address_stats: format!(
+                "/katvisualizer/v{}/stats",
+                env!("CARGO_PKG_VERSION")
+            ),
             output_midi: false,
             midi_pressure_min_amplitude: 30.0 - 86.0,
             midi_pressure_max_amplitude: 70.0 - 86.0,
@@ -382,6 +388,7 @@ impl Default for AnalysisChainConfig {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub(crate) struct AnalysisChain {
     chunker: StftHelper<0>,
     left_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
@@ -410,7 +417,7 @@ pub(crate) struct AnalysisChain {
     osc_pool: ThreadPool,
     pub(crate) frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
     osc_socket: Arc<Mutex<Option<UdpSocket>>>,
-    osc_output: Arc<Mutex<Vec<(f32, f32, f32)>>>,
+    osc_output: Arc<Mutex<Vec<(f32, f32, f32, f32)>>>,
 }
 
 impl AnalysisChain {
@@ -662,8 +669,8 @@ impl AnalysisChain {
         #[cfg(feature = "midi")]
         let mut enabled_midi_notes = [false; 128];
 
-        for (frequency, pan, volume) in peaks {
-            osc_output.push((frequency, pan, volume));
+        for (frequency, pan, volume, signal_to_mask) in peaks {
+            osc_output.push((frequency, pan, volume, signal_to_mask));
 
             #[cfg(feature = "midi")]
             {
@@ -759,24 +766,26 @@ impl AnalysisChain {
                     let time = SystemTime::now() - timestamp.elapsed();
                     let message_data = if let Some(listening_volume) = listening_volume {
                         data.iter()
-                            .map(|(f, p, v)| {
+                            .map(|(f, p, v, stm)| {
                                 OscType::Array(OscArray {
                                     content: vec![
                                         OscType::Float(*f),
                                         OscType::Float(*p),
                                         OscType::Float(*v + listening_volume),
+                                        OscType::Float(*stm),
                                     ],
                                 })
                             })
                             .collect()
                     } else {
                         data.iter()
-                            .map(|(f, p, v)| {
+                            .map(|(f, p, v, stm)| {
                                 OscType::Array(OscArray {
                                     content: vec![
                                         OscType::Float(*f),
                                         OscType::Float(*p),
                                         OscType::Float(*v),
+                                        OscType::Float(*stm),
                                     ],
                                 })
                             })
