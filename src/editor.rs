@@ -1872,7 +1872,7 @@ pub fn create(
                             if analysis_settings.output_midi {
                                 ui.colored_label(
                                     Color32::YELLOW,
-                                    "Some MIDI software may struggle to handle this plugin's outputs. If you encounter issues, try lowering the number of simultaneous tones or increasing the plugin's buffer size.",
+                                    "Some MIDI software may struggle to handle this plugin's output rate. If you encounter issues, try lowering the number of simultaneous tones or increasing the plugin's buffer size.",
                                 );
 
                                 if ui
