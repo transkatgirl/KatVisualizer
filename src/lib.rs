@@ -638,7 +638,8 @@ impl AnalysisChain {
         // TODO: Move this functionality to a separate crate module
         // TODO: Add support for MIDI over OSC
         // TODO: Add output of analysis masking average & maximum volume via OSC
-        //      TODO: Add support for outputting averages, medians, and percentiles of these values, similar to editor AGC
+        // TODO: Add OSC output AGC
+        // TODO: Add support for outputting full analysis slice via OSC?
 
         if !self.output_osc && !self.output_midi {
             return;
