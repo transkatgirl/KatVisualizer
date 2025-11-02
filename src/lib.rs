@@ -488,7 +488,6 @@ impl AnalysisChain {
         buffer: &mut Buffer,
         output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
         midi_output: &mut [f32; 128],
-        //osc_output: &mut (Option<SocketAddr>, Vec<(f32, f32, f32)>),
     ) {
         let mut finished = Instant::now();
 
