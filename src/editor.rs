@@ -1708,9 +1708,14 @@ pub fn create(
                             );
 
                             if analysis_settings.output_osc || analysis_settings.output_midi {
+                                let max_simultaneous = if analysis_settings.output_osc {
+                                    MAX_PEAK_OUTPUTS
+                                } else {
+                                    128
+                                };
                                 if ui
                                     .add(
-                                        egui::Slider::new(&mut analysis_settings.output_max_simultaneous_peaks, 1..=MAX_PEAK_OUTPUTS)
+                                        egui::Slider::new(&mut analysis_settings.output_max_simultaneous_peaks, 1..=max_simultaneous)
                                             .suffix(" notes")
                                             .logarithmic(true)
                                             .text("Maximum simultaneous tones"),
@@ -1736,6 +1741,8 @@ pub fn create(
                                     analysis_settings.internal_buffering = false;
                                     analysis_settings.normalize_amplitude = true;
                                     analysis_settings.masking = true;
+                                } else if analysis_settings.output_midi && analysis_settings.output_max_simultaneous_peaks > 128 {
+                                    analysis_settings.output_max_simultaneous_peaks = 128;
                                 }
                                 update(&analysis_settings);
                                 egui_ctx.request_discard("Changed setting");
