@@ -289,8 +289,11 @@ impl Plugin for MyPlugin {
                     }
                 }
 
-                if self.midi_on && !midi_on {
+                if self.midi_on {
                     self.midi_output.iter_mut().for_each(|m| *m = 0.0);
+                }
+
+                if self.midi_on && !midi_on {
                     context.send_event(NoteEvent::MidiCC {
                         timing: 0,
                         channel: 0,
