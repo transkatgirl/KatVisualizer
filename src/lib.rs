@@ -243,21 +243,21 @@ impl Plugin for MyPlugin {
 
             #[cfg(feature = "midi")]
             {
-                if !self.midi_on {
-                    context.send_event(NoteEvent::MidiCC {
-                        timing: 0,
-                        channel: 0,
-                        cc: POLY_MODE_ON,
-                        value: 0.0,
-                    });
-                    self.midi_notes = [false; 128];
-                    self.midi_on = true;
-                }
-
                 let mut midi_on = false;
+
                 for (note, pressure) in self.midi_output.iter().enumerate() {
                     if *pressure > 0.0 {
-                        midi_on = true;
+                        if !self.midi_on {
+                            context.send_event(NoteEvent::MidiCC {
+                                timing: 0,
+                                channel: 0,
+                                cc: POLY_MODE_ON,
+                                value: 0.0,
+                            });
+                            self.midi_notes = [false; 128];
+                            self.midi_on = true;
+                            midi_on = true;
+                        }
 
                         if !self.midi_notes[note] {
                             context.send_event(NoteEvent::NoteOn {
@@ -290,6 +290,7 @@ impl Plugin for MyPlugin {
                 }
 
                 if self.midi_on && !midi_on {
+                    self.midi_output.iter_mut().for_each(|m| *m = 0.0);
                     context.send_event(NoteEvent::MidiCC {
                         timing: 0,
                         channel: 0,
