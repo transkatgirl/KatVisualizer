@@ -182,7 +182,7 @@ pub struct BetterAnalysis {
     pub data: Vec<(f32, f32)>,
     pub masking: Vec<(f32, f32)>,
     pub min: f32,
-    //pub mean: f32,
+    pub mean: f32,
     pub max: f32,
     pub masking_mean: f32,
     peak_scratchpad: Vec<bool>,
@@ -196,7 +196,7 @@ impl BetterAnalysis {
             data: Vec::with_capacity(capacity),
             masking: Vec::with_capacity(capacity),
             min: f32::NEG_INFINITY,
-            //mean: f32::NEG_INFINITY,
+            mean: f32::NEG_INFINITY,
             max: f32::NEG_INFINITY,
             masking_mean: f32::NEG_INFINITY,
             sorting_scratchpad: Vec::with_capacity(capacity),
@@ -218,7 +218,7 @@ impl BetterAnalysis {
 
         let new_length = left.transform.spectrum_data.len();
 
-        //let mut sum = 0.0;
+        let mut sum = 0.0;
         self.max = f32::NEG_INFINITY;
 
         if left.config.masking {
@@ -303,7 +303,7 @@ impl BetterAnalysis {
                         .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                         - listening_volume;
 
-                    //sum += dbfs_to_amplitude(volume);
+                    sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
                     self.data[index] = ((pan * 2.0) as f32, volume);
@@ -320,7 +320,7 @@ impl BetterAnalysis {
                     let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
                     let volume = volume + gain;
 
-                    //sum += dbfs_to_amplitude(volume);
+                    sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
                     self.data[index] = ((pan * 2.0) as f32, volume);
@@ -348,14 +348,14 @@ impl BetterAnalysis {
                         .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                         - listening_volume;
 
-                    //sum += dbfs_to_amplitude(volume);
+                    sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
                     self.data.push(((pan * 2.0) as f32, volume));
                     self.max = self.max.max(volume);
                 }
             } else {
-                //let gain_amplitude = dbfs_to_amplitude(gain);
+                let gain_amplitude = dbfs_to_amplitude(gain);
 
                 for (left, right) in left
                     .transform
@@ -366,7 +366,7 @@ impl BetterAnalysis {
                     let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
                     let volume = volume + gain;
 
-                    //sum += (*left + *right) * gain_amplitude;
+                    sum += (*left + *right) * gain_amplitude;
                     let volume = volume as f32;
 
                     self.data.push(((pan * 2.0) as f32, volume));
@@ -381,7 +381,7 @@ impl BetterAnalysis {
             self.min = f32::NEG_INFINITY;
         }
 
-        //self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
+        self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
 
         self.duration = duration;
     }
@@ -394,7 +394,7 @@ impl BetterAnalysis {
     ) {
         let new_length = center.transform.spectrum_data.len();
 
-        //let mut sum = 0.0;
+        let mut sum = 0.0;
         self.max = f32::NEG_INFINITY;
 
         if center.config.masking {
@@ -475,7 +475,7 @@ impl BetterAnalysis {
                         .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                         - listening_volume;
 
-                    //sum += dbfs_to_amplitude(volume);
+                    sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
                     self.data[index] = (0.0, volume);
@@ -485,7 +485,7 @@ impl BetterAnalysis {
                 for (index, amplitude) in center.transform.spectrum_data.iter().enumerate() {
                     let volume = amplitude_to_dbfs(*amplitude * 2.0) + gain;
 
-                    //sum += dbfs_to_amplitude(volume);
+                    sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
                     self.data[index] = (0.0, volume);
@@ -510,7 +510,7 @@ impl BetterAnalysis {
                         .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                         - listening_volume;
 
-                    //sum += dbfs_to_amplitude(volume);
+                    sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
                     self.data.push((0.0, volume));
@@ -522,7 +522,7 @@ impl BetterAnalysis {
                 for amplitude in center.transform.spectrum_data.iter() {
                     let amplitude = *amplitude * 2.0 * gain_amplitude;
 
-                    //sum += amplitude;
+                    sum += amplitude;
                     let volume = amplitude_to_dbfs(amplitude) as f32;
 
                     self.data.push((0.0, volume));
@@ -537,7 +537,7 @@ impl BetterAnalysis {
             self.min = f32::NEG_INFINITY;
         }
 
-        //self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
+        self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
 
         self.duration = duration;
     }
@@ -618,7 +618,7 @@ impl BetterSpectrogram {
                     data: vec![(0.0, f32::NEG_INFINITY); slice_capacity],
                     masking: vec![(0.0, f32::NEG_INFINITY); slice_capacity],
                     min: f32::NEG_INFINITY,
-                    //mean: f32::NEG_INFINITY,
+                    mean: f32::NEG_INFINITY,
                     max: f32::NEG_INFINITY,
                     masking_mean: f32::NEG_INFINITY,
                     sorting_scratchpad: vec![(f32::NEG_INFINITY, 0); slice_capacity],
@@ -639,7 +639,7 @@ impl BetterSpectrogram {
             }
             buffer.duration = analysis.duration;
             buffer.min = analysis.min;
-            //buffer.mean = analysis.mean;
+            buffer.mean = analysis.mean;
             buffer.max = analysis.max;
             buffer.masking_mean = analysis.masking_mean;
         });

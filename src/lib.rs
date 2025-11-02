@@ -327,12 +327,13 @@ pub(crate) struct AnalysisChainConfig {
     update_rate_hz: f64,
     latency_offset: Duration,
 
-    output_max_simultaneous_peaks: usize,
+    output_tone_amplitude_threshold: f32,
+    output_max_simultaneous_tones: usize,
     output_osc: bool,
     osc_socket_address: String,
-    osc_resource_address: String,
+    osc_resource_address_tones: String,
+    osc_resource_address_stats: String,
     output_midi: bool,
-    midi_amplitude_threshold: f32,
     midi_pressure_min_amplitude: f32,
     midi_pressure_max_amplitude: f32,
 
@@ -359,12 +360,13 @@ impl Default for AnalysisChainConfig {
             resolution: 512,
             latency_offset: Duration::ZERO,
 
-            output_max_simultaneous_peaks: 24,
+            output_tone_amplitude_threshold: 30.0 - 86.0,
+            output_max_simultaneous_tones: 24,
             output_osc: false,
             osc_socket_address: "127.0.0.1:8000".to_string(),
-            osc_resource_address: "/katvisualizer/tones".to_string(),
+            osc_resource_address_tones: "/katvisualizer/tones".to_string(),
+            osc_resource_address_stats: "/katvisualizer/stats".to_string(),
             output_midi: false,
-            midi_amplitude_threshold: 30.0 - 86.0,
             midi_pressure_min_amplitude: 30.0 - 86.0,
             midi_pressure_max_amplitude: 70.0 - 86.0,
 
@@ -386,12 +388,13 @@ pub(crate) struct AnalysisChain {
     right_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
     gain: f64,
     internal_buffering: bool,
-    output_max_simultaneous_peaks: usize,
+    output_tone_amplitude_threshold: f32,
+    output_max_simultaneous_tones: usize,
     output_osc: bool,
     osc_socket_address: String,
-    osc_resource_address: Arc<String>,
+    osc_resource_address_tones: Arc<String>,
+    osc_resource_address_stats: Arc<String>,
     output_midi: bool,
-    midi_amplitude_threshold: f32,
     midi_pressure_min_amplitude: f32,
     midi_pressure_max_amplitude: f32,
     update_rate: f64,
@@ -449,12 +452,13 @@ impl AnalysisChain {
         Self {
             sample_rate,
             internal_buffering: config.internal_buffering,
-            output_max_simultaneous_peaks: config.output_max_simultaneous_peaks,
+            output_tone_amplitude_threshold: config.output_tone_amplitude_threshold,
+            output_max_simultaneous_tones: config.output_max_simultaneous_tones,
             output_osc: config.output_osc,
             osc_socket_address: config.osc_socket_address.clone(),
-            osc_resource_address: Arc::new(config.osc_resource_address.clone()),
+            osc_resource_address_tones: Arc::new(config.osc_resource_address_tones.clone()),
+            osc_resource_address_stats: Arc::new(config.osc_resource_address_stats.clone()),
             output_midi: config.output_midi,
-            midi_amplitude_threshold: config.midi_amplitude_threshold,
             midi_pressure_min_amplitude: config.midi_pressure_min_amplitude,
             midi_pressure_max_amplitude: config.midi_pressure_max_amplitude,
             latency_samples: if config.internal_buffering {
@@ -637,8 +641,6 @@ impl AnalysisChain {
     ) {
         // TODO: Move this functionality to a separate crate module
         // TODO: Add support for MIDI over OSC
-        // TODO: Add output of analysis masking average & maximum volume via OSC
-        // TODO: Add OSC output AGC
 
         if !self.output_osc && !self.output_midi {
             return;
@@ -652,8 +654,8 @@ impl AnalysisChain {
         let timestamp = Instant::now();
         let frequencies = self.frequencies.read();
         let peaks = spectrogram.data[0].peaks(
-            self.midi_amplitude_threshold,
-            self.output_max_simultaneous_peaks,
+            self.output_tone_amplitude_threshold,
+            self.output_max_simultaneous_tones,
             left_analyzer,
         );
 
@@ -680,10 +682,25 @@ impl AnalysisChain {
         if self.output_osc
             && let Ok(socket_address) = self.osc_socket_address.parse()
         {
-            let osc_resource_address = self.osc_resource_address.clone();
+            let osc_resource_address_tones = self.osc_resource_address_tones.clone();
+            let osc_resource_address_stats = self.osc_resource_address_stats.clone();
             let osc_socket = self.osc_socket.clone();
             let osc_output = self.osc_output.clone();
             let listening_volume = self.listening_volume.map(|l| l as f32);
+
+            let osc_spectrum_metadata = if let Some(listening_volume) = listening_volume {
+                (
+                    spectrogram.data[0].masking_mean + listening_volume,
+                    spectrogram.data[0].mean + listening_volume,
+                    spectrogram.data[0].max + listening_volume,
+                )
+            } else {
+                (
+                    spectrogram.data[0].masking_mean,
+                    spectrogram.data[0].mean,
+                    spectrogram.data[0].max,
+                )
+            };
 
             self.osc_pool.execute(move || {
                 let mut socket = osc_socket.lock();
@@ -773,12 +790,22 @@ impl AnalysisChain {
                             seconds: 0,
                             fractional: 0,
                         }),
-                        content: vec![OscPacket::Message(OscMessage {
-                            addr: osc_resource_address.to_string(),
-                            args: vec![OscType::Array(OscArray {
-                                content: message_data,
-                            })],
-                        })],
+                        content: vec![
+                            OscPacket::Message(OscMessage {
+                                addr: osc_resource_address_stats.to_string(),
+                                args: vec![
+                                    OscType::Float(osc_spectrum_metadata.0),
+                                    OscType::Float(osc_spectrum_metadata.1),
+                                    OscType::Float(osc_spectrum_metadata.2),
+                                ],
+                            }),
+                            OscPacket::Message(OscMessage {
+                                addr: osc_resource_address_tones.to_string(),
+                                args: vec![OscType::Array(OscArray {
+                                    content: message_data,
+                                })],
+                            }),
+                        ],
                     });
                     let buf = encoder::encode(&packet).unwrap();
                     let _ = socket.send_to(&buf, socket_address);
@@ -825,7 +852,7 @@ impl AnalysisChain {
                 if items != 0.0 {
                     let volume = amplitude_to_dbfs(volume_sum / items) as f32;
 
-                    if volume >= self.midi_amplitude_threshold {
+                    if volume >= self.output_tone_amplitude_threshold {
                         midi_output[i] = map_value_f32(
                             volume,
                             self.midi_pressure_min_amplitude,
@@ -857,12 +884,13 @@ impl AnalysisChain {
             normalize_amplitude: self.listening_volume.is_some(),
             masking: self.masking,
             internal_buffering: self.internal_buffering,
-            output_max_simultaneous_peaks: self.output_max_simultaneous_peaks,
+            output_tone_amplitude_threshold: self.output_tone_amplitude_threshold,
+            output_max_simultaneous_tones: self.output_max_simultaneous_tones,
             output_osc: self.output_osc,
             osc_socket_address: self.osc_socket_address.to_string(),
-            osc_resource_address: self.osc_resource_address.to_string(),
+            osc_resource_address_tones: self.osc_resource_address_tones.to_string(),
+            osc_resource_address_stats: self.osc_resource_address_stats.to_string(),
             output_midi: self.output_midi,
-            midi_amplitude_threshold: self.midi_amplitude_threshold,
             midi_pressure_min_amplitude: self.midi_pressure_min_amplitude,
             midi_pressure_max_amplitude: self.midi_pressure_max_amplitude,
             update_rate_hz: self.update_rate,
@@ -890,12 +918,13 @@ impl AnalysisChain {
         let old_left_analyzer = self.left_analyzer.lock();
         let old_analyzer_config = old_left_analyzer.1.config();
 
-        self.output_max_simultaneous_peaks = config.output_max_simultaneous_peaks;
+        self.output_tone_amplitude_threshold = config.output_tone_amplitude_threshold;
+        self.output_max_simultaneous_tones = config.output_max_simultaneous_tones;
         self.output_osc = config.output_osc;
         self.osc_socket_address = config.osc_socket_address.clone();
-        self.osc_resource_address = Arc::new(config.osc_resource_address.clone());
+        self.osc_resource_address_tones = Arc::new(config.osc_resource_address_tones.clone());
+        self.osc_resource_address_stats = Arc::new(config.osc_resource_address_stats.clone());
         self.output_midi = config.output_midi;
-        self.midi_amplitude_threshold = config.midi_amplitude_threshold;
         self.midi_pressure_min_amplitude = config.midi_pressure_min_amplitude;
         self.midi_pressure_max_amplitude = config.midi_pressure_max_amplitude;
         if config.internal_buffering {

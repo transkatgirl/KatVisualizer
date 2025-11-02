@@ -1413,8 +1413,8 @@ pub fn create(
                         }
 
                         if analysis_settings.normalize_amplitude {
-                            let old_midi_threshold_phon =
-                                (analysis_settings.midi_amplitude_threshold as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
+                            let old_tone_threshold_phon =
+                                (analysis_settings.output_tone_amplitude_threshold as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
                             let old_midi_min_phon =
                                 (analysis_settings.midi_pressure_min_amplitude as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
                             let old_midi_max_phon =
@@ -1437,8 +1437,8 @@ pub fn create(
                                 .changed()
                             {
                                 update_and_clear(&analysis_settings);
-                                analysis_settings.midi_amplitude_threshold =
-                                    (old_midi_threshold_phon - analysis_settings.listening_volume) as f32;
+                                analysis_settings.output_tone_amplitude_threshold =
+                                    (old_tone_threshold_phon - analysis_settings.listening_volume) as f32;
                                 analysis_settings.midi_pressure_min_amplitude =
                                     (old_midi_min_phon - analysis_settings.listening_volume) as f32;
                                 analysis_settings.midi_pressure_max_amplitude =
@@ -1715,7 +1715,7 @@ pub fn create(
                                 };
                                 if ui
                                     .add(
-                                        egui::Slider::new(&mut analysis_settings.output_max_simultaneous_peaks, 1..=max_simultaneous)
+                                        egui::Slider::new(&mut analysis_settings.output_max_simultaneous_tones, 1..=max_simultaneous)
                                             .suffix(" notes")
                                             .logarithmic(true)
                                             .text("Maximum simultaneous tones"),
@@ -1727,6 +1727,46 @@ pub fn create(
                                     egui_ctx.request_discard("Changed setting");
                                     return;
                                 };
+
+                                if analysis_settings.normalize_amplitude {
+                                    let mut tone_threshold_phon =
+                                        (analysis_settings.output_tone_amplitude_threshold as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
+
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut tone_threshold_phon, 0.0..=100.0)
+                                                .suffix(" phon")
+                                                .step_by(1.0)
+                                                .fixed_decimals(0)
+                                                .text("Tone amplitude threshold"),
+                                        )
+                                        .on_hover_text("This setting adjusts the minimum amplitude necessary for a tone to be considered valid. Tones with an amplitude below this threshold will always be considered inactive, regardless of the tone limit.")
+                                        .changed()
+                                    {
+                                        analysis_settings.output_tone_amplitude_threshold =
+                                            (tone_threshold_phon - analysis_settings.listening_volume) as f32;
+                                        update(&analysis_settings);
+                                        egui_ctx.request_discard("Changed setting");
+                                        return;
+                                    }
+                                } else {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut analysis_settings.output_tone_amplitude_threshold, -100.0..=0.0)
+                                                .clamping(egui::SliderClamping::Never)
+                                                .suffix("dB")
+                                                .step_by(1.0)
+                                                .fixed_decimals(0)
+                                                .text("Tone amplitude threshold"),
+                                        )
+                                        .on_hover_text("This setting adjusts the minimum amplitude necessary for a tone to be considered valid. Tones with an amplitude below this threshold will always be considered inactive, regardless of the tone limit.")
+                                        .changed()
+                                    {
+                                        update(&analysis_settings);
+                                        egui_ctx.request_discard("Changed setting");
+                                        return;
+                                    };
+                                }
                             }
 
                             if ui
@@ -1734,15 +1774,15 @@ pub fn create(
                                     &mut analysis_settings.output_osc,
                                     "Output analysis via OSC",
                                 )
-                                .on_hover_text("If this is enabled, the plugin will output analysis data via OSC, which can then be used as an input for alternative visualization methods.\n\nThe message output format is [(frequency, pan, volume)], with tones being listed in order of priority. Frequencies are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), and pan ranges from -1 to 1.")
+                                .on_hover_text("If this is enabled, the plugin will output analysis data via OSC, which can then be used as an input for alternative visualization methods.")
                                 .changed()
                             {
                                 if analysis_settings.output_osc {
                                     analysis_settings.internal_buffering = false;
                                     analysis_settings.normalize_amplitude = true;
                                     analysis_settings.masking = true;
-                                } else if analysis_settings.output_midi && analysis_settings.output_max_simultaneous_peaks > 128 {
-                                    analysis_settings.output_max_simultaneous_peaks = 128;
+                                } else if analysis_settings.output_midi && analysis_settings.output_max_simultaneous_tones > 128 {
+                                    analysis_settings.output_max_simultaneous_tones = 128;
                                 }
                                 update(&analysis_settings);
                                 egui_ctx.request_discard("Changed setting");
@@ -1765,14 +1805,29 @@ pub fn create(
                                     return;
                                 }
 
-                                let message_label = ui
-                                    .label("OSC Message Address:")
-                                    .on_hover_text("The OSC address pattern that analysis output will be sent under.");
+                                let message_label_1 = ui
+                                    .label("Tone Data OSC Message Address:")
+                                    .on_hover_text("The OSC address pattern that tone data will be sent under.\n\nThe message format for tone data is [(frequency, pan, volume)], with tones being listed in order of priority. Frequencies are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), and pan ranges from -1 to 1.");
 
                                 if ui.
-                                    text_edit_singleline(&mut analysis_settings.osc_resource_address)
-                                    .labelled_by(message_label.id)
-                                    .on_hover_text("The OSC address pattern that analysis output will be sent under.")
+                                    text_edit_singleline(&mut analysis_settings.osc_resource_address_tones)
+                                    .labelled_by(message_label_1.id)
+                                    .on_hover_text("The OSC address pattern that tone data will be sent under.\n\nThe message format for tone data is [(frequency, pan, volume)], with tones being listed in order of priority. Frequencies are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), and pan ranges from -1 to 1.")
+                                    .changed()
+                                {
+                                    update(&analysis_settings);
+                                    egui_ctx.request_discard("Changed setting");
+                                    return;
+                                }
+
+                                let message_label_2 = ui
+                                    .label("Analysis Statistics Data OSC Message Address:")
+                                    .on_hover_text("The OSC address pattern that analysis statistics data will be sent under.\n\nThe message format for analysis statistics data is (average_masking, average_volume, maximum_volume), with amplitude values being in phon (or dBFS if amplitude normalization is disabled). Analysis statistics are only applicable for the most recent slice of tone data.");
+
+                                if ui.
+                                    text_edit_singleline(&mut analysis_settings.osc_resource_address_stats)
+                                    .labelled_by(message_label_2.id)
+                                    .on_hover_text("The OSC address pattern that analysis statistics data will be sent under.\n\nThe message format for analysis statistics data is (average_masking, average_volume, maximum_volume), with amplitude values being in phon (or dBFS if amplitude normalization is disabled). Analysis statistics are only applicable for the most recent slice of tone data.")
                                     .changed()
                                 {
                                     update(&analysis_settings);
@@ -1805,30 +1860,10 @@ pub fn create(
                             #[cfg(feature = "midi")]
                             if analysis_settings.output_midi {
                                 if analysis_settings.normalize_amplitude {
-                                    let mut midi_threshold_phon =
-                                        (analysis_settings.midi_amplitude_threshold as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
                                     let mut midi_min_phon =
                                         (analysis_settings.midi_pressure_min_amplitude as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
                                     let mut midi_max_phon =
                                         (analysis_settings.midi_pressure_max_amplitude as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
-
-                                    if ui
-                                        .add(
-                                            egui::Slider::new(&mut midi_threshold_phon, 0.0..=100.0)
-                                                .suffix(" phon")
-                                                .step_by(1.0)
-                                                .fixed_decimals(0)
-                                                .text("MIDI note amplitude threshold"),
-                                        )
-                                        .on_hover_text("This setting adjusts the minimum amplitude necessary for a note to be considered valid. Notes with an amplitude below this threshold will always be considered inactive, regardless of the note limit.")
-                                        .changed()
-                                    {
-                                        analysis_settings.midi_amplitude_threshold =
-                                            (midi_threshold_phon - analysis_settings.listening_volume) as f32;
-                                        update(&analysis_settings);
-                                        egui_ctx.request_discard("Changed setting");
-                                        return;
-                                    }
 
                                     if ui
                                         .add(
@@ -1865,23 +1900,6 @@ pub fn create(
                                         egui_ctx.request_discard("Changed setting");
                                     }
                                 } else {
-                                    if ui
-                                        .add(
-                                            egui::Slider::new(&mut analysis_settings.midi_amplitude_threshold, -100.0..=0.0)
-                                                .clamping(egui::SliderClamping::Never)
-                                                .suffix("dB")
-                                                .step_by(1.0)
-                                                .fixed_decimals(0)
-                                                .text("MIDI note amplitude threshold"),
-                                        )
-                                        .on_hover_text("This setting adjusts the minimum amplitude necessary for a note to be considered valid. Notes with an amplitude below this threshold will always be considered inactive, regardless of the note limit.")
-                                        .changed()
-                                    {
-                                        update(&analysis_settings);
-                                        egui_ctx.request_discard("Changed setting");
-                                        return;
-                                    };
-
                                     if ui
                                         .add(
                                             egui::Slider::new(&mut analysis_settings.midi_pressure_min_amplitude, -100.0..=0.0)
