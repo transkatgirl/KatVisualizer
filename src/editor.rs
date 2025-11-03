@@ -1349,6 +1349,8 @@ pub fn create(
                                 BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS);
                         };
 
+                        let is_outside_hearing_range = analysis_settings.start_frequency < 20.0 || analysis_settings.start_frequency > 20000.0 || analysis_settings.end_frequency > 20000.0 || analysis_settings.end_frequency < 20.0;
+
                         ui.colored_label(
                             Color32::YELLOW,
                             "Editing these options temporarily interrupts audio analysis.",
@@ -1390,28 +1392,29 @@ pub fn create(
                             return;
                         };
 
-
-                        if ui
-                            .checkbox(
-                                &mut analysis_settings.normalize_amplitude,
-                                "Perform amplitude normalization",
-                            )
-                            .on_hover_text("If this is enabled, amplitude values are normalized using the ISO 226:2023 equal-loudness contours, which map the amplitudes of frequency bins into phons, a psychoacoustic unit of loudness measurement.\nIf this is disabled, amplitude values are not normalized.")
-                            .changed()
-                        {
-                            update(&analysis_settings);
-                            if analysis_settings.normalize_amplitude {
-                                render_settings.agc_minimum =
-                                    (3.0 - analysis_settings.listening_volume) as f32;
-                                render_settings.agc_maximum =
-                                    (100.0 - analysis_settings.listening_volume) as f32;
-                            } else {
-                                render_settings.agc_minimum =
-                                    f32::NEG_INFINITY;
-                                render_settings.agc_maximum = f32::INFINITY;
+                        if !is_outside_hearing_range {
+                            if ui
+                                .checkbox(
+                                    &mut analysis_settings.normalize_amplitude,
+                                    "Perform amplitude normalization",
+                                )
+                                .on_hover_text("If this is enabled, amplitude values are normalized using the ISO 226:2023 equal-loudness contours, which map the amplitudes of frequency bins into phons, a psychoacoustic unit of loudness measurement.\nIf this is disabled, amplitude values are not normalized.")
+                                .changed()
+                            {
+                                update(&analysis_settings);
+                                if analysis_settings.normalize_amplitude {
+                                    render_settings.agc_minimum =
+                                        (3.0 - analysis_settings.listening_volume) as f32;
+                                    render_settings.agc_maximum =
+                                        (100.0 - analysis_settings.listening_volume) as f32;
+                                } else {
+                                    render_settings.agc_minimum =
+                                        f32::NEG_INFINITY;
+                                    render_settings.agc_maximum = f32::INFINITY;
+                                }
+                                egui_ctx.request_discard("Changed setting");
+                                return;
                             }
-                            egui_ctx.request_discard("Changed setting");
-                            return;
                         }
 
                         if analysis_settings.normalize_amplitude {
@@ -1450,17 +1453,19 @@ pub fn create(
                             };
                         }
 
-                        if ui
-                            .checkbox(
-                                &mut analysis_settings.masking,
-                                "Perform simultaneous masking",
-                            )
-                            .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, simultaneous masking thresholds are calculated using a simple tone-masking-tone model.\nIf this is disabled, simultaneous masking thresholds are not calculated.")
-                            .changed()
-                        {
-                            update(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
+                        if !is_outside_hearing_range {
+                            if ui
+                                .checkbox(
+                                    &mut analysis_settings.masking,
+                                    "Perform simultaneous masking",
+                                )
+                                .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, simultaneous masking thresholds are calculated using a simple tone-masking-tone model.\nIf this is disabled, simultaneous masking thresholds are not calculated.")
+                                .changed()
+                            {
+                                update(&analysis_settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            }
                         }
 
                         if ui
@@ -1542,6 +1547,10 @@ pub fn create(
                                     analysis_settings.end_frequency = 0.0;
                                 }
                                 if analysis_settings.end_frequency > analysis_settings.start_frequency {
+                                    if analysis_settings.start_frequency < 20.0 || analysis_settings.start_frequency > 20000.0  {
+                                        analysis_settings.normalize_amplitude = false;
+                                        analysis_settings.masking = false;
+                                    }
                                     update_and_clear(&analysis_settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
@@ -1565,13 +1574,17 @@ pub fn create(
                                     analysis_settings.end_frequency = 0.0;
                                 }
                                 if analysis_settings.end_frequency > analysis_settings.start_frequency {
+                                    if analysis_settings.end_frequency > 20000.0 || analysis_settings.end_frequency < 20.0 {
+                                        analysis_settings.normalize_amplitude = false;
+                                        analysis_settings.masking = false;
+                                    }
                                     update_and_clear(&analysis_settings);
                                     egui_ctx.request_discard("Changed setting");
                                     return;
                                 }
                             };
                         }
-                        frame.end(ui).on_hover_text("The frequency range of human hearing in healthy young individuals generally spans from 20 Hz to 20 kHz. However, this range can vary significantly, often becoming narrower as age progresses.\n\nThere are many use cases where you may want to adjust the range of processed frequencies, such as zooming in on a specific range of auditory frequencies or checking for the presence or absence of ultrasonic/subsonic sounds. These settings allow you to do so.\n(Note: If you're interested in the sounds outside the range of human hearing, make sure to turn off amplitude normalization and simultaneous masking!)");
+                        frame.end(ui).on_hover_text("The frequency range of human hearing in healthy young individuals generally spans from 20 Hz to 20 kHz. However, this range can vary significantly, often becoming narrower as age progresses.\n\nThere are many use cases where you may want to adjust the range of processed frequencies, such as zooming in on a specific range of auditory frequencies or checking for the presence or absence of ultrasonic/subsonic sounds. These settings allow you to do so.");
 
                         if ui
                             .checkbox(
