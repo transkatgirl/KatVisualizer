@@ -641,10 +641,10 @@ impl AnalysisChain {
             let osc_timestamp = if self.output_osc {
                 let since_start = finished.elapsed();
 
-                if self.output_osc && since_start > chunk_duration {
-                    SystemTime::now()
-                } else {
+                if chunk_duration > since_start {
                     (SystemTime::now() - since_start) + chunk_duration
+                } else {
+                    SystemTime::now()
                 }
             } else {
                 SystemTime::UNIX_EPOCH
