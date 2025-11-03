@@ -569,6 +569,12 @@ impl AnalysisChain {
                     }
                 });
         } else {
+            let mut osc_timestamp = if self.output_osc {
+                SystemTime::now()
+            } else {
+                SystemTime::UNIX_EPOCH
+            };
+
             if self.single_input {
                 let mut lock = self.left_analyzer.lock();
                 let (ref _buffer, ref mut analyzer) = *lock;
@@ -609,6 +615,8 @@ impl AnalysisChain {
             let chunk_duration =
                 Duration::from_secs_f64(buffer.samples() as f64 / self.sample_rate as f64);
 
+            osc_timestamp += chunk_duration;
+
             let (ref mut spectrogram, ref mut metrics) = *output.lock();
 
             let (left_ref, right_ref) = (self.left_analyzer.clone(), self.right_analyzer.clone());
@@ -638,7 +646,13 @@ impl AnalysisChain {
                 }
             });
 
-            self.generate_external_output(midi_output, spectrogram, left_analyzer, right_analyzer);
+            self.generate_external_output(
+                midi_output,
+                spectrogram,
+                left_analyzer,
+                right_analyzer,
+                osc_timestamp,
+            );
 
             let now = Instant::now();
             metrics.processing = now.duration_since(finished);
@@ -651,6 +665,7 @@ impl AnalysisChain {
         spectrogram: &mut BetterSpectrogram,
         left_analyzer: &mut BetterAnalyzer,
         right_analyzer: &mut BetterAnalyzer,
+        osc_timestamp: SystemTime,
     ) {
         if !self.output_osc && !self.output_midi {
             return;
@@ -661,7 +676,6 @@ impl AnalysisChain {
             right_analyzer.remove_masked_components();
         }
 
-        let timestamp = Instant::now();
         let frequencies = self.frequencies.read();
         let peaks = spectrogram.data[0].peaks(
             self.output_tone_amplitude_threshold,
@@ -769,7 +783,6 @@ impl AnalysisChain {
 
                 if let Some(socket) = &mut *socket {
                     let data = osc_output.lock();
-                    let time = SystemTime::now() - timestamp.elapsed();
                     let message_data = if let Some(listening_volume) = listening_volume {
                         data.iter()
                             .map(|(f, p, v, stm)| {
@@ -798,7 +811,7 @@ impl AnalysisChain {
                             .collect()
                     };
                     let packet = OscPacket::Bundle(OscBundle {
-                        timetag: OscTime::try_from(time).unwrap_or(OscTime {
+                        timetag: OscTime::try_from(osc_timestamp).unwrap_or(OscTime {
                             seconds: 0,
                             fractional: 0,
                         }),
