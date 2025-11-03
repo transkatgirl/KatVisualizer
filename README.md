@@ -51,7 +51,7 @@ The visualizer uses different threads for different tasks. The audio thread\* pe
 
 Only one thread can access the shared data at a time: When the render thread is generating a spectrogram, the audio thread cannot continue processing, and vice versa. However, the different threads try to do as much of their work as possible before locking the shared data and try to lock it for the minimum amount of time necessary.
 
-\* When processing stereo inputs, some aspects of the audio processing chain use one thread per channel.
+\* When processing stereo inputs, some components of the audio processing chain use one thread per channel.
 
 #### Interpreting performance counters
 
