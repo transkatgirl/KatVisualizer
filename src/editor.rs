@@ -1571,7 +1571,7 @@ pub fn create(
                                 }
                             };
                         }
-                        frame.end(ui).on_hover_text("The frequency range of human hearing in healthy young individuals generally spans from 20 Hz to 20 kHz. However, this range can vary significantly, often becoming narrower as age progresses.\n\nThere are many use cases where you may want to adjust the range of processed frequencies, such as zooming in on a specific range of auditory frequencies or checking for the presence or absence of ultrasonic/subsonic sounds. These settings allow you to do so.\n(Note: If you're interested in the sounds outside the range of human hearing, make sure to turn off amplitude normalization!)");
+                        frame.end(ui).on_hover_text("The frequency range of human hearing in healthy young individuals generally spans from 20 Hz to 20 kHz. However, this range can vary significantly, often becoming narrower as age progresses.\n\nThere are many use cases where you may want to adjust the range of processed frequencies, such as zooming in on a specific range of auditory frequencies or checking for the presence or absence of ultrasonic/subsonic sounds. These settings allow you to do so.\n(Note: If you're interested in the sounds outside the range of human hearing, make sure to turn off amplitude normalization and simultaneous masking!)");
 
                         if ui
                             .checkbox(
