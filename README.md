@@ -43,7 +43,7 @@ The compiled plugin can be loaded into a DAW like any other metering plugin. It'
 
 Once the program is running, the window will display a graphical representation of the input audio, along with additional information in the top corners. The parameters used to render this graphical representation can be adjusted in the dragable settings window.
 
-Keep in mind that this plugin is very CPU intensive, and some systems may struggle to run the default settings. If you experience performance issues, the first thing you should do is open the analysis settings and lower the update rate and resolution.
+Keep in mind that this plugin is very CPU intensive, and some systems may struggle to run the default settings. If you experience performance issues, the first thing you should do is open the analysis settings and lower the resolution.
 
 ### Performance Details
 
