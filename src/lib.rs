@@ -569,12 +569,6 @@ impl AnalysisChain {
                     }
                 });
         } else {
-            let mut osc_timestamp = if self.output_osc {
-                SystemTime::now()
-            } else {
-                SystemTime::UNIX_EPOCH
-            };
-
             if self.single_input {
                 let mut lock = self.left_analyzer.lock();
                 let (ref _buffer, ref mut analyzer) = *lock;
@@ -615,8 +609,6 @@ impl AnalysisChain {
             let chunk_duration =
                 Duration::from_secs_f64(buffer.samples() as f64 / self.sample_rate as f64);
 
-            osc_timestamp += chunk_duration;
-
             let (ref mut spectrogram, ref mut metrics) = *output.lock();
 
             let (left_ref, right_ref) = (self.left_analyzer.clone(), self.right_analyzer.clone());
@@ -645,6 +637,18 @@ impl AnalysisChain {
                     );
                 }
             });
+
+            let osc_timestamp = if self.output_osc {
+                let since_start = finished.elapsed();
+
+                if self.output_osc && since_start > chunk_duration {
+                    SystemTime::now()
+                } else {
+                    (SystemTime::now() - since_start) + chunk_duration
+                }
+            } else {
+                SystemTime::UNIX_EPOCH
+            };
 
             self.generate_external_output(
                 midi_output,
