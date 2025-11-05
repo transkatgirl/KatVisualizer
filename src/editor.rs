@@ -1846,12 +1846,12 @@ pub fn create(
 
                                 let message_label_2 = ui
                                     .label("Analysis statistics OSC message address:")
-                                    .on_hover_text("The OSC address pattern that analysis statistics will be sent under.\n\nThe message format for analysis statistics is (average_masking, average_volume, maximum_volume), with amplitude values being in phon (or dBFS if amplitude normalization is disabled). Analysis statistics are only applicable for the most recent slice of tone data.");
+                                    .on_hover_text("The OSC address pattern that analysis statistics will be sent under.\n\nThe message format for analysis statistics is (average_masking, average_volume, maximum_volume, chunk_duration), with amplitude values being in phon (or dBFS if amplitude normalization is disabled) and duration values being in seconds. Analysis statistics are only applicable for the most recent slice of tone data.");
 
                                 if ui.
                                     text_edit_singleline(&mut analysis_settings.osc_resource_address_stats)
                                     .labelled_by(message_label_2.id)
-                                    .on_hover_text("The OSC address pattern that analysis statistics data will be sent under.\n\nThe message format for analysis statistics data is (average_masking, average_volume, maximum_volume), with amplitude values being in phon (or dBFS if amplitude normalization is disabled). Analysis statistics are only applicable for the most recent slice of tone data.")
+                                    .on_hover_text("The OSC address pattern that analysis statistics will be sent under.\n\nThe message format for analysis statistics is (average_masking, average_volume, maximum_volume, chunk_duration), with amplitude values being in phon (or dBFS if amplitude normalization is disabled) and duration values being in seconds. Analysis statistics are only applicable for the most recent slice of tone data.")
                                     .changed()
                                 {
                                     update(&analysis_settings);

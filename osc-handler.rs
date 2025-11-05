@@ -16,7 +16,10 @@
 use clap::Parser;
 use rosc::{OscArray, OscBundle, OscMessage, OscPacket, OscTime, OscType, decoder, encoder};
 
-use std::net::{SocketAddr, UdpSocket};
+use std::{
+    net::{SocketAddr, UdpSocket},
+    time::Duration,
+};
 
 struct Handler {}
 
@@ -26,6 +29,9 @@ impl Handler {
     }
     fn handle_packet(&mut self, packet: OscPacket) -> anyhow::Result<Vec<OscPacket>> {
         let data = VisualizerData::try_from(packet).map_err(|e| anyhow::anyhow!(e))?;
+
+        // Magnitude should range from 0 to 1
+        // Buttons should be either float(1) or float(0)
 
         Ok(vec![OscPacket::Bundle(OscBundle {
             timetag: data.timetag,
@@ -66,6 +72,8 @@ const FORMAT_VERSION: &str = "v0.8.4";
 
 struct VisualizerData {
     timetag: OscTime,
+    duration: Duration,
+
     masking_mean: f32,
     mean: f32,
     max: f32,
@@ -89,10 +97,16 @@ impl TryFrom<OscPacket> for VisualizerData {
                         return Err("One or more message addresses are incorrect");
                     }
 
-                    if metadata.args.len() != 3 || analysis.args.len() != 1 {
+                    if metadata.args.len() != 4 || analysis.args.len() != 1 {
                         return Err("One or more message arguments are malformed");
                     }
 
+                    let duration_secs = metadata
+                        .args
+                        .pop()
+                        .ok_or("One or more message arguments are malformed")?
+                        .float()
+                        .ok_or("One or more message arguments are malformed")?;
                     let max = metadata
                         .args
                         .pop()
@@ -111,6 +125,7 @@ impl TryFrom<OscPacket> for VisualizerData {
                         .ok_or("One or more message arguments are malformed")?
                         .float()
                         .ok_or("One or more message arguments are malformed")?;
+                    let duration = Duration::from_secs_f32(duration_secs);
 
                     let analysis_array = analysis
                         .args
@@ -158,6 +173,7 @@ impl TryFrom<OscPacket> for VisualizerData {
 
                     Ok(Self {
                         timetag: bundle.timetag,
+                        duration,
                         masking_mean,
                         mean,
                         max,

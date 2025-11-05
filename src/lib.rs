@@ -656,6 +656,7 @@ impl AnalysisChain {
                 left_analyzer,
                 right_analyzer,
                 osc_timestamp,
+                chunk_duration,
             );
 
             let now = Instant::now();
@@ -670,6 +671,7 @@ impl AnalysisChain {
         left_analyzer: &mut BetterAnalyzer,
         right_analyzer: &mut BetterAnalyzer,
         osc_timestamp: SystemTime,
+        chunk_duration: Duration,
     ) {
         if !self.output_osc && !self.output_midi {
             return;
@@ -721,12 +723,14 @@ impl AnalysisChain {
                     spectrogram.data[0].masking_mean + listening_volume,
                     spectrogram.data[0].mean + listening_volume,
                     spectrogram.data[0].max + listening_volume,
+                    chunk_duration.as_secs_f32(),
                 )
             } else {
                 (
                     spectrogram.data[0].masking_mean,
                     spectrogram.data[0].mean,
                     spectrogram.data[0].max,
+                    chunk_duration.as_secs_f32(),
                 )
             };
 
@@ -826,6 +830,7 @@ impl AnalysisChain {
                                     OscType::Float(osc_spectrum_metadata.0),
                                     OscType::Float(osc_spectrum_metadata.1),
                                     OscType::Float(osc_spectrum_metadata.2),
+                                    OscType::Float(osc_spectrum_metadata.3),
                                 ],
                             }),
                             OscPacket::Message(OscMessage {
