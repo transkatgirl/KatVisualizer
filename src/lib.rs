@@ -29,7 +29,6 @@ use crate::analyzer::{
 
 pub mod analyzer;
 mod editor;
-mod scripting;
 
 #[derive(Clone, Copy)]
 pub(crate) struct AnalysisMetrics {
