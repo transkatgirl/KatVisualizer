@@ -417,7 +417,7 @@ pub(crate) struct AnalysisChain {
     osc_pool: ThreadPool,
     pub(crate) frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
     osc_socket: Arc<Mutex<Option<UdpSocket>>>,
-    osc_output: Arc<Mutex<Vec<(f32, f32, f32, f32)>>>,
+    osc_output: Arc<Mutex<Vec<(f32, f32, f32, f32, f32)>>>,
 }
 
 impl AnalysisChain {
@@ -695,8 +695,8 @@ impl AnalysisChain {
         #[cfg(feature = "midi")]
         let mut enabled_midi_notes = [false; 128];
 
-        for (frequency, pan, volume, signal_to_mask) in peaks {
-            osc_output.push((frequency, pan, volume, signal_to_mask));
+        for (frequency, width, pan, volume, signal_to_mask) in peaks {
+            osc_output.push((frequency, width, pan, volume, signal_to_mask));
 
             #[cfg(feature = "midi")]
             {
@@ -793,10 +793,11 @@ impl AnalysisChain {
                     let data = osc_output.lock();
                     let message_data = if let Some(listening_volume) = listening_volume {
                         data.iter()
-                            .map(|(f, p, v, stm)| {
+                            .map(|(f, w, p, v, stm)| {
                                 OscType::Array(OscArray {
                                     content: vec![
                                         OscType::Float(*f),
+                                        OscType::Float(*w),
                                         OscType::Float(*p),
                                         OscType::Float(*v + listening_volume),
                                         OscType::Float(*stm),
@@ -806,10 +807,11 @@ impl AnalysisChain {
                             .collect()
                     } else {
                         data.iter()
-                            .map(|(f, p, v, stm)| {
+                            .map(|(f, w, p, v, stm)| {
                                 OscType::Array(OscArray {
                                     content: vec![
                                         OscType::Float(*f),
+                                        OscType::Float(*w),
                                         OscType::Float(*p),
                                         OscType::Float(*v),
                                         OscType::Float(*stm),

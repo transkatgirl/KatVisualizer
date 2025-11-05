@@ -50,11 +50,11 @@ impl Handler {
                         content: data
                             .analysis
                             .into_iter()
-                            .map(|(f, p, v, stm)| {
+                            .map(|(f, b, _, v, stm)| {
                                 OscType::Array(OscArray {
                                     content: vec![
                                         OscType::Float(f),
-                                        OscType::Float(p),
+                                        OscType::Float(b),
                                         OscType::Float(v),
                                         OscType::Float(stm),
                                     ],
@@ -68,8 +68,6 @@ impl Handler {
     }
 }
 
-const FORMAT_VERSION: &str = "v0.8.4";
-
 struct VisualizerData {
     timetag: OscTime,
     duration: Duration,
@@ -77,8 +75,10 @@ struct VisualizerData {
     masking_mean: f32,
     mean: f32,
     max: f32,
-    analysis: Vec<(f32, f32, f32, f32)>,
+    analysis: Vec<(f32, f32, f32, f32, f32)>,
 }
+
+const FORMAT_VERSION: &str = "v0.8.4";
 
 impl TryFrom<OscPacket> for VisualizerData {
     type Error = &'static str;
@@ -162,13 +162,18 @@ impl TryFrom<OscPacket> for VisualizerData {
                             .unwrap()
                             .float()
                             .ok_or("One or more message arguments are malformed")?;
+                        let bandwidth = tone_array
+                            .pop()
+                            .unwrap()
+                            .float()
+                            .ok_or("One or more message arguments are malformed")?;
                         let frequency = tone_array
                             .pop()
                             .unwrap()
                             .float()
                             .ok_or("One or more message arguments are malformed")?;
 
-                        analysis.push((frequency, pan, volume, signal_mask_ratio))
+                        analysis.push((frequency, bandwidth, pan, volume, signal_mask_ratio))
                     }
 
                     Ok(Self {
@@ -201,7 +206,7 @@ struct Args {
     destination_address: SocketAddr,
 }
 
-const MAX_PACKET_SIZE: usize = 32768;
+const MAX_PACKET_SIZE: usize = 65535;
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
