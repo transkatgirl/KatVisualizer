@@ -29,6 +29,8 @@ struct Handler {
     agc_target_minimum: f64,
     above_masking: f64,
     below_masking: f64,
+
+    frequency_scale: Vec<(f64, f64, f64)>,
 }
 
 impl Handler {
@@ -40,6 +42,8 @@ impl Handler {
             agc_target_minimum: config.agc_target_minimum as f64,
             above_masking: config.above_masking as f64,
             below_masking: config.below_masking as f64,
+
+            frequency_scale: Vec::with_capacity(138),
         }
     }
     fn get_normalization_targets(&mut self, masking_mean: f32, duration: Duration) -> (f32, f32) {
@@ -65,12 +69,57 @@ impl Handler {
             (mean + self.above_masking) as f32,
         )
     }
+    fn update_frequency_scale(&mut self, sorted_analysis: &[(f32, f32, f32, f32, f32)]) {
+        let mut scratchpad = [(0.0, 0.0); 138];
+
+        for (frequency, _, _, volume, _) in sorted_analysis {
+            if *frequency > 20000.0 {
+                break;
+            } else if *frequency < 20.0 || !volume.is_finite() {
+                continue;
+            }
+
+            let index = scale_erb(*frequency as f64).round() as usize;
+            scratchpad[index].0 += *frequency as f64 * *volume as f64;
+            scratchpad[index].1 += *volume as f64;
+        }
+
+        let mut mean_erb = [0.0; 138];
+
+        for (index, (sum, count)) in scratchpad.into_iter().enumerate() {
+            mean_erb[index] = scale_erb((sum / count));
+        }
+
+        self.frequency_scale.clear();
+
+        let mut lower = 20.0;
+
+        for i in 0..138 {
+            let x = mean_erb[i];
+
+            let low = inv_scale_erb(x - 0.5).min(lower);
+            let hi = if i < 137 {
+                let current_erb = x + 0.5;
+                let next_erb = mean_erb[i + 1] - 0.5;
+
+                inv_scale_erb(current_erb.max((current_erb + next_erb) / 2.0))
+            } else {
+                inv_scale_erb(x + 0.5)
+            };
+
+            lower = hi;
+
+            self.frequency_scale.push((low, inv_scale_erb(x), hi));
+        }
+    }
     fn handle_packet(&mut self, packet: OscPacket) -> anyhow::Result<Vec<OscPacket>> {
         let mut data = VisualizerData::try_from(packet).map_err(|e| anyhow::anyhow!(e))?;
 
         let (lower, upper) = self.get_normalization_targets(data.masking_mean, data.duration);
 
         data.analysis.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+
+        self.update_frequency_scale(&data.analysis);
 
         //println!("{}", data.analysis.len());
 
@@ -299,6 +348,14 @@ impl TryFrom<OscPacket> for VisualizerData {
     }
 }
 
-pub fn map_value_f32(x: f32, min: f32, max: f32, target_min: f32, target_max: f32) -> f32 {
+fn map_value_f32(x: f32, min: f32, max: f32, target_min: f32, target_max: f32) -> f32 {
     (x - min) / (max - min) * (target_max - target_min) + target_min
+}
+
+fn scale_erb(x: f64) -> f64 {
+    21.4 * (1.0 + 0.00437 * x).log2()
+}
+
+fn inv_scale_erb(x: f64) -> f64 {
+    (1.0 / 0.00437) * ((2.0_f64.powf(x / 21.4)) - 1.0)
 }
