@@ -175,16 +175,22 @@ impl Handler {
                 })
             });
 
-        Ok(vec![
+        /*Ok(vec![
             OscPacket::Bundle(OscBundle {
                 timetag: data.timetag,
-                content: frequency_messages.collect(),
+                content: frequency_messages.chain(amplitude_messages).collect(),
             }),
-            OscPacket::Bundle(OscBundle {
-                timetag: data.timetag,
-                content: amplitude_messages.collect(),
-            }),
-        ])
+        ])*/
+
+        Ok(frequency_messages
+            .zip(amplitude_messages)
+            .map(|(frequency_message, amplitude_message)| {
+                OscPacket::Bundle(OscBundle {
+                    timetag: data.timetag,
+                    content: vec![frequency_message, amplitude_message],
+                })
+            })
+            .collect())
     }
 }
 
@@ -252,6 +258,8 @@ fn main() -> anyhow::Result<()> {
                         write_buf.clear();
                         encoder::encode_into(&response, &mut write_buf)?;
                         socket.send_to(&write_buf, args.destination_address)?;
+
+                        //println!("Sent {} bytes", write_buf.len());
                     }
 
                     /*println!(
