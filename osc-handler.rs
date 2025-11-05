@@ -30,7 +30,7 @@ struct Handler {
     above_masking: f64,
     below_masking: f64,
 
-    frequency_scale: Vec<(f64, f64, f64)>,
+    frequency_scale: Vec<(f32, f32, f32)>,
 }
 
 impl Handler {
@@ -43,7 +43,7 @@ impl Handler {
             above_masking: config.above_masking as f64,
             below_masking: config.below_masking as f64,
 
-            frequency_scale: Vec::with_capacity(138),
+            frequency_scale: Vec::with_capacity(139),
         }
     }
     fn get_normalization_targets(&mut self, masking_mean: f32, duration: Duration) -> (f32, f32) {
@@ -70,7 +70,7 @@ impl Handler {
         )
     }
     fn update_frequency_scale(&mut self, sorted_analysis: &[(f32, f32, f32, f32, f32)]) {
-        let mut scratchpad = [(0.0, 0.0); 138];
+        let mut scratchpad = [(0.0, 0.0); 139];
 
         for (frequency, _, _, volume, _) in sorted_analysis {
             if *frequency > 20000.0 {
@@ -84,7 +84,7 @@ impl Handler {
             scratchpad[index].1 += *volume as f64;
         }
 
-        let mut mean_erb = [0.0; 138];
+        let mut mean_erb = [0.0; 139];
 
         for (index, (sum, count)) in scratchpad.into_iter().enumerate() {
             if count > 0.0 {
@@ -96,7 +96,7 @@ impl Handler {
 
         let mut lower = 20.0;
 
-        for i in 0..138 {
+        for i in 0..139 {
             let x = mean_erb[i];
 
             if x == 0.0 {
@@ -105,7 +105,7 @@ impl Handler {
             }
 
             let low = inv_scale_erb(x - 0.5).min(lower);
-            let hi = if i < 137 {
+            let hi = if i < 138 {
                 let current_erb = x + 0.5;
                 let next_erb = mean_erb[i + 1] - 0.5;
 
@@ -116,7 +116,8 @@ impl Handler {
 
             lower = hi;
 
-            self.frequency_scale.push((low, inv_scale_erb(x), hi));
+            self.frequency_scale
+                .push((low as f32, inv_scale_erb(x) as f32, hi as f32));
         }
     }
     fn handle_packet(&mut self, packet: OscPacket) -> anyhow::Result<Vec<OscPacket>> {
@@ -128,6 +129,27 @@ impl Handler {
 
         self.update_frequency_scale(&data.analysis);
 
+        let mut scale_index = 0;
+        let mut scratchpad = [(0.0, 0.0); 139];
+
+        for (frequency, _bandwidth, _pan, volume, _stm) in data.analysis {
+            while self.frequency_scale[scale_index].0 < frequency && scale_index < 138 {
+                scale_index += 1;
+            }
+
+            scratchpad[scale_index].0 +=
+                map_value_f32(volume, lower, upper, 0.0, 1.0).clamp(0.0, 1.0) as f64;
+            scratchpad[scale_index].1 += 1.0
+        }
+
+        let mut scale_amplitudes = [0.0; 139];
+
+        for (index, (sum, count)) in scratchpad.into_iter().enumerate() {
+            if count > 0.0 {
+                scale_amplitudes[index] = (sum / count) as f32;
+            }
+        }
+
         //println!("{}", data.analysis.len());
 
         // Magnitude should range from 0 to 1
@@ -138,17 +160,13 @@ impl Handler {
             content: vec![OscPacket::Message(OscMessage {
                 addr: "/tones".to_string(),
                 args: vec![OscType::Array(OscArray {
-                    content: data
-                        .analysis
-                        .into_iter()
-                        .map(|(f, _b, _p, v, _stm)| {
+                    content: self
+                        .frequency_scale
+                        .iter()
+                        .zip(scale_amplitudes.into_iter())
+                        .map(|((_, f, _), v)| {
                             OscType::Array(OscArray {
-                                content: vec![
-                                    OscType::Float(f),
-                                    OscType::Float(
-                                        map_value_f32(v, lower, upper, 0.0, 1.0).clamp(0.0, 1.0),
-                                    ),
-                                ],
+                                content: vec![OscType::Float(*f), OscType::Float(v)],
                             })
                         })
                         .collect(),
