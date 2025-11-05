@@ -139,8 +139,7 @@ impl Handler {
                 scale_index += 1;
             }
 
-            scratchpad[scale_index].0 +=
-                map_value_f32(volume, lower, upper, 0.0, 1.0).clamp(0.0, 1.0) as f64;
+            scratchpad[scale_index].0 += volume as f64;
             scratchpad[scale_index].1 += 1.0
         }
 
@@ -148,7 +147,8 @@ impl Handler {
 
         for (index, (sum, count)) in scratchpad.into_iter().enumerate() {
             if count > 0.0 {
-                scale_amplitudes[index] = (sum / count) as f32;
+                scale_amplitudes[index] =
+                    map_value_f32((sum / count) as f32, lower, upper, 0.0, 1.0).clamp(0.0, 1.0)
             }
         }
 
@@ -159,21 +159,23 @@ impl Handler {
 
         Ok(vec![OscPacket::Bundle(OscBundle {
             timetag: data.timetag,
-            content: vec![OscPacket::Message(OscMessage {
-                addr: "/tones".to_string(),
-                args: vec![OscType::Array(OscArray {
-                    content: self
-                        .frequency_scale
-                        .iter()
-                        .zip(scale_amplitudes.into_iter())
-                        .map(|((_, f, _), v)| {
-                            OscType::Array(OscArray {
+            content: self
+                .frequency_scale
+                .iter()
+                .zip(scale_amplitudes.into_iter())
+                .enumerate()
+                .filter(|(i, _)| *i > 1 && *i < 60)
+                .map(|(i, ((_, f, _), v))| {
+                    OscPacket::Message(OscMessage {
+                        addr: ["/tones/", &i.to_string()].concat(),
+                        args: vec![OscType::Array(OscArray {
+                            content: vec![OscType::Array(OscArray {
                                 content: vec![OscType::Float(*f), OscType::Float(v)],
-                            })
-                        })
-                        .collect(),
-                })],
-            })],
+                            })],
+                        })],
+                    })
+                })
+                .collect(),
         })])
     }
 }
