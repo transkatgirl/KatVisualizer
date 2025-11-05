@@ -87,7 +87,9 @@ impl Handler {
         let mut mean_erb = [0.0; 138];
 
         for (index, (sum, count)) in scratchpad.into_iter().enumerate() {
-            mean_erb[index] = scale_erb((sum / count));
+            if count > 0.0 {
+                mean_erb[index] = scale_erb(sum / count);
+            }
         }
 
         self.frequency_scale.clear();
@@ -96,6 +98,11 @@ impl Handler {
 
         for i in 0..138 {
             let x = mean_erb[i];
+
+            if x == 0.0 {
+                self.frequency_scale.push((0.0, 0.0, 0.0));
+                continue;
+            }
 
             let low = inv_scale_erb(x - 0.5).min(lower);
             let hi = if i < 137 {
