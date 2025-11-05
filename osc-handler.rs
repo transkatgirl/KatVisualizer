@@ -19,13 +19,14 @@ use rosc::{OscArray, OscBundle, OscMessage, OscPacket, OscTime, OscType, decoder
 use std::{
     collections::VecDeque,
     net::{SocketAddr, UdpSocket},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 struct Handler {
     normalization_data: VecDeque<(f64, Duration)>,
     normalization_duration: Duration,
     agc_length: Duration,
+    agc_target_minimum: f64,
     above_masking: f64,
     below_masking: f64,
 }
@@ -36,6 +37,7 @@ impl Handler {
             normalization_data: VecDeque::with_capacity(8192),
             normalization_duration: Duration::ZERO,
             agc_length: Duration::from_secs_f32(config.agc_length),
+            agc_target_minimum: config.agc_target_minimum as f64,
             above_masking: config.above_masking as f64,
             below_masking: config.below_masking as f64,
         }
@@ -50,12 +52,13 @@ impl Handler {
             self.normalization_duration -= front.1;
         }
 
-        let mean = self
+        let mean = (self
             .normalization_data
             .iter()
             .map(|(d, l)| d * l.as_secs_f64())
             .sum::<f64>()
-            / self.normalization_duration.as_secs_f64();
+            / self.normalization_duration.as_secs_f64())
+        .max(self.agc_target_minimum);
 
         (
             (mean - self.below_masking) as f32,
@@ -63,9 +66,13 @@ impl Handler {
         )
     }
     fn handle_packet(&mut self, packet: OscPacket) -> anyhow::Result<Vec<OscPacket>> {
-        let data = VisualizerData::try_from(packet).map_err(|e| anyhow::anyhow!(e))?;
+        let mut data = VisualizerData::try_from(packet).map_err(|e| anyhow::anyhow!(e))?;
 
         let (lower, upper) = self.get_normalization_targets(data.masking_mean, data.duration);
+
+        data.analysis.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+
+        //println!("{}", data.analysis.len());
 
         // Magnitude should range from 0 to 1
         // Buttons should be either float(1) or float(0)
@@ -117,8 +124,11 @@ struct Args {
     #[arg(short, long)]
     destination_address: SocketAddr,
 
-    #[arg(long, default_value_t = 1.0)]
+    #[arg(long, default_value_t = 0.128)]
     agc_length: f32,
+
+    #[arg(long, default_value_t = 15.0)]
+    agc_target_minimum: f32,
 
     #[arg(long, default_value_t = 30.0)]
     above_masking: f32,
@@ -147,6 +157,8 @@ fn main() -> anyhow::Result<()> {
         let length = socket.recv(&mut read_buf)?;
         let received = &read_buf[0..length];
 
+        //let start = Instant::now();
+
         match decoder::decode_udp(received) {
             Ok((_, packet)) => match handler.handle_packet(packet) {
                 Ok(responses) => {
@@ -155,6 +167,11 @@ fn main() -> anyhow::Result<()> {
                         encoder::encode_into(&response, &mut write_buf)?;
                         socket.send_to(&write_buf, args.destination_address)?;
                     }
+
+                    /*println!(
+                        "Processing time: {:.1} ms",
+                        start.elapsed().as_secs_f32() / 1000.0
+                    );*/
                 }
                 Err(e) => {
                     eprintln!("Failed to handle OSC packet:\n{:#?}", e);
