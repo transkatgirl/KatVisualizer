@@ -9,10 +9,8 @@
 //! clap = { version = "4.5.51", features = ["derive"] }
 //! rosc = "0.11.4"
 //! ```
-#![feature(vec_into_chunks)] // Requires nightly rust (rust-script --toolchain nightly)
-
 use clap::Parser;
-use rosc::{OscArray, OscBundle, OscMessage, OscPacket, OscTime, OscType, decoder, encoder};
+use rosc::{OscBundle, OscMessage, OscPacket, OscTime, OscType, decoder, encoder};
 
 use std::{
     collections::VecDeque,
