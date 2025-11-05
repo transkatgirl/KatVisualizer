@@ -152,31 +152,39 @@ impl Handler {
             }
         }
 
-        //println!("{}", data.analysis.len());
-
-        // Magnitude should range from 0 to 1
-        // Buttons should be either float(1) or float(0)
-
-        Ok(vec![OscPacket::Bundle(OscBundle {
-            timetag: data.timetag,
-            content: self
-                .frequency_scale
-                .iter()
-                .zip(scale_amplitudes.into_iter())
-                .enumerate()
-                .filter(|(i, _)| *i > 1)
-                .map(|(i, ((_, f, _), v))| {
-                    OscPacket::Message(OscMessage {
-                        addr: ["/tones/", &(i - 1).to_string()].concat(),
-                        args: vec![OscType::Array(OscArray {
-                            content: vec![OscType::Array(OscArray {
-                                content: vec![OscType::Float(*f), OscType::Float(v)],
-                            })],
-                        })],
-                    })
+        let frequency_messages = self
+            .frequency_scale
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i > 1)
+            .map(|(i, (_, f, _))| {
+                OscPacket::Message(OscMessage {
+                    addr: ["/tones/", &(i - 1).to_string(), "/frequency"].concat(),
+                    args: vec![OscType::Float(*f)],
                 })
-                .collect(),
-        })])
+            });
+
+        let amplitude_messages = scale_amplitudes
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| *i > 1)
+            .map(|(i, v)| {
+                OscPacket::Message(OscMessage {
+                    addr: ["/tones/", &(i - 1).to_string(), "/amplitude"].concat(),
+                    args: vec![OscType::Float(v)],
+                })
+            });
+
+        Ok(vec![
+            OscPacket::Bundle(OscBundle {
+                timetag: data.timetag,
+                content: frequency_messages.collect(),
+            }),
+            OscPacket::Bundle(OscBundle {
+                timetag: data.timetag,
+                content: amplitude_messages.collect(),
+            }),
+        ])
     }
 }
 
