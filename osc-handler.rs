@@ -164,10 +164,10 @@ impl Handler {
                 .iter()
                 .zip(scale_amplitudes.into_iter())
                 .enumerate()
-                .filter(|(i, _)| *i > 1 && *i < 60)
+                .filter(|(i, _)| *i > 1)
                 .map(|(i, ((_, f, _), v))| {
                     OscPacket::Message(OscMessage {
-                        addr: ["/tones/", &i.to_string()].concat(),
+                        addr: ["/tones/", &(i - 1).to_string()].concat(),
                         args: vec![OscType::Array(OscArray {
                             content: vec![OscType::Array(OscArray {
                                 content: vec![OscType::Float(*f), OscType::Float(v)],
