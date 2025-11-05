@@ -143,7 +143,7 @@ impl TryFrom<OscPacket> for VisualizerData {
                             .ok_or("One or more message arguments are malformed")?
                             .content;
 
-                        if tone_array.len() != 4 {
+                        if tone_array.len() != 5 {
                             return Err("One or more message arguments are malformed");
                         }
 
