@@ -23,7 +23,8 @@ use threadpool::ThreadPool;
 static GLOBAL: MiMalloc = MiMalloc;
 
 use crate::analyzer::{
-    BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram, map_value_f32,
+    BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram, amplitude_to_dbfs,
+    dbfs_to_amplitude, map_value_f32,
 };
 
 pub mod analyzer;
@@ -681,6 +682,7 @@ impl AnalysisChain {
             right_analyzer.remove_masked_components();
         }
 
+        let frequencies = self.frequencies.read();
         let peaks = spectrogram.data[0].peaks(
             self.output_tone_amplitude_threshold,
             self.output_max_simultaneous_tones,
@@ -691,31 +693,18 @@ impl AnalysisChain {
         osc_output.clear();
 
         #[cfg(feature = "midi")]
-        if self.output_midi {
-            for (frequency, width, pan, volume, signal_to_mask) in peaks {
-                osc_output.push((frequency, width, pan, volume, signal_to_mask));
+        let mut enabled_midi_notes = [false; 128];
 
-                let note = freq_to_midi_note(frequency).clamp(0.0, 128.0).round() as usize;
-                if note != 128 {
-                    midi_output[note] = map_value_f32(
-                        volume,
-                        self.midi_pressure_min_amplitude,
-                        self.midi_pressure_max_amplitude,
-                        0.0,
-                        1.0,
-                    )
-                    .clamp(0.0, 1.0);
-                }
-            }
-        } else {
-            for (frequency, width, pan, volume, signal_to_mask) in peaks {
-                osc_output.push((frequency, width, pan, volume, signal_to_mask));
-            }
-        }
-
-        #[cfg(not(feature = "midi"))]
         for (frequency, width, pan, volume, signal_to_mask) in peaks {
             osc_output.push((frequency, width, pan, volume, signal_to_mask));
+
+            #[cfg(feature = "midi")]
+            {
+                let note = freq_to_midi_note(frequency).clamp(0.0, 128.0).round() as usize;
+                if note != 128 {
+                    enabled_midi_notes[note] = true;
+                }
+            }
         }
 
         drop(osc_output);
@@ -858,6 +847,65 @@ impl AnalysisChain {
                     let _ = socket.send_to(&buf, socket_address);
                 }
             });
+        }
+
+        #[cfg(feature = "midi")]
+        if self.output_midi {
+            let mut note_scratchpad: [(f64, f64); 128] = [(0.0, 0.0); 128];
+
+            let left = left_analyzer.raw_analysis();
+            let right = right_analyzer.raw_analysis();
+
+            let gain_amplitude = dbfs_to_amplitude(self.gain);
+
+            for (index, ((_, volume), (_, center, _))) in spectrogram.data[0]
+                .data
+                .iter()
+                .zip(frequencies.iter())
+                .enumerate()
+            {
+                let note = freq_to_midi_note(*center).round() as usize;
+
+                if note > 127 {
+                    break;
+                }
+
+                let amplitude = if self.single_input {
+                    left[index]
+                } else {
+                    left[index] + right[index]
+                } * gain_amplitude;
+
+                if !volume.is_finite() || *volume < spectrogram.data[0].masking[index].1 {
+                    continue;
+                }
+
+                note_scratchpad[note].0 += 1.0;
+                note_scratchpad[note].1 += amplitude;
+            }
+
+            for (i, (items, volume_sum)) in note_scratchpad.into_iter().enumerate() {
+                if items != 0.0 {
+                    let volume = amplitude_to_dbfs(volume_sum / items) as f32;
+
+                    if volume >= self.output_tone_amplitude_threshold {
+                        midi_output[i] = map_value_f32(
+                            volume,
+                            self.midi_pressure_min_amplitude,
+                            self.midi_pressure_max_amplitude,
+                            0.0,
+                            1.0,
+                        )
+                        .clamp(0.0, 1.0);
+                    }
+                }
+            }
+
+            for (index, enabled) in enabled_midi_notes.into_iter().enumerate() {
+                if !enabled {
+                    midi_output[index] = 0.0;
+                }
+            }
         }
     }
     pub(crate) fn config(&self) -> AnalysisChainConfig {
