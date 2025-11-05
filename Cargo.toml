@@ -39,6 +39,16 @@ parking_lot = "0.12.5"
 mimalloc = "0.1.48"
 voracious_radix_sort = "1.2.0"
 rosc = "0.11.4"
+rhai = { version = "1.23.6", features = [
+	"sync",
+	"f32_float",
+	"no_module",
+	"no_custom_syntax",
+] }
+egui_extras = { version = "0.32.0", features = [
+	"syntect",
+] }
+syntect = "5.3.0"
 
 [profile.dev]
 opt-level = 3
