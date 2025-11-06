@@ -26,11 +26,15 @@ struct Handler {
     above_masking: f64,
     below_masking: f64,
 
-    frequency_scale: Vec<(f32, f32, f32, f32)>,
+    frequency_scale: Vec<(f32, f32, f32)>,
 }
 
 impl Handler {
     fn new(config: &Args) -> Self {
+        let scale_minimum = scale_erb(20.0);
+        let scale_maximum = scale_erb(20000.0);
+        let target_max = (config.frequency_scale_bins - 1) as f32;
+
         Self {
             normalization_data: VecDeque::with_capacity(8192),
             normalization_duration: Duration::ZERO,
@@ -39,7 +43,35 @@ impl Handler {
             above_masking: config.above_masking as f64,
             below_masking: config.below_masking as f64,
 
-            frequency_scale: Vec::with_capacity(43),
+            frequency_scale: (0..config.frequency_scale_bins)
+                .map(|i| {
+                    let i = i as f32;
+
+                    (
+                        inv_scale_erb(map_value_f32(
+                            i - 0.5,
+                            0.0,
+                            target_max,
+                            scale_minimum,
+                            scale_maximum,
+                        )),
+                        inv_scale_erb(map_value_f32(
+                            i,
+                            0.0,
+                            target_max,
+                            scale_minimum,
+                            scale_maximum,
+                        )),
+                        inv_scale_erb(map_value_f32(
+                            i + 0.5,
+                            0.0,
+                            target_max,
+                            scale_minimum,
+                            scale_maximum,
+                        )),
+                    )
+                })
+                .collect(),
         }
     }
     fn get_normalization_targets(&mut self, masking_mean: f32, duration: Duration) -> (f32, f32) {
@@ -65,63 +97,6 @@ impl Handler {
             (mean + self.above_masking) as f32,
         )
     }
-    fn update_frequency_scale(&mut self, sorted_analysis: &[(f32, f32, f32, f32, f32)]) {
-        let mut scratchpad = [(0.0, 0.0); 43];
-
-        for (frequency, _, _, volume, _) in sorted_analysis {
-            if *frequency > 20000.0 {
-                break;
-            } else if *frequency < 20.0 || !volume.is_finite() {
-                continue;
-            }
-
-            let index = scale_erb(*frequency as f64).round() as usize;
-            scratchpad[index].0 += *frequency as f64 * *volume as f64;
-            scratchpad[index].1 += *volume as f64;
-        }
-
-        let mut mean_erb = [0.0; 43];
-
-        for (index, (sum, count)) in scratchpad.into_iter().enumerate() {
-            mean_erb[index] = if count > 0.0 {
-                scale_erb(sum / count).clamp(index as f64 - 0.49, index as f64 + 0.49)
-            } else {
-                index as f64
-            };
-        }
-
-        self.frequency_scale.clear();
-
-        let mut lower = 20.0;
-
-        for i in 0..43 {
-            let x = mean_erb[i];
-
-            if x == 0.0 {
-                self.frequency_scale.push((0.0, 0.0, 0.0, 0.0));
-                continue;
-            }
-
-            let low = inv_scale_erb(x - 0.5).min(lower);
-            let hi = if i < 42 {
-                let current_erb = x + 0.5;
-                let next_erb = mean_erb[i + 1] - 0.5;
-
-                inv_scale_erb(current_erb.max((current_erb + next_erb) / 2.0))
-            } else {
-                inv_scale_erb(x + 0.5)
-            };
-
-            lower = hi;
-
-            self.frequency_scale.push((
-                low as f32,
-                inv_scale_erb(x) as f32,
-                hi as f32,
-                i as f32 - x as f32,
-            ));
-        }
-    }
     fn handle_packet(&mut self, packet: OscPacket) -> anyhow::Result<Vec<OscPacket>> {
         let mut data = VisualizerData::try_from(packet).map_err(|e| anyhow::anyhow!(e))?;
 
@@ -129,13 +104,13 @@ impl Handler {
 
         data.analysis.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
 
-        self.update_frequency_scale(&data.analysis);
-
         let mut scale_index = 0;
         let mut scale_amplitudes = [f32::NEG_INFINITY; 43];
 
         for (frequency, _bandwidth, _pan, volume, _stm) in data.analysis {
-            while self.frequency_scale[scale_index].0 < frequency && scale_index < 42 {
+            while self.frequency_scale[scale_index].0 < frequency
+                && scale_index < self.frequency_scale.len() - 1
+            {
                 scale_index += 1;
             }
 
@@ -148,43 +123,23 @@ impl Handler {
             .iter_mut()
             .for_each(|a| *a = map_value_f32(*a as f32, lower, upper, 0.0, 1.0).clamp(0.0, 1.0));
 
-        /*let frequency_messages = self
-        .frequency_scale
-        .iter()
-        .enumerate()
-        .skip(1)
-        .take(41)
-        .map(|(i, (_, f, _, _))| {
-            OscPacket::Message(OscMessage {
-                addr: ["/tones/", &i.to_string(), "/frequency"].concat(),
-                args: vec![OscType::Float(*f)],
-            })
-        });*/
-
         let frequency_messages = self
             .frequency_scale
             .iter()
             .enumerate()
-            .skip(1)
-            .take(41)
-            .map(|(i, (_, _, _, fskew))| {
+            .map(|(i, (_, f, _))| {
                 OscPacket::Message(OscMessage {
-                    addr: ["/tones/", &i.to_string(), "/freqskew"].concat(),
-                    args: vec![OscType::Float(*fskew + 0.5)],
+                    addr: ["/tones/", &(i + 1).to_string(), "/frequency"].concat(),
+                    args: vec![OscType::Float(*f)],
                 })
             });
 
-        let amplitude_messages = scale_amplitudes
-            .into_iter()
-            .enumerate()
-            .skip(1)
-            .take(41)
-            .map(|(i, v)| {
-                OscPacket::Message(OscMessage {
-                    addr: ["/tones/", &i.to_string(), "/amplitude"].concat(),
-                    args: vec![OscType::Float(v)],
-                })
-            });
+        let amplitude_messages = scale_amplitudes.into_iter().enumerate().map(|(i, v)| {
+            OscPacket::Message(OscMessage {
+                addr: ["/tones/", &(i + 1).to_string(), "/amplitude"].concat(),
+                args: vec![OscType::Float(v)],
+            })
+        });
 
         /*Ok(vec![
             OscPacket::Bundle(OscBundle {
@@ -238,6 +193,9 @@ struct Args {
 
     #[arg(long, default_value_t = -3.0)]
     below_masking: f32,
+
+    #[arg(long, default_value_t = 41)]
+    frequency_scale_bins: u16,
 }
 
 const MAX_PACKET_SIZE: usize = 65535;
@@ -408,10 +366,10 @@ fn map_value_f32(x: f32, min: f32, max: f32, target_min: f32, target_max: f32) -
     (x - min) / (max - min) * (target_max - target_min) + target_min
 }
 
-fn scale_erb(x: f64) -> f64 {
+fn scale_erb(x: f32) -> f32 {
     21.4 * (1.0 + 0.00437 * x).log10()
 }
 
-fn inv_scale_erb(x: f64) -> f64 {
-    (1.0 / 0.00437) * ((10.0_f64.powf(x / 21.4)) - 1.0)
+fn inv_scale_erb(x: f32) -> f32 {
+    (1.0 / 0.00437) * ((10.0_f32.powf(x / 21.4)) - 1.0)
 }
