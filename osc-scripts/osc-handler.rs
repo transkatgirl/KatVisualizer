@@ -84,7 +84,7 @@ impl Handler {
 
         for (index, (sum, count)) in scratchpad.into_iter().enumerate() {
             mean_erb[index] = if count > 0.0 {
-                scale_erb(sum / count).clamp(index as f64 - 0.5, index as f64 + 0.5)
+                scale_erb(sum / count).clamp(index as f64 - 0.49, index as f64 + 0.49)
             } else {
                 index as f64
             };
@@ -132,25 +132,21 @@ impl Handler {
         self.update_frequency_scale(&data.analysis);
 
         let mut scale_index = 0;
-        let mut scratchpad = [(0.0, 0.0); 43];
+        let mut scale_amplitudes = [f32::NEG_INFINITY; 43];
 
         for (frequency, _bandwidth, _pan, volume, _stm) in data.analysis {
             while self.frequency_scale[scale_index].0 < frequency && scale_index < 42 {
                 scale_index += 1;
             }
 
-            scratchpad[scale_index].0 += volume as f64;
-            scratchpad[scale_index].1 += 1.0
-        }
-
-        let mut scale_amplitudes = [0.0; 43];
-
-        for (index, (sum, count)) in scratchpad.into_iter().enumerate() {
-            if count > 0.0 {
-                scale_amplitudes[index] =
-                    map_value_f32((sum / count) as f32, lower, upper, 0.0, 1.0).clamp(0.0, 1.0)
+            if volume > scale_amplitudes[scale_index] {
+                scale_amplitudes[scale_index] = volume;
             }
         }
+
+        scale_amplitudes
+            .iter_mut()
+            .for_each(|a| *a = map_value_f32(*a as f32, lower, upper, 0.0, 1.0).clamp(0.0, 1.0));
 
         /*let frequency_messages = self
         .frequency_scale
@@ -240,7 +236,7 @@ struct Args {
     #[arg(long, default_value_t = 30.0)]
     above_masking: f32,
 
-    #[arg(long, default_value_t = 0.0)]
+    #[arg(long, default_value_t = -3.0)]
     below_masking: f32,
 }
 
