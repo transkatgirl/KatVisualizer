@@ -95,7 +95,7 @@
     </Channel>
     <Channel Number="16083">
         <Name>/tones/41/amplitude</Name>
-        <Type>Button</Type>
+        <Type>Slider</Type>
     </Channel>
     <Channel Number="16451">
         <Name>/tones/12/amplitude</Name>
