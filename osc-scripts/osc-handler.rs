@@ -26,7 +26,7 @@ struct Handler {
     above_masking: f64,
     below_masking: f64,
 
-    frequency_scale: Vec<(f32, f32, f32)>,
+    frequency_scale: Vec<(f32, f32, f32, f32)>,
 }
 
 impl Handler {
@@ -98,7 +98,7 @@ impl Handler {
             let x = mean_erb[i];
 
             if x == 0.0 {
-                self.frequency_scale.push((0.0, 0.0, 0.0));
+                self.frequency_scale.push((0.0, 0.0, 0.0, 0.0));
                 continue;
             }
 
@@ -114,8 +114,12 @@ impl Handler {
 
             lower = hi;
 
-            self.frequency_scale
-                .push((low as f32, inv_scale_erb(x) as f32, hi as f32));
+            self.frequency_scale.push((
+                low as f32,
+                inv_scale_erb(x) as f32,
+                hi as f32,
+                i as f32 - x as f32,
+            ));
         }
     }
     fn handle_packet(&mut self, packet: OscPacket) -> anyhow::Result<Vec<OscPacket>> {
@@ -148,16 +152,29 @@ impl Handler {
             }
         }
 
+        /*let frequency_messages = self
+        .frequency_scale
+        .iter()
+        .enumerate()
+        .skip(1)
+        .take(41)
+        .map(|(i, (_, f, _, _))| {
+            OscPacket::Message(OscMessage {
+                addr: ["/tones/", &i.to_string(), "/frequency"].concat(),
+                args: vec![OscType::Float(*f)],
+            })
+        });*/
+
         let frequency_messages = self
             .frequency_scale
             .iter()
             .enumerate()
             .skip(1)
             .take(41)
-            .map(|(i, (_, f, _))| {
+            .map(|(i, (_, _, _, fskew))| {
                 OscPacket::Message(OscMessage {
-                    addr: ["/tones/", &i.to_string(), "/frequency"].concat(),
-                    args: vec![OscType::Float(*f)],
+                    addr: ["/tones/", &i.to_string(), "/freqskew"].concat(),
+                    args: vec![OscType::Float(*fskew + 0.5)],
                 })
             });
 
