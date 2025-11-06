@@ -170,7 +170,7 @@
         <Type>Slider</Type>
     </Channel>
     <Channel Number="27458">
-        <Name></Name>
+        <Name>/tones/40/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="27791">
@@ -335,10 +335,6 @@
     </Channel>
     <Channel Number="64068">
         <Name>/tones/32/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="27458">
-        <Name>/tones/40/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
 </InputProfile>
