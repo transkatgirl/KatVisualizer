@@ -18,7 +18,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use voracious_radix_sort::RadixSort;
 
 use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS, MAX_PEAK_OUTPUTS,
@@ -29,17 +28,16 @@ use crate::{
 
 fn calculate_volume_min_max(
     settings: &RenderSettings,
-    scratchpad: &mut Vec<f32>,
     spectrogram: &BetterSpectrogram,
 ) -> (f32, f32) {
     if !settings.automatic_gain || !spectrogram.data[0].masking_mean.is_finite() {
         return (settings.min_db, settings.max_db);
     }
 
-    scratchpad.clear();
     let mut elapsed = Duration::ZERO;
 
     let mut masking_sum = 0.0;
+    let mut rows = 0.0;
 
     for row in &spectrogram.data {
         elapsed += row.duration;
@@ -49,27 +47,15 @@ fn calculate_volume_min_max(
 
         if row.masking_mean.is_finite() {
             masking_sum += row.masking_mean as f64;
-            scratchpad.push(row.max);
+            rows += 1.0;
         }
     }
 
-    scratchpad.voracious_sort();
-
-    let rows = scratchpad.len() as f32;
-
-    let peak_index = (settings.agc_peak_percentile * rows)
-        .round()
-        .clamp(0.0, rows - 1.0) as usize;
-    let peak = scratchpad[peak_index];
-    let masking = (masking_sum / rows as f64) as f32;
+    let masking = (masking_sum / rows) as f32;
 
     (
-        (masking - settings.agc_below_masking)
-            .max(peak - settings.agc_max_peak_range)
-            .clamp(settings.agc_minimum, settings.agc_maximum),
-        (masking + settings.agc_above_masking)
-            .max(peak)
-            .clamp(settings.agc_minimum, settings.agc_maximum),
+        (masking - settings.agc_below_masking).clamp(settings.agc_minimum, settings.agc_maximum),
+        (masking + settings.agc_above_masking).clamp(settings.agc_minimum, settings.agc_maximum),
     )
 }
 
@@ -469,8 +455,6 @@ struct RenderSettings {
     maximum_chroma: f32,
     automatic_gain: bool,
     agc_duration: Duration,
-    agc_peak_percentile: f32,
-    agc_max_peak_range: f32,
     agc_above_masking: f32,
     agc_below_masking: f32,
     agc_minimum: f32,
@@ -497,8 +481,6 @@ impl Default for RenderSettings {
             maximum_chroma: 0.09,
             automatic_gain: true,
             agc_duration: Duration::from_secs_f64(1.0),
-            agc_peak_percentile: 0.97,
-            agc_max_peak_range: 60.0,
             agc_above_masking: 42.0,
             agc_below_masking: 3.0,
             agc_minimum: 3.0 - AnalysisChainConfig::default().listening_volume as f32,
@@ -686,7 +668,6 @@ pub fn create(
                 let color_table = &shared_state.color_table.read();
                 let spectrogram_texture = shared_state.spectrogram_texture.read().unwrap();
                 let frequencies = analysis_frequencies.read();
-                let mut agc_scratchpad = Vec::with_capacity(SPECTROGRAM_SLICES);
 
                 let bargraph_bounds = Rect {
                     min: Pos2 { x: 0.0, y: 0.0 },
@@ -730,8 +711,7 @@ pub fn create(
                 let processing_duration = metrics.processing;
                 let chunk_duration = front.duration;
 
-                let (min_db, max_db) =
-                    calculate_volume_min_max(&settings, &mut agc_scratchpad, spectrogram);
+                let (min_db, max_db) = calculate_volume_min_max(&settings, spectrogram);
 
                 if settings.bargraph_height != 0.0 {
                     if settings.show_masking {
@@ -1153,8 +1133,6 @@ pub fn create(
                         }
 
                         if render_settings.automatic_gain && analysis_settings.masking {
-                            let percentile_duration = render_settings.agc_duration.as_secs_f64() * (1.0 - render_settings.agc_peak_percentile as f64);
-
                             let mut agc_duration = render_settings.agc_duration.as_secs_f64();
                             if ui
                                 .add(
@@ -1168,28 +1146,8 @@ pub fn create(
                                 if agc_duration > 0.0 {
                                     render_settings.agc_duration =
                                         Duration::from_secs_f64(agc_duration);
-                                    render_settings.agc_peak_percentile = (1.0 - (percentile_duration / agc_duration)) as f32;
                                 }
                             };
-
-                            let mut agc_peak_percentile = render_settings.agc_peak_percentile * 100.0;
-
-                            if ui.add(
-                                egui::Slider::new(&mut agc_peak_percentile, 0.0..=100.0)
-                                    .text("Peak percentile"),
-                            ).changed() {
-                                render_settings.agc_peak_percentile =
-                                    agc_peak_percentile / 100.0;
-                            }
-
-                            ui.add(
-                                egui::Slider::new(&mut render_settings.agc_max_peak_range, 0.0..=100.0)
-                                    .clamping(egui::SliderClamping::Never)
-                                    .suffix("dB")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Maximum range below peak"),
-                            );
 
                             ui.add(
                                 egui::Slider::new(&mut render_settings.agc_above_masking, 0.0..=100.0)
@@ -1197,7 +1155,7 @@ pub fn create(
                                     .suffix("dB")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
-                                    .text("Minimum range above masking mean"),
+                                    .text("Range above masking mean"),
                             );
 
                             ui.add(
@@ -1206,7 +1164,7 @@ pub fn create(
                                     .suffix("dB")
                                     .step_by(1.0)
                                     .fixed_decimals(0)
-                                    .text("Maximum range below masking mean"),
+                                    .text("Range below masking mean"),
                             );
                         } else {
                             if analysis_settings.normalize_amplitude {
