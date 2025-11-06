@@ -152,7 +152,7 @@ impl Handler {
             .frequency_scale
             .iter()
             .enumerate()
-            .filter(|(i, _)| *i > 1)
+            .filter(|(i, _)| *i > 1 && *i < 42)
             .map(|(i, (_, f, _))| {
                 OscPacket::Message(OscMessage {
                     addr: ["/tones/", &(i - 1).to_string(), "/frequency"].concat(),
@@ -163,7 +163,7 @@ impl Handler {
         let amplitude_messages = scale_amplitudes
             .into_iter()
             .enumerate()
-            .filter(|(i, _)| *i > 1)
+            .filter(|(i, _)| *i > 1 && *i < 42)
             .map(|(i, v)| {
                 OscPacket::Message(OscMessage {
                     addr: ["/tones/", &(i - 1).to_string(), "/amplitude"].concat(),
