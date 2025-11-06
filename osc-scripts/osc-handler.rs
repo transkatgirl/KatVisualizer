@@ -39,7 +39,7 @@ impl Handler {
             above_masking: config.above_masking as f64,
             below_masking: config.below_masking as f64,
 
-            frequency_scale: Vec::with_capacity(139),
+            frequency_scale: Vec::with_capacity(43),
         }
     }
     fn get_normalization_targets(&mut self, masking_mean: f32, duration: Duration) -> (f32, f32) {
@@ -66,7 +66,7 @@ impl Handler {
         )
     }
     fn update_frequency_scale(&mut self, sorted_analysis: &[(f32, f32, f32, f32, f32)]) {
-        let mut scratchpad = [(0.0, 0.0); 139];
+        let mut scratchpad = [(0.0, 0.0); 43];
 
         for (frequency, _, _, volume, _) in sorted_analysis {
             if *frequency > 20000.0 {
@@ -80,7 +80,7 @@ impl Handler {
             scratchpad[index].1 += *volume as f64;
         }
 
-        let mut mean_erb = [0.0; 139];
+        let mut mean_erb = [0.0; 43];
 
         for (index, (sum, count)) in scratchpad.into_iter().enumerate() {
             mean_erb[index] = if count > 0.0 {
@@ -94,7 +94,7 @@ impl Handler {
 
         let mut lower = 20.0;
 
-        for i in 0..139 {
+        for i in 0..43 {
             let x = mean_erb[i];
 
             if x == 0.0 {
@@ -103,7 +103,7 @@ impl Handler {
             }
 
             let low = inv_scale_erb(x - 0.5).min(lower);
-            let hi = if i < 138 {
+            let hi = if i < 42 {
                 let current_erb = x + 0.5;
                 let next_erb = mean_erb[i + 1] - 0.5;
 
@@ -128,10 +128,10 @@ impl Handler {
         self.update_frequency_scale(&data.analysis);
 
         let mut scale_index = 0;
-        let mut scratchpad = [(0.0, 0.0); 139];
+        let mut scratchpad = [(0.0, 0.0); 43];
 
         for (frequency, _bandwidth, _pan, volume, _stm) in data.analysis {
-            while self.frequency_scale[scale_index].0 < frequency && scale_index < 138 {
+            while self.frequency_scale[scale_index].0 < frequency && scale_index < 42 {
                 scale_index += 1;
             }
 
@@ -139,7 +139,7 @@ impl Handler {
             scratchpad[scale_index].1 += 1.0
         }
 
-        let mut scale_amplitudes = [0.0; 139];
+        let mut scale_amplitudes = [0.0; 43];
 
         for (index, (sum, count)) in scratchpad.into_iter().enumerate() {
             if count > 0.0 {
@@ -274,7 +274,7 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-const FORMAT_VERSION: &str = "v0.8.4";
+const FORMAT_VERSION: &str = "v0.9.0";
 
 impl TryFrom<OscPacket> for VisualizerData {
     type Error = &'static str;
@@ -394,9 +394,9 @@ fn map_value_f32(x: f32, min: f32, max: f32, target_min: f32, target_max: f32) -
 }
 
 fn scale_erb(x: f64) -> f64 {
-    21.4 * (1.0 + 0.00437 * x).log2()
+    21.4 * (1.0 + 0.00437 * x).log10()
 }
 
 fn inv_scale_erb(x: f64) -> f64 {
-    (1.0 / 0.00437) * ((2.0_f64.powf(x / 21.4)) - 1.0)
+    (1.0 / 0.00437) * ((10.0_f64.powf(x / 21.4)) - 1.0)
 }
