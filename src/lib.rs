@@ -1051,6 +1051,7 @@ fn get_osc_packet_size(stats_address: &str, tones_address: &str, notes: usize) -
                     OscType::Float(0.0),
                     OscType::Float(0.0),
                     OscType::Float(0.0),
+                    OscType::Float(0.0),
                 ],
             })
         })
@@ -1064,6 +1065,7 @@ fn get_osc_packet_size(stats_address: &str, tones_address: &str, notes: usize) -
             OscPacket::Message(OscMessage {
                 addr: stats_address.to_string(),
                 args: vec![
+                    OscType::Float(0.0),
                     OscType::Float(0.0),
                     OscType::Float(0.0),
                     OscType::Float(0.0),
