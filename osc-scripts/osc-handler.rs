@@ -3,6 +3,9 @@
 //!
 //! This script is meant as a *starting point* for using KatVisualizer for lighting control, and should be customized by the user to fit their needs.
 //!
+//! For reference, the rarameters I personally use:
+//!  rust-script osc-handler.rs --listen-address 127.0.0.1:8000 --destination-address 127.0.0.1:7700 --frequency-scale-bins 40 --above-mean-stm 3.5 --aggregate-end
+//!
 //! ```cargo
 //! [dependencies]
 //! anyhow = "1.0.100"
@@ -86,11 +89,7 @@ impl Handler {
             above_masking: config.above_masking as f64,
             below_masking: config.below_masking as f64,
             above_mean_stm: if config.frequency_scale_bins >= 32 {
-                if config.above_mean_stm > 0.0 {
-                    config.above_mean_stm
-                } else {
-                    f32::NEG_INFINITY
-                }
+                config.above_mean_stm
             } else {
                 f32::NEG_INFINITY
             },
@@ -266,7 +265,7 @@ struct Args {
     below_masking: f32,
 
     /// Ignored if frequency_scale_bins < 32
-    #[arg(long, default_value_t = 3.5)]
+    #[arg(long, default_value_t = f32::NEG_INFINITY)]
     above_mean_stm: f32,
 
     #[arg(long, default_value_t = 64)]
