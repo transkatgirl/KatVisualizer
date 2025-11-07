@@ -210,7 +210,7 @@ struct Args {
     #[arg(long, default_value_t = 15.0)]
     agc_target_minimum: f32,
 
-    #[arg(long, default_value_t = 36.0)]
+    #[arg(long, default_value_t = 30.0)]
     above_masking: f32,
 
     #[arg(long, default_value_t = -6.0)]
