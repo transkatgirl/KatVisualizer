@@ -44,7 +44,7 @@ impl Handler {
             agc_target_minimum: config.agc_target_minimum as f64,
             above_masking: config.above_masking as f64,
             below_masking: config.below_masking as f64,
-            above_mean_stm: if config.frequency_scale_bins >= 30 {
+            above_mean_stm: if config.frequency_scale_bins >= 32 {
                 if config.above_mean_stm > 0.0 {
                     config.above_mean_stm
                 } else {
@@ -246,7 +246,7 @@ struct Args {
     #[arg(long, default_value_t = -6.0)]
     below_masking: f32,
 
-    /// Ignored if frequency_scale_bins < 30
+    /// Ignored if frequency_scale_bins < 32
     #[arg(long, default_value_t = 3.0)]
     above_mean_stm: f32,
 
