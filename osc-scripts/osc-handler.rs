@@ -138,7 +138,10 @@ impl Handler {
         }
 
         scale_amplitudes.iter_mut().enumerate().for_each(|(i, a)| {
-            *a = if self.active_bins[i] || self.frequency_scale[i].0 < 300.0 {
+            *a = if self.active_bins[i]
+                || self.frequency_scale[i].0 < 300.0
+                || self.frequency_scale[i].1 > 8000.0
+            {
                 map_value_f32(*a as f32, lower, upper, 0.0, 1.0).clamp(0.0, 1.0)
             } else {
                 0.0
