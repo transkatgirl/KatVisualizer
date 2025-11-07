@@ -28,6 +28,7 @@ struct Handler {
     stm_threshold: f32,
 
     frequency_scale: Vec<(f32, f32, f32)>,
+    active_bins: Vec<bool>,
 }
 
 impl Handler {
@@ -74,6 +75,7 @@ impl Handler {
                     )
                 })
                 .collect(),
+            active_bins: vec![false; config.frequency_scale_bins as usize],
         }
     }
     fn get_normalization_targets(&mut self, masking_mean: f32, duration: Duration) -> (f32, f32) {
@@ -116,8 +118,18 @@ impl Handler {
                 scale_index += 1;
             }
 
+            if self.active_bins[scale_index] {
+                if stm < (self.stm_threshold - 1.0) {
+                    self.active_bins[scale_index] = false;
+                }
+            } else {
+                if stm > self.stm_threshold {
+                    self.active_bins[scale_index] = true;
+                }
+            }
+
             if volume > scale_amplitudes[scale_index]
-                && (frequency < 300.0 || stm > self.stm_threshold)
+                && (frequency < 300.0 || self.active_bins[scale_index])
             {
                 scale_amplitudes[scale_index] = volume;
             }
