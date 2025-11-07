@@ -167,7 +167,7 @@ impl Handler {
         scale_amplitudes.iter_mut().enumerate().for_each(|(i, a)| {
             *a = if self.active_bins[i]
                 || self.frequency_scale[i].0 < 300.0
-                || self.frequency_scale[i].1 > 8000.0
+                || self.frequency_scale[i].1 > 6000.0
             {
                 map_value_f32(*a as f32, lower, upper, 0.0, 1.0).clamp(0.0, 1.0)
             } else {
@@ -243,7 +243,7 @@ struct Args {
     #[arg(long, default_value_t = 30.0)]
     above_masking: f32,
 
-    #[arg(long, default_value_t = -6.0)]
+    #[arg(long, default_value_t = -10.0)]
     below_masking: f32,
 
     /// Ignored if frequency_scale_bins < 32
