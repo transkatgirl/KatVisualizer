@@ -136,7 +136,7 @@ impl Handler {
                 scale_index += 1;
             }
 
-            if volume > scale_amplitudes[scale_index] {
+            if stm > scale_stms[scale_index] {
                 scale_amplitudes[scale_index] = volume;
                 scale_stms[scale_index] = stm;
             }
