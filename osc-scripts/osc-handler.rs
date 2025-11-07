@@ -86,7 +86,11 @@ impl Handler {
             above_masking: config.above_masking as f64,
             below_masking: config.below_masking as f64,
             above_mean_stm: if config.frequency_scale_bins >= 32 {
-                config.above_mean_stm
+                if config.above_mean_stm > 0.0 {
+                    config.above_mean_stm
+                } else {
+                    f32::NEG_INFINITY
+                }
             } else {
                 f32::NEG_INFINITY
             },
@@ -267,25 +271,33 @@ struct Args {
     #[arg(short, long)]
     destination_address: SocketAddr,
 
+    /// The length of the automatic gain control used to normalize bin values between 0 and 1.
     #[arg(long, default_value_t = 0.128)]
     agc_length: f32,
 
+    /// The minimum value that the AGC can select as its target (the target is the masking threshold mean).
     #[arg(long, default_value_t = 15.0)]
     agc_target_minimum: f32,
 
+    /// The value (relative to the masking threshold mean) that maps to a bin value of 1.
     #[arg(long, default_value_t = 30.0)]
     above_masking: f32,
 
+    /// The value (relative to the masking threshold mean) that maps to a bin value of 0.
     #[arg(long, default_value_t = -10.0)]
     below_masking: f32,
 
-    /// Ignored if frequency_scale_bins < 32
-    #[arg(long, default_value_t = f32::NEG_INFINITY)]
+    /// The minimum signal-to-masking-threshold ratio (relative to the mean for the agc-length) for a bin to count as valid. Disabled if set to 0.
+    ///
+    /// Ignored if frequency_scale_bins < 32, only applied for bins between 300Hz and 6kHz
+    #[arg(long, default_value_t = 2.0)]
     above_mean_stm: f32,
 
-    #[arg(long, default_value_t = 64)]
+    /// The number of frequency bins to output
+    #[arg(long, default_value_t = 128)]
     frequency_scale_bins: u16,
 
+    /// If this is enabled, all frequencies >6kHz will be aggregated into a single bin
     #[arg(long, default_value_t = false)]
     aggregate_end: bool,
 }
