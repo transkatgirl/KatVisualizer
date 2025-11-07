@@ -25,6 +25,7 @@ struct Handler {
     agc_target_minimum: f64,
     above_masking: f64,
     below_masking: f64,
+    stm_threshold: f32,
 
     frequency_scale: Vec<(f32, f32, f32)>,
 }
@@ -42,6 +43,7 @@ impl Handler {
             agc_target_minimum: config.agc_target_minimum as f64,
             above_masking: config.above_masking as f64,
             below_masking: config.below_masking as f64,
+            stm_threshold: config.stm_threshold,
 
             frequency_scale: (0..config.frequency_scale_bins)
                 .map(|i| {
@@ -107,8 +109,6 @@ impl Handler {
         let mut scale_index = 0;
         let mut scale_amplitudes = vec![f32::NEG_INFINITY; self.frequency_scale.len()];
 
-        let stm_threshold = data.mean - data.masking_mean;
-
         for (frequency, _bandwidth, _pan, volume, stm) in data.analysis {
             while self.frequency_scale[scale_index].0 < frequency
                 && scale_index < self.frequency_scale.len() - 1
@@ -116,7 +116,8 @@ impl Handler {
                 scale_index += 1;
             }
 
-            if volume > scale_amplitudes[scale_index] && (frequency < 300.0 || stm > stm_threshold)
+            if volume > scale_amplitudes[scale_index]
+                && (frequency < 300.0 || stm > self.stm_threshold)
             {
                 scale_amplitudes[scale_index] = volume;
             }
@@ -196,6 +197,9 @@ struct Args {
 
     #[arg(long, default_value_t = -6.0)]
     below_masking: f32,
+
+    #[arg(long, default_value_t = 13.0)]
+    stm_threshold: f32,
 
     #[arg(long, default_value_t = 64)]
     frequency_scale_bins: u16,
