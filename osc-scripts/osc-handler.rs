@@ -33,9 +33,50 @@ struct Handler {
 
 impl Handler {
     fn new(config: &Args) -> Self {
+        let scale_bins =
+            config.frequency_scale_bins.max(3) - if config.aggregate_end { 1 } else { 0 };
+
         let scale_minimum = scale_erb(20.0);
-        let scale_maximum = scale_erb(18000.0);
-        let target_max = (config.frequency_scale_bins - 1) as f32;
+        let scale_maximum = scale_erb(if config.aggregate_end {
+            6000.0
+        } else {
+            20000.0
+        });
+        let target_max = (scale_bins - 1) as f32;
+
+        let mut frequency_scale: Vec<(f32, f32, f32)> = (0..scale_bins)
+            .map(|i| {
+                let i = i as f32;
+
+                (
+                    inv_scale_erb(map_value_f32(
+                        i - 0.5,
+                        0.0,
+                        target_max,
+                        scale_minimum,
+                        scale_maximum,
+                    )),
+                    inv_scale_erb(map_value_f32(
+                        i,
+                        0.0,
+                        target_max,
+                        scale_minimum,
+                        scale_maximum,
+                    )),
+                    inv_scale_erb(map_value_f32(
+                        i + 0.5,
+                        0.0,
+                        target_max,
+                        scale_minimum,
+                        scale_maximum,
+                    )),
+                )
+            })
+            .collect();
+
+        if config.aggregate_end {
+            frequency_scale.push((6000.0, 8000.0, 20000.0));
+        }
 
         Self {
             normalization_data: VecDeque::with_capacity(8192),
@@ -53,37 +94,8 @@ impl Handler {
             } else {
                 f32::NEG_INFINITY
             },
-
-            frequency_scale: (0..config.frequency_scale_bins)
-                .map(|i| {
-                    let i = i as f32;
-
-                    (
-                        inv_scale_erb(map_value_f32(
-                            i - 0.5,
-                            0.0,
-                            target_max,
-                            scale_minimum,
-                            scale_maximum,
-                        )),
-                        inv_scale_erb(map_value_f32(
-                            i,
-                            0.0,
-                            target_max,
-                            scale_minimum,
-                            scale_maximum,
-                        )),
-                        inv_scale_erb(map_value_f32(
-                            i + 0.5,
-                            0.0,
-                            target_max,
-                            scale_minimum,
-                            scale_maximum,
-                        )),
-                    )
-                })
-                .collect(),
-            active_bins: vec![false; config.frequency_scale_bins as usize],
+            frequency_scale,
+            active_bins: vec![false; config.frequency_scale_bins.max(3) as usize],
         }
     }
     fn get_normalization_targets(
@@ -167,7 +179,7 @@ impl Handler {
         scale_amplitudes.iter_mut().enumerate().for_each(|(i, a)| {
             *a = if self.active_bins[i]
                 || self.frequency_scale[i].0 < 300.0
-                || self.frequency_scale[i].1 > 6000.0
+                || self.frequency_scale[i].0 >= 6000.0
             {
                 map_value_f32(*a as f32, lower, upper, 0.0, 1.0).clamp(0.0, 1.0)
             } else {
@@ -252,6 +264,9 @@ struct Args {
 
     #[arg(long, default_value_t = 64)]
     frequency_scale_bins: u16,
+
+    #[arg(long, default_value_t = false)]
+    aggregate_end: bool,
 }
 
 const MAX_PACKET_SIZE: usize = 65535;
