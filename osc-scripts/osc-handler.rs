@@ -191,8 +191,22 @@ impl Handler {
                 }
             } else {
                 0.0
+            };
+
+            if *a > 0.8 {
+                print!("█");
+            } else if *a > 0.6 {
+                print!("▓");
+            } else if *a > 0.4 {
+                print!("▒");
+            } else if *a > 0.2 {
+                print!("░");
+            } else {
+                print!(" ");
             }
         });
+
+        print!("\n");
 
         let frequency_messages = self
             .frequency_scale
@@ -325,7 +339,7 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-const FORMAT_VERSION: &str = "v0.9.0";
+const FORMAT_VERSION: &str = "v0.9.1";
 
 impl TryFrom<OscPacket> for VisualizerData {
     type Error = &'static str;
