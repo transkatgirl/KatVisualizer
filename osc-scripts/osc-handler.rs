@@ -111,43 +111,35 @@ impl Handler {
         let mut scale_index = 0;
         let mut scale_amplitudes = vec![f32::NEG_INFINITY; self.frequency_scale.len()];
 
-        for (frequency, _bandwidth, _pan, _volume, stm) in &data.analysis {
-            while self.frequency_scale[scale_index].0 < *frequency
-                && scale_index < self.frequency_scale.len() - 1
-            {
-                scale_index += 1;
-            }
-
-            if self.active_bins[scale_index] {
-                if *stm < (self.stm_threshold - 1.0) {
-                    self.active_bins[scale_index] = false;
-                }
-            } else {
-                if *stm > self.stm_threshold {
-                    self.active_bins[scale_index] = true;
-                }
-            }
-        }
-
-        scale_index = 0;
-
-        for (frequency, _bandwidth, _pan, volume, _stm) in data.analysis {
+        for (frequency, _bandwidth, _pan, volume, stm) in data.analysis {
             while self.frequency_scale[scale_index].0 < frequency
                 && scale_index < self.frequency_scale.len() - 1
             {
                 scale_index += 1;
             }
 
-            if volume > scale_amplitudes[scale_index]
-                && (frequency < 300.0 || self.active_bins[scale_index])
-            {
+            if self.active_bins[scale_index] {
+                if stm < (self.stm_threshold - 1.0) {
+                    self.active_bins[scale_index] = false;
+                }
+            } else {
+                if stm > self.stm_threshold {
+                    self.active_bins[scale_index] = true;
+                }
+            }
+
+            if volume > scale_amplitudes[scale_index] {
                 scale_amplitudes[scale_index] = volume;
             }
         }
 
-        scale_amplitudes
-            .iter_mut()
-            .for_each(|a| *a = map_value_f32(*a as f32, lower, upper, 0.0, 1.0).clamp(0.0, 1.0));
+        scale_amplitudes.iter_mut().enumerate().for_each(|(i, a)| {
+            *a = if self.active_bins[i] || self.frequency_scale[i].0 < 300.0 {
+                map_value_f32(*a as f32, lower, upper, 0.0, 1.0).clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        });
 
         let frequency_messages = self
             .frequency_scale
