@@ -127,7 +127,7 @@ impl Handler {
 
         for (i, stm) in scale_stms.into_iter().enumerate() {
             if self.active_bins[i] {
-                if stm < (self.stm_threshold - 1.5) {
+                if stm < (self.stm_threshold - 3.0) {
                     self.active_bins[i] = false;
                 }
             } else {
@@ -216,7 +216,7 @@ struct Args {
     #[arg(long, default_value_t = -6.0)]
     below_masking: f32,
 
-    #[arg(long, default_value_t = 13.5)]
+    #[arg(long, default_value_t = 14)]
     stm_threshold: f32,
 
     #[arg(long, default_value_t = 64)]
