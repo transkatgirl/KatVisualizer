@@ -127,7 +127,7 @@ impl Handler {
 
         for (i, stm) in scale_stms.into_iter().enumerate() {
             if self.active_bins[i] {
-                if stm < (self.stm_threshold - 1.0) {
+                if stm < (self.stm_threshold - 1.5) {
                     self.active_bins[i] = false;
                 }
             } else {
