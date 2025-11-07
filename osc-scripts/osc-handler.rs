@@ -194,7 +194,7 @@ struct Args {
     #[arg(long, default_value_t = -3.0)]
     below_masking: f32,
 
-    #[arg(long, default_value_t = 41)]
+    #[arg(long, default_value_t = 32)]
     frequency_scale_bins: u16,
 }
 
