@@ -110,6 +110,7 @@ impl Handler {
 
         let mut scale_index = 0;
         let mut scale_amplitudes = vec![f32::NEG_INFINITY; self.frequency_scale.len()];
+        let mut scale_stms = vec![f32::NEG_INFINITY; self.frequency_scale.len()];
 
         for (frequency, _bandwidth, _pan, volume, stm) in data.analysis {
             while self.frequency_scale[scale_index].0 < frequency
@@ -120,15 +121,18 @@ impl Handler {
 
             if volume > scale_amplitudes[scale_index] {
                 scale_amplitudes[scale_index] = volume;
+                scale_stms[scale_index] = stm;
+            }
+        }
 
-                if self.active_bins[scale_index] {
-                    if stm < (self.stm_threshold - 1.0) {
-                        self.active_bins[scale_index] = false;
-                    }
-                } else {
-                    if stm > self.stm_threshold {
-                        self.active_bins[scale_index] = true;
-                    }
+        for (i, stm) in scale_stms.into_iter().enumerate() {
+            if self.active_bins[i] {
+                if stm < (self.stm_threshold - 1.0) {
+                    self.active_bins[i] = false;
+                }
+            } else {
+                if stm > self.stm_threshold {
+                    self.active_bins[i] = true;
                 }
             }
         }
