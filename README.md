@@ -39,7 +39,7 @@ Usage information for the standalone binary can be found by running it with the 
 
 #### OSC Scripts
 
-Example scripts for working with this plugin's OSC output can be found in the repository's osc-scripts folder. These scripts can be run using [rust-script](https://rust-script.org).
+Example scripts for working with this plugin's OSC output can be found in the repository's [osc-scripts](./osc-scripts/) folder. These scripts can be run using [rust-script](https://rust-script.org).
 
 ## Usage
 
