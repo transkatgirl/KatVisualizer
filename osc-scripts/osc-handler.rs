@@ -3,9 +3,6 @@
 //!
 //! This script is meant as a *starting point* for using KatVisualizer for lighting control, and should be customized by the user to fit their needs.
 //!
-//! For reference, the rarameters I personally use:
-//!  rust-script osc-handler.rs --listen-address 127.0.0.1:8000 --destination-address 127.0.0.1:7700 --frequency-scale-bins 50 --above-mean-stm 3
-//!
 //! ```cargo
 //! [dependencies]
 //! anyhow = "1.0.100"
