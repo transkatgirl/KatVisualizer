@@ -105,7 +105,7 @@ impl Handler {
         data.analysis.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
 
         let mut scale_index = 0;
-        let mut scale_amplitudes = [f32::NEG_INFINITY; 43];
+        let mut scale_amplitudes = vec![f32::NEG_INFINITY; self.frequency_scale.len()];
 
         for (frequency, _bandwidth, _pan, volume, _stm) in data.analysis {
             while self.frequency_scale[scale_index].0 < frequency
