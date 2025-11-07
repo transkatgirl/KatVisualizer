@@ -118,18 +118,18 @@ impl Handler {
                 scale_index += 1;
             }
 
-            if self.active_bins[scale_index] {
-                if stm < (self.stm_threshold - 1.0) {
-                    self.active_bins[scale_index] = false;
-                }
-            } else {
-                if stm > self.stm_threshold {
-                    self.active_bins[scale_index] = true;
-                }
-            }
-
             if volume > scale_amplitudes[scale_index] {
                 scale_amplitudes[scale_index] = volume;
+
+                if self.active_bins[scale_index] {
+                    if stm < (self.stm_threshold - 1.0) {
+                        self.active_bins[scale_index] = false;
+                    }
+                } else {
+                    if stm > self.stm_threshold {
+                        self.active_bins[scale_index] = true;
+                    }
+                }
             }
         }
 
