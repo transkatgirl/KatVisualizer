@@ -156,9 +156,16 @@ impl Handler {
                 scale_index += 1;
             }
 
-            if stm > scale_stms[scale_index] {
-                scale_amplitudes[scale_index] = volume;
-                scale_stms[scale_index] = stm;
+            if frequency >= 6000.0 {
+                if volume > scale_amplitudes[scale_index] {
+                    scale_amplitudes[scale_index] = volume;
+                    scale_stms[scale_index] = stm;
+                }
+            } else {
+                if stm > scale_stms[scale_index] {
+                    scale_amplitudes[scale_index] = volume;
+                    scale_stms[scale_index] = stm;
+                }
             }
         }
 
