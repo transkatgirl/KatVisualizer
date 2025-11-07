@@ -19,13 +19,13 @@ use std::{
 };
 
 struct Handler {
-    normalization_data: VecDeque<(f64, Duration)>,
+    normalization_data: VecDeque<(f64, Duration, f64)>,
     normalization_duration: Duration,
     agc_length: Duration,
     agc_target_minimum: f64,
     above_masking: f64,
     below_masking: f64,
-    stm_threshold: f32,
+    above_mean_stm: f32,
 
     frequency_scale: Vec<(f32, f32, f32)>,
     active_bins: Vec<bool>,
@@ -44,7 +44,7 @@ impl Handler {
             agc_target_minimum: config.agc_target_minimum as f64,
             above_masking: config.above_masking as f64,
             below_masking: config.below_masking as f64,
-            stm_threshold: config.stm_threshold,
+            above_mean_stm: config.above_mean_stm,
 
             frequency_scale: (0..config.frequency_scale_bins)
                 .map(|i| {
@@ -78,9 +78,17 @@ impl Handler {
             active_bins: vec![false; config.frequency_scale_bins as usize],
         }
     }
-    fn get_normalization_targets(&mut self, masking_mean: f32, duration: Duration) -> (f32, f32) {
-        self.normalization_data
-            .push_back((masking_mean as f64, duration));
+    fn get_normalization_targets(
+        &mut self,
+        masking_mean: f32,
+        mean: f32,
+        duration: Duration,
+    ) -> (f32, f32, f32) {
+        self.normalization_data.push_back((
+            masking_mean as f64,
+            duration,
+            (mean - masking_mean) as f64,
+        ));
         self.normalization_duration += duration;
 
         while self.normalization_duration > self.agc_length {
@@ -88,23 +96,32 @@ impl Handler {
             self.normalization_duration -= front.1;
         }
 
-        let mean = (self
+        let target = (self
             .normalization_data
             .iter()
-            .map(|(d, l)| d * l.as_secs_f64())
+            .map(|(d, l, _)| d * l.as_secs_f64())
             .sum::<f64>()
             / self.normalization_duration.as_secs_f64())
         .max(self.agc_target_minimum);
 
+        let target_stm = self
+            .normalization_data
+            .iter()
+            .map(|(_, l, d)| d * l.as_secs_f64())
+            .sum::<f64>()
+            / self.normalization_duration.as_secs_f64();
+
         (
-            (mean - self.below_masking) as f32,
-            (mean + self.above_masking) as f32,
+            (target - self.below_masking) as f32,
+            (target + self.above_masking) as f32,
+            target_stm as f32,
         )
     }
     fn handle_packet(&mut self, packet: OscPacket) -> anyhow::Result<Vec<OscPacket>> {
         let mut data = VisualizerData::try_from(packet).map_err(|e| anyhow::anyhow!(e))?;
 
-        let (lower, upper) = self.get_normalization_targets(data.masking_mean, data.duration);
+        let (lower, upper, mean_stm) =
+            self.get_normalization_targets(data.masking_mean, data.mean, data.duration);
 
         data.analysis.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
 
@@ -125,13 +142,15 @@ impl Handler {
             }
         }
 
+        let stm_threshold = mean_stm + self.above_mean_stm;
+
         for (i, stm) in scale_stms.into_iter().enumerate() {
             if self.active_bins[i] {
-                if stm < (self.stm_threshold - 3.0) {
+                if stm < (stm_threshold - 3.0) {
                     self.active_bins[i] = false;
                 }
             } else {
-                if stm > self.stm_threshold {
+                if stm > stm_threshold {
                     self.active_bins[i] = true;
                 }
             }
@@ -219,8 +238,8 @@ struct Args {
     #[arg(long, default_value_t = -6.0)]
     below_masking: f32,
 
-    #[arg(long, default_value_t = 17.0)]
-    stm_threshold: f32,
+    #[arg(long, default_value_t = 3.0)]
+    above_mean_stm: f32,
 
     #[arg(long, default_value_t = 64)]
     frequency_scale_bins: u16,
