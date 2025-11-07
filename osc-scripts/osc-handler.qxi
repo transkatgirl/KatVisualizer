@@ -17,32 +17,24 @@
         <Name>/tones/19/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="748">
-        <Name>/tones/40/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="1534">
-        <Name>/tones/6/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
     <Channel Number="1667">
         <Name>/tones/2/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="2344">
-        <Name>/tones/10/freqskew</Name>
+    <Channel Number="1836">
+        <Name>/tones/59/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="3399">
         <Name>/tones/7/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="4363">
-        <Name>/tones/8/amplitude</Name>
+    <Channel Number="4260">
+        <Name>/tones/53/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="4758">
-        <Name>/tones/34/freqskew</Name>
+    <Channel Number="4363">
+        <Name>/tones/8/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="5586">
@@ -53,6 +45,10 @@
         <Name>/tones/33/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
+    <Channel Number="7008">
+        <Name>/tones/56/amplitude</Name>
+        <Type>Slider</Type>
+    </Channel>
     <Channel Number="7341">
         <Name>/tones/36/amplitude</Name>
         <Type>Slider</Type>
@@ -61,36 +57,24 @@
         <Name>/tones/16/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="8009">
-        <Name>/tones/26/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="9487">
-        <Name>/tones/11/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="10713">
-        <Name>/tones/7/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="11979">
-        <Name>/tones/41/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
     <Channel Number="13018">
         <Name>/tones/24/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="13166">
-        <Name>/tones/27/freqskew</Name>
+    <Channel Number="13591">
+        <Name>/tones/44/amplitude</Name>
+        <Type>Slider</Type>
+    </Channel>
+    <Channel Number="14252">
+        <Name>/tones/64/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="14622">
         <Name>/tones/21/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="16049">
-        <Name>/tones/35/freqskew</Name>
+    <Channel Number="15464">
+        <Name>/tones/61/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="16083">
@@ -109,28 +93,24 @@
         <Name>/tones/9/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="18183">
-        <Name>/tones/24/freqskew</Name>
+    <Channel Number="17717">
+        <Name>/tones/52/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="18748">
         <Name>/tones/37/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="19160">
-        <Name>/tones/36/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
     <Channel Number="19335">
         <Name>/tones/17/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="19494">
-        <Name>/tones/19/freqskew</Name>
+    <Channel Number="20209">
+        <Name>/tones/57/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="20838">
-        <Name>/tones/12/freqskew</Name>
+    <Channel Number="21181">
+        <Name>/tones/58/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="21266">
@@ -149,24 +129,16 @@
         <Name>/tones/6/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="23984">
-        <Name>/tones/4/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="24577">
-        <Name>/tones/18/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="26367">
-        <Name>/tones/37/freqskew</Name>
+    <Channel Number="24710">
+        <Name>/tones/45/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="26443">
         <Name>/tones/25/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="27424">
-        <Name>/tones/25/freqskew</Name>
+    <Channel Number="27129">
+        <Name>/tones/60/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="27458">
@@ -177,84 +149,52 @@
         <Name>/tones/20/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="29079">
-        <Name>/tones/5/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="32065">
-        <Name>/tones/13/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="33778">
-        <Name>/tones/23/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="33797">
-        <Name>/tones/8/freqskew</Name>
+    <Channel Number="33401">
+        <Name>/tones/49/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="34228">
         <Name>/tones/29/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="36397">
-        <Name>/tones/31/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
     <Channel Number="37436">
         <Name>/tones/23/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="38291">
-        <Name>/tones/15/freqskew</Name>
+    <Channel Number="38385">
+        <Name>/tones/43/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="39237">
-        <Name>/tones/3/freqskew</Name>
+    <Channel Number="38730">
+        <Name>/tones/63/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="39416">
         <Name>/tones/26/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="40626">
-        <Name>/tones/28/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="41482">
-        <Name>/tones/30/freqskew</Name>
+    <Channel Number="40501">
+        <Name>/tones/46/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="42597">
         <Name>/tones/5/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="43042">
-        <Name>/tones/9/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="45013">
-        <Name>/tones/22/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="45717">
-        <Name>/tones/29/freqskew</Name>
+    <Channel Number="45122">
+        <Name>/tones/54/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="46388">
         <Name>/tones/14/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="46434">
-        <Name>/tones/2/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
     <Channel Number="46991">
         <Name>/tones/34/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="47540">
-        <Name>/tones/14/freqskew</Name>
+    <Channel Number="48006">
+        <Name>/tones/51/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="48203">
@@ -265,52 +205,44 @@
         <Name>/tones/11/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="49419">
-        <Name>/tones/1/freqskew</Name>
+    <Channel Number="49248">
+        <Name>/tones/42/amplitude</Name>
+        <Type>Slider</Type>
+    </Channel>
+    <Channel Number="49883">
+        <Name>/tones/62/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="51117">
         <Name>/tones/22/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="52003">
-        <Name>/tones/38/freqskew</Name>
+    <Channel Number="52132">
+        <Name>/tones/47/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="52329">
         <Name>/tones/27/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="52701">
-        <Name>/tones/17/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
     <Channel Number="53285">
         <Name>/tones/28/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="54883">
-        <Name>/tones/33/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="56252">
-        <Name>/tones/21/freqskew</Name>
+    <Channel Number="55272">
+        <Name>/tones/48/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="57509">
         <Name>/tones/15/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="57850">
-        <Name>/tones/16/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
     <Channel Number="57886">
         <Name>/tones/35/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="59140">
-        <Name>/tones/39/freqskew</Name>
+    <Channel Number="58835">
+        <Name>/tones/55/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
     <Channel Number="59866">
@@ -321,20 +253,16 @@
         <Name>/tones/10/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
+    <Channel Number="60951">
+        <Name>/tones/50/amplitude</Name>
+        <Type>Slider</Type>
+    </Channel>
     <Channel Number="62452">
         <Name>/tones/4/amplitude</Name>
         <Type>Slider</Type>
     </Channel>
-    <Channel Number="63387">
-        <Name>/tones/20/freqskew</Name>
-        <Type>Slider</Type>
-    </Channel>
     <Channel Number="63536">
         <Name>/tones/1/amplitude</Name>
-        <Type>Slider</Type>
-    </Channel>
-    <Channel Number="64068">
-        <Name>/tones/32/freqskew</Name>
         <Type>Slider</Type>
     </Channel>
 </InputProfile>
