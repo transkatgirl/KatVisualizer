@@ -247,7 +247,7 @@ struct Args {
     below_masking: f32,
 
     /// Ignored if frequency_scale_bins < 32
-    #[arg(long, default_value_t = 3.0)]
+    #[arg(long, default_value_t = 3.5)]
     above_mean_stm: f32,
 
     #[arg(long, default_value_t = 64)]
