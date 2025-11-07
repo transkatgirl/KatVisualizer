@@ -198,7 +198,7 @@ struct Args {
     #[arg(long, default_value_t = -6.0)]
     below_masking: f32,
 
-    #[arg(long, default_value_t = 13.0)]
+    #[arg(long, default_value_t = 13.5)]
     stm_threshold: f32,
 
     #[arg(long, default_value_t = 64)]
