@@ -364,7 +364,7 @@ impl TryFrom<OscPacket> for VisualizerData {
                     Some(OscPacket::Message(mut metadata)),
                 ) = (bundle.content.pop(), bundle.content.pop())
                 {
-                    if metadata.addr != ["/katvisualizer/", FORMAT_VERSION, "/stats"].concat()
+                    if metadata.addr != ["/katvisualizer/", FORMAT_VERSION, "/frequencies"].concat()
                         || analysis.addr != ["/katvisualizer/", FORMAT_VERSION, "/tones"].concat()
                     {
                         return Err("One or more message addresses are incorrect");

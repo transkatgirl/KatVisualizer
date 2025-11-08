@@ -1700,7 +1700,7 @@ pub fn create(
                             if analysis_settings.output_osc {
                                 ui.colored_label(
                                     Color32::YELLOW,
-                                    "OSC packets produced by this program are too large to be sent over most networks, as they are intended for further local analysis.",
+                                    "OSC packets produced by this program are intended solely for further local analysis and significantly exceed the MTU of most networks.",
                                 );
 
                                 let address_label = ui
@@ -1719,7 +1719,7 @@ pub fn create(
                                 }
 
                                 let message_label_1 = ui
-                                    .label("Frequency data OSC message address:")
+                                    .label("Frequency bin data OSC message address:")
                                     .on_hover_text("The OSC address pattern that frequency bin data will be sent under.\n\nThe message format for frequency bin data is [(frequency, bandwidth, pan, volume, signalToMaskRatio)], with bins being listed in order of priority. Frequencies and bandwidths are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), pan ranges from -1 to 1, and signalToMaskRatio is in dB.");
 
                                 if ui.
