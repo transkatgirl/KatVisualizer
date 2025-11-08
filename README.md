@@ -37,10 +37,6 @@ cargo build --release --features $channel_config,mute-output
 
 Usage information for the standalone binary can be found by running it with the `--help` command (keep in mind that not all available CLI flags are relevant to this program). You will likely want to use the `--input-device`, `--output-device`, and `--period-size` CLI flags.
 
-#### OSC Scripts
-
-Example scripts for working with this plugin's OSC output can be found in the repository's [osc-scripts](./osc-scripts/) folder. These scripts can be run using [rust-script](https://rust-script.org).
-
 ## Usage
 
 The compiled plugin can be loaded into a DAW like any other metering plugin. It's recommended that you use a buffer size under 10ms long (unless you are using the plugin to generate outputs for an external program) and avoid sample rates below 40kHz.
@@ -89,3 +85,11 @@ If you're having performance or latency issues, enabling performance counters ca
 	- This is rarely the issue. Generally, the appearance of dropped frames is caused by high buffering time, not a variance in frame times.
 	- Affected by buffering time & rasterize time
 		- These only increase the frame time when they exceed what can be compensated for by the renderer.
+
+### OSC Details
+
+This plugin supports outputting analysis data as OSC, which can then be interpreted by another program to perform actions such as adjusting sliders in a [lighting software](https://www.qlcplus.org).
+
+However, the output format is not directly usable in most software; A wrapper script is required to convert the data into actionable features, as doing so is far more of an art than a science.
+
+Example scripts for working with this plugin's OSC output can be found in the repository's [osc-scripts](./osc-scripts/) folder. These scripts can be run using [rust-script](https://rust-script.org).

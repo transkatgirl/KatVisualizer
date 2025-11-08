@@ -1,5 +1,5 @@
 #!/usr/bin/env rust-script
-//! This wrapper converts KatVisualizer's OSC output into a format directly usable within lighting software. Mapping this data to OSC controls is far from trivial, which is why this functionality is not built in to KatVisualizer.
+//! This wrapper is one attempt at converting KatVisualizer's OSC output into a format directly usable within lighting software.
 //!
 //! This script is meant as a *starting point* for using KatVisualizer for lighting control, and should be customized by the user to fit their needs.
 //!
