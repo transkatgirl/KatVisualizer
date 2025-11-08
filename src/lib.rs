@@ -704,7 +704,7 @@ impl AnalysisChain {
                 }
             }
 
-            let osc_resource_address_tones = self.osc_resource_address_frequencies.clone();
+            let osc_resource_address_frequencies = self.osc_resource_address_frequencies.clone();
             let osc_resource_address_stats = self.osc_resource_address_stats.clone();
             let osc_socket = self.osc_socket.clone();
             let osc_output = self.osc_output.clone();
@@ -828,7 +828,7 @@ impl AnalysisChain {
                                 ],
                             }),
                             OscPacket::Message(OscMessage {
-                                addr: osc_resource_address_tones.to_string(),
+                                addr: osc_resource_address_frequencies.to_string(),
                                 args: vec![OscType::Array(OscArray {
                                     content: message_data,
                                 })],

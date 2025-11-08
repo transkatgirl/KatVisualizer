@@ -146,8 +146,7 @@ impl Handler {
         data.analysis.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
 
         let mut scale_index = 0;
-        let mut scale_amplitudes = vec![f32::NEG_INFINITY; self.frequency_scale.len()];
-        let mut scale_stms = vec![f32::NEG_INFINITY; self.frequency_scale.len()];
+        let mut bin_sums = vec![(0.0, 0.0, 0.0); self.frequency_scale.len()];
 
         for (frequency, _bandwidth, _pan, volume, stm) in data.analysis {
             while self.frequency_scale[scale_index].0 < frequency
@@ -156,17 +155,19 @@ impl Handler {
                 scale_index += 1;
             }
 
-            if frequency >= 6000.0 {
-                if volume > scale_amplitudes[scale_index] {
-                    scale_amplitudes[scale_index] = volume;
-                    scale_stms[scale_index] = stm;
-                }
-            } else {
-                if stm > scale_stms[scale_index] {
-                    scale_amplitudes[scale_index] = volume;
-                    scale_stms[scale_index] = stm;
-                }
+            if volume.is_finite() {
+                bin_sums[scale_index].0 += volume;
+                bin_sums[scale_index].1 += stm;
+                bin_sums[scale_index].2 += 1.0;
             }
+        }
+
+        let mut scale_amplitudes = vec![f32::NEG_INFINITY; self.frequency_scale.len()];
+        let mut scale_stms = vec![f32::NEG_INFINITY; self.frequency_scale.len()];
+
+        for (i, (volume_sum, stm_sum, count)) in bin_sums.into_iter().enumerate() {
+            scale_amplitudes[i] = volume_sum / count;
+            scale_stms[i] = stm_sum / count;
         }
 
         let stm_threshold = mean_stm + self.above_mean_stm;
