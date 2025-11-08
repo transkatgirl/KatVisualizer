@@ -1756,7 +1756,7 @@ pub fn create(
 
                             if analysis_settings.output_osc {
                                 let packet_size = get_osc_packet_size(&analysis_settings.osc_resource_address_stats, &analysis_settings.osc_resource_address_tones, analysis_settings.output_max_simultaneous_tones);
-                                if packet_size > 1500 {
+                                if packet_size > 1492 {
                                     if  analysis_settings.osc_socket_address.parse::<SocketAddr>().map(|addr| addr.ip().is_loopback()).unwrap_or(true) {
                                         ui.colored_label(
                                             Color32::YELLOW,
