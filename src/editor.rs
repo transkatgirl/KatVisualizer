@@ -1700,7 +1700,7 @@ pub fn create(
                             if analysis_settings.output_osc {
                                 ui.colored_label(
                                     Color32::YELLOW,
-                                    "OSC packets produced by this program are too large to be sent over most networks, as they are intended for further analysis before being sent over the network.",
+                                    "OSC packets produced by this program are too large to be sent over most networks, as they are intended for further local analysis.",
                                 );
 
                                 let address_label = ui
@@ -1782,7 +1782,7 @@ pub fn create(
                                         egui::Slider::new(&mut analysis_settings.midi_max_simultaneous_tones, 1..=128)
                                             .suffix(" notes")
                                             .logarithmic(true)
-                                            .text("Maximum simultaneous notes"),
+                                            .text("Maximum simultaneous MIDI notes"),
                                     )
                                     .on_hover_text("This setting adjusts the maximum number of simultaneous MIDI notes output by the plugin.\nValid notes are prioritized by their distance from the masking threshold, or if masking data is not available, their perceptual amplitude. If amplitude normalization is also disabled, notes will then be prioritized based on absolute amplitude.")
                                     .changed()
