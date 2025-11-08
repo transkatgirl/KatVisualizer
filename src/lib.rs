@@ -680,11 +680,6 @@ impl AnalysisChain {
             return;
         }
 
-        if self.masking {
-            left_analyzer.remove_masked_components();
-            right_analyzer.remove_masked_components();
-        }
-
         let frequencies = self.frequencies.read();
 
         if self.output_osc
@@ -843,6 +838,11 @@ impl AnalysisChain {
 
         #[cfg(feature = "midi")]
         if self.output_midi {
+            if self.masking {
+                left_analyzer.remove_masked_components();
+                right_analyzer.remove_masked_components();
+            }
+
             let peaks = spectrogram.data[0].peaks(
                 self.midi_tone_amplitude_threshold,
                 self.midi_max_simultaneous_tones,
