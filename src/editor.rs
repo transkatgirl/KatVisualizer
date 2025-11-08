@@ -1688,8 +1688,8 @@ pub fn create(
                                     analysis_settings.internal_buffering = false;
                                     analysis_settings.normalize_amplitude = true;
                                     analysis_settings.masking = true;
-                                    if analysis_settings.resolution > 512 {
-                                        analysis_settings.resolution = 512;
+                                    if analysis_settings.resolution > MAX_OSC_FREQUENCY_BINS {
+                                        analysis_settings.resolution = MAX_OSC_FREQUENCY_BINS;
                                     }
                                 }
                                 update(&analysis_settings);
