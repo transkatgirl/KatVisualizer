@@ -288,7 +288,7 @@ struct Args {
     /// The minimum signal-to-masking-threshold ratio (relative to the mean for the agc-length) for a bin to count as valid. Disabled if set to 0.
     ///
     /// Ignored if frequency_scale_bins < 32
-    #[arg(long, default_value_t = 2.0)]
+    #[arg(long, default_value_t = 1.5)]
     above_mean_stm: f32,
 
     /// The number of frequency bins to output
