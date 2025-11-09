@@ -777,6 +777,8 @@ impl Masker {
         flatness: f64,
         masking_threshold: &mut [f64],
     ) {
+        assert_eq!(masking_threshold.len(), self.frequency_set.len());
+
         masking_threshold.fill(0.0);
 
         let amplitude_correction_offset = if let Some(listening_volume) = listening_volume {
@@ -815,18 +817,26 @@ impl Masker {
 
             let adjusted_amplitude = dbfs_to_amplitude(offset) * amplitude;
 
-            masking_threshold[min_i..i]
+            unsafe { masking_threshold.get_unchecked_mut(min_i..i) }
                 .iter_mut()
-                .zip(self.bark_set[min_i..i].iter().copied())
+                .zip(
+                    unsafe { self.bark_set.get_unchecked(min_i..i) }
+                        .iter()
+                        .copied(),
+                )
                 .for_each(|(t, b)| {
                     *t += dbfs_to_amplitude(-lower_spread * (bark - b)) * adjusted_amplitude;
                 });
 
             masking_threshold[i] += adjusted_amplitude;
 
-            masking_threshold[i..=max_i]
+            unsafe { masking_threshold.get_unchecked_mut(i..=max_i) }
                 .iter_mut()
-                .zip(self.bark_set[i..=max_i].iter().copied())
+                .zip(
+                    unsafe { self.bark_set.get_unchecked(i..=max_i) }
+                        .iter()
+                        .copied(),
+                )
                 .for_each(|(t, b)| {
                     *t += dbfs_to_amplitude(-upper_spread * (b - bark)) * adjusted_amplitude;
                 });
