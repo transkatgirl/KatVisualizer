@@ -2,7 +2,6 @@
 #![allow(clippy::collapsible_else_if)]
 
 use color::{ColorSpaceTag, DynamicColor, Flags, Rgba8, Srgb};
-use ndarray::Array2;
 use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
@@ -509,7 +508,7 @@ impl Default for RenderSettings {
 }
 
 struct ColorTable {
-    table: ndarray::Array<(u8, u8, u8), ndarray::Dim<[usize; 2]>>,
+    table: Vec<(u8, u8, u8)>,
     size: (usize, usize),
     max: (f32, f32),
 }
@@ -520,7 +519,7 @@ const COLOR_TABLE_LIGHTNESS_SIZE: usize = 1024;
 impl ColorTable {
     fn new() -> Self {
         Self {
-            table: Array2::default((COLOR_TABLE_CHROMA_SIZE, COLOR_TABLE_LIGHTNESS_SIZE)),
+            table: vec![(0, 0, 0); COLOR_TABLE_CHROMA_SIZE * COLOR_TABLE_LIGHTNESS_SIZE],
             size: (COLOR_TABLE_CHROMA_SIZE, COLOR_TABLE_LIGHTNESS_SIZE),
             max: (
                 (COLOR_TABLE_CHROMA_SIZE - 1) as f32,
@@ -551,7 +550,7 @@ impl ColorTable {
             let split = map_value_f32(split_index as f32, 0.0, self.max.0, -1.0, 1.0);
             for intensity_index in 0..self.size.1 {
                 if intensity_index == 0 {
-                    self.table[[split_index, 0]] = (0, 0, 0);
+                    self.table[split_index * self.size.1] = (0, 0, 0);
                     continue;
                 }
 
@@ -572,20 +571,28 @@ impl ColorTable {
 
                 let converted: Rgba8 = color.to_alpha_color::<Srgb>().to_rgba8();
 
-                self.table[[split_index, intensity_index]] =
+                self.table[(split_index * self.size.1) + intensity_index] =
                     (converted.r, converted.g, converted.b);
             }
         }
     }
     fn lookup(&self, split: f32, intensity: f32) -> Color32 {
-        let color = self.table[[
+        let location = (
             map_value_f32(split, -1.0, 1.0, 0.0, self.max.0)
                 .round()
                 .clamp(0.0, self.max.0) as usize,
             map_value_f32(intensity, 0.0, 1.0, 0.0, self.max.1)
                 .round()
                 .clamp(0.0, self.max.1) as usize,
-        ]];
+        );
+
+        let color = unsafe {
+            *self
+                .table
+                .get_unchecked((location.0 * self.size.1) + location.1)
+        };
+
+        //let color = self.table[(location.0 * self.size.1) + location.1];
 
         Color32::from_rgb(color.0, color.1, color.2)
     }

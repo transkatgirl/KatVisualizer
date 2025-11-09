@@ -34,7 +34,6 @@ serde = { version = "1.0", features = [
 ] }
 color = "0.3.2"
 threadpool = "1.8.1"
-ndarray = "0.17.1"
 parking_lot = "0.12.5"
 mimalloc = { version = "0.1.48", features = [
 	"v3",
