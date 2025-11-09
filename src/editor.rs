@@ -89,8 +89,11 @@ fn draw_bargraph(
             let count = max_index as f32 + 1.0;
 
             let iterator = (0..target_len).map(move |i| {
-                let sum = (0..=max_index)
-                    .map(|ii| spectrogram.data[ii].data[i])
+                let sum = spectrogram
+                    .data
+                    .iter()
+                    .take(max_index + 1)
+                    .map(|row| row.data[i])
                     .fold((0.0, 0.0), |acc, d| (acc.0 + d.0, acc.1 + d.1));
 
                 (sum.0 / count, sum.1 / count)
@@ -107,8 +110,11 @@ fn draw_bargraph(
 
             if let Some(masking_color) = masking_color {
                 let masking_iterator = (0..target_len).map(move |i| {
-                    let sum = (0..=max_index)
-                        .map(|ii| spectrogram.data[ii].masking[i])
+                    let sum = spectrogram
+                        .data
+                        .iter()
+                        .take(max_index + 1)
+                        .map(|row| row.masking[i])
                         .fold(0.0, |acc, d| acc + d.1);
 
                     sum / count
@@ -130,7 +136,7 @@ fn draw_bargraph(
 
     draw_bargraph_from_iter(
         mesh,
-        front.data.iter().map(|d| (d.0, d.1)),
+        front.data.iter().copied().map(|d| (d.0, d.1)),
         front.data.len(),
         bounds,
         color_table,
@@ -351,9 +357,14 @@ fn draw_spectrogram_image(
             break;
         }
 
-        for (x, (pan, volume)) in analysis.data.iter().enumerate() {
-            let intensity = map_value_f32(*volume, min_db, max_db, 0.0, 1.0);
-            image.pixels[(image_width * y) + x] = color_table.lookup(*pan, intensity);
+        for ((pan, volume), pixel) in analysis
+            .data
+            .iter()
+            .copied()
+            .zip(image.pixels[(image_width * y)..].iter_mut())
+        {
+            let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0);
+            *pixel = color_table.lookup(pan, intensity);
         }
     }
 }
