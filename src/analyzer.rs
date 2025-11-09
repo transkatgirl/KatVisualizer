@@ -710,15 +710,19 @@ const MAX_MASKING_DYNAMIC_RANGE: f64 = 100.0;
 
 #[derive(Clone)]
 struct Masker {
-    frequency_set: Vec<(f64, f64)>,
+    frequency_set: Vec<f64>,
+    bark_set: Vec<f64>,
     range_indices: Vec<(usize, usize)>,
 }
 
 impl Masker {
     fn new(frequency_bands: &[FrequencyBand]) -> Self {
-        let frequency_set: Vec<(f64, f64)> = frequency_bands
+        let frequency_set: Vec<f64> = frequency_bands.iter().map(|f| f.center).collect();
+
+        let bark_set: Vec<f64> = frequency_set
             .iter()
-            .map(|f| (f.center, FrequencyScale::Bark.scale(f.center)))
+            .copied()
+            .map(|f| FrequencyScale::Bark.scale(f))
             .collect();
 
         let band_count = frequency_bands.len();
@@ -751,6 +755,7 @@ impl Masker {
 
         Self {
             frequency_set,
+            bark_set,
             range_indices,
         }
     }
@@ -772,8 +777,8 @@ impl Masker {
         for (i, component) in spectrum.enumerate() {
             let amplitude = component;
             let amplitude_db = amplitude_to_dbfs(component);
-            let frequency = self.frequency_set[i].0;
-            let bark = self.frequency_set[i].1;
+            let frequency = self.frequency_set[i];
+            let bark = self.bark_set[i];
 
             if !amplitude.is_normal() {
                 continue;
@@ -793,7 +798,7 @@ impl Masker {
 
             masking_threshold[min..i]
                 .iter_mut()
-                .zip(self.frequency_set[min..i].iter().map(|(_, b)| *b))
+                .zip(self.bark_set[min..i].iter().copied())
                 .for_each(|(t, b)| {
                     *t += dbfs_to_amplitude(-lower_spread * (bark - b) + offset) * amplitude;
                 });
@@ -802,7 +807,7 @@ impl Masker {
 
             masking_threshold[i..=max]
                 .iter_mut()
-                .zip(self.frequency_set[i..=max].iter().map(|(_, b)| *b))
+                .zip(self.bark_set[i..=max].iter().copied())
                 .for_each(|(t, b)| {
                     *t += dbfs_to_amplitude(-upper_spread * (b - bark) + offset) * amplitude;
                 });
