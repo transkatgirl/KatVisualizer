@@ -1199,7 +1199,6 @@ impl VQsDFT {
 
             for i in 0..self.coeffs.len() {
                 let coeff = &mut self.coeffs[i];
-                let kernel_length = coeff.coeffs1.len();
                 let oldest = (((self.buffer_index as isize - coeff.period as isize)
                     % buffer_len_int)
                     + buffer_len_int) as usize
@@ -1207,7 +1206,54 @@ impl VQsDFT {
                 let latest = self.buffer_index;
                 let mut sum = (0.0, 0.0);
 
-                for j in 0..kernel_length {
+                for (
+                    fiddle,
+                    (
+                        twiddle,
+                        (coeff1, (coeff2, (coeff3, (coeff4, (coeff5, (reson_coeff, gain)))))),
+                    ),
+                ) in coeff.fiddles.iter().copied().zip(
+                    coeff.twiddles.iter().copied().zip(
+                        coeff.coeffs1.iter_mut().zip(
+                            coeff.coeffs2.iter_mut().zip(
+                                coeff.coeffs3.iter_mut().zip(
+                                    coeff.coeffs4.iter_mut().zip(
+                                        coeff.coeffs5.iter_mut().zip(
+                                            coeff
+                                                .reson_coeffs
+                                                .iter()
+                                                .copied()
+                                                .zip(self.gains.iter().copied()),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ) {
+                    let comb_x = self.buffer[latest] * fiddle.0 - self.buffer[oldest];
+                    let comb_y = self.buffer[latest] * fiddle.1;
+
+                    coeff1.0 = comb_x * twiddle.0 - comb_y * twiddle.1 - coeff2.0;
+                    coeff1.1 = comb_x * twiddle.1 + comb_y * twiddle.0 - coeff2.1;
+
+                    coeff2.0 = comb_x;
+                    coeff2.1 = comb_y;
+
+                    coeff3.0 = coeff1.0 + reson_coeff * coeff4.0 - coeff5.0;
+                    coeff3.1 = coeff1.1 + reson_coeff * coeff4.1 - coeff5.1;
+
+                    coeff5.0 = coeff4.0;
+                    coeff5.1 = coeff4.1;
+
+                    coeff4.0 = coeff3.0;
+                    coeff4.1 = coeff3.1;
+
+                    sum.0 += coeff3.0 * gain / coeff.period;
+                    sum.1 += coeff3.1 * gain / coeff.period;
+                }
+
+                /*for j in 0..kernel_length {
                     let fiddle = coeff.fiddles[j];
                     let twiddle = coeff.twiddles[j];
 
@@ -1237,7 +1283,7 @@ impl VQsDFT {
 
                     sum.0 += coeff.coeffs3[j].0 * self.gains[j] / coeff.period;
                     sum.1 += coeff.coeffs3[j].1 * self.gains[j] / coeff.period;
-                }
+                }*/
                 self.spectrum_data[i] = f64::max(
                     self.spectrum_data[i],
                     if self.use_nc {
