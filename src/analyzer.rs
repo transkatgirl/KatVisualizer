@@ -943,18 +943,22 @@ fn approximate_hearing_threshold(frequency: f64) -> f64 {
 
 // ----- Below algorithms are taken from https://codepen.io/TF3RDL/pen/MWLzPoO -----
 
+#[inline(always)]
 pub fn amplitude_to_dbfs(amplitude: f64) -> f64 {
     20.0 * f64::log10(amplitude)
 }
 
+#[inline(always)]
 pub fn dbfs_to_amplitude(decibels: f64) -> f64 {
     10.0_f64.powf(decibels / 20.0)
 }
 
+#[inline(always)]
 pub fn map_value_f64(x: f64, min: f64, max: f64, target_min: f64, target_max: f64) -> f64 {
     (x - min) / (max - min) * (target_max - target_min) + target_min
 }
 
+#[inline(always)]
 pub fn map_value_f32(x: f32, min: f32, max: f32, target_min: f32, target_max: f32) -> f32 {
     (x - min) / (max - min) * (target_max - target_min) + target_min
 }

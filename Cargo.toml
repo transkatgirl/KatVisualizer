@@ -34,9 +34,11 @@ serde = { version = "1.0", features = [
 ] }
 color = "0.3.2"
 threadpool = "1.8.1"
-ndarray = "0.16.1"
+ndarray = "0.17.1"
 parking_lot = "0.12.5"
-mimalloc = "0.1.48"
+mimalloc = { version = "0.1.48", features = [
+	"v3",
+] }
 voracious_radix_sort = "1.2.0"
 rosc = "0.11.4"
 
@@ -44,6 +46,7 @@ rosc = "0.11.4"
 opt-level = 3
 
 [profile.release]
-lto   = "thin"
-strip = "symbols"
-panic = "abort"
+lto           = "fat"
+codegen-units = 1
+strip         = "symbols"
+panic         = "abort"

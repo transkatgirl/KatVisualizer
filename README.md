@@ -24,13 +24,13 @@ Compiling this program requires the [Rust Programming Language](https://rust-lan
 In order to build this program as a VST3 plugin, run the following command:
 
 ```bash
-cargo xtask bundle katvisualizer --release
+RUSTFLAGS="-C target-cpu=native" cargo xtask bundle katvisualizer --release
 ```
 
 Alternatively, this program can run in a standalone mode which processes audio from the microphone. In order to build a standalone mode binary, run the following command:
 
 ```bash
-cargo build --release --features $channel_config,mute-output
+RUSTFLAGS="-C target-cpu=native" cargo build --release --features $channel_config,mute-output
 ```
 
 (`$channel_config` must be set to one of the following: `force-mono, force-mono-to-stereo, force-stereo`. Due to a limitation of nih-plug, channel configurations cannot be changed in standalone mode at runtime.)

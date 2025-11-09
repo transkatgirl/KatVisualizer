@@ -1,3 +1,5 @@
+// TODO: Go through https://nnethercote.github.io/perf-book/title-page.html and apply applicable optimizations
+
 #[cfg(not(debug_assertions))]
 use mimalloc::MiMalloc;
 
