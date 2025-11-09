@@ -853,7 +853,7 @@ impl AnalysisChain {
 
             let mut enabled_midi_notes = [false; 128];
 
-            for (frequency, _, _, _, _) in peaks {
+            for frequency in peaks {
                 let note = freq_to_midi_note(frequency).clamp(0.0, 128.0).round() as usize;
                 if note != 128 {
                     enabled_midi_notes[note] = true;
