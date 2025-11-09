@@ -1255,7 +1255,7 @@ pub fn create(
                         let mut bargraph_averaging = render_settings.bargraph_averaging.as_secs_f64() * 1000.0;
                         if ui
                             .add(
-                                egui::Slider::new(&mut bargraph_averaging, 0.0..=500.0)
+                                egui::Slider::new(&mut bargraph_averaging, 0.0..=1000.0)
                                     .logarithmic(true)
                                     .clamping(egui::SliderClamping::Never)
                                     .suffix("ms")
