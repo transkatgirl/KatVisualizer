@@ -92,7 +92,7 @@ fn draw_bargraph(
                     .data
                     .iter()
                     .take(max_index + 1)
-                    .map(|row| row.data[i])
+                    .map(|row| unsafe { *row.data.get_unchecked(i) })
                     .fold((0.0, 0.0), |acc, d| (acc.0 + d.0, acc.1 + d.1));
 
                 (sum.0 / count, sum.1 / count)
@@ -113,7 +113,7 @@ fn draw_bargraph(
                         .data
                         .iter()
                         .take(max_index + 1)
-                        .map(|row| row.masking[i])
+                        .map(|row| unsafe { *row.masking.get_unchecked(i) })
                         .fold(0.0, |acc, d| acc + d.1);
 
                     sum / count
@@ -1158,7 +1158,7 @@ pub fn create(
                             let mut agc_duration = render_settings.agc_duration.as_secs_f64();
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut agc_duration, 0.2..=8.0)
+                                    egui::Slider::new(&mut agc_duration, 0.1..=8.0)
                                         .clamping(egui::SliderClamping::Never)
                                         .suffix("s")
                                         .text("Amplitude ranging duration"),
@@ -1240,7 +1240,8 @@ pub fn create(
                         let mut spectrogram_duration = render_settings.spectrogram_duration.as_secs_f64();
                         if ui
                             .add(
-                                egui::Slider::new(&mut spectrogram_duration, 0.05..=2.0)
+                                egui::Slider::new(&mut spectrogram_duration, 0.05..=8.0)
+                                    .logarithmic(true)
                                     .clamping(egui::SliderClamping::Never)
                                     .suffix("s")
                                     .text("Spectrogram duration"),
@@ -1254,7 +1255,8 @@ pub fn create(
                         let mut bargraph_averaging = render_settings.bargraph_averaging.as_secs_f64() * 1000.0;
                         if ui
                             .add(
-                                egui::Slider::new(&mut bargraph_averaging, 0.0..=100.0)
+                                egui::Slider::new(&mut bargraph_averaging, 0.0..=500.0)
+                                    .logarithmic(true)
                                     .clamping(egui::SliderClamping::Never)
                                     .suffix("ms")
                                     .step_by(1.0)
