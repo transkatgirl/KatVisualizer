@@ -185,7 +185,7 @@ impl Handler {
         }
 
         scale_amplitudes.iter_mut().enumerate().for_each(|(i, a)| {
-            *a = if self.active_bins[i] {
+            *a = if self.active_bins[i] || self.frequency_scale[i].0 >= 6000.0 {
                 if self.frequency_scale[i].0 <= 300.0 {
                     map_value_f32(*a as f32, lower - 4.0, upper - 4.0, 0.0, 1.0).clamp(0.0, 1.0)
                 } else {
@@ -287,7 +287,7 @@ struct Args {
 
     /// The minimum signal-to-masking-threshold ratio (relative to the mean for the agc-length) for a bin to count as valid. Disabled if set to 0.
     ///
-    /// Ignored if frequency_scale_bins < 32
+    /// Ignored if frequency_scale_bins < 32, only applied for bins <6kHz
     #[arg(long, default_value_t = 1.5)]
     above_mean_stm: f32,
 
