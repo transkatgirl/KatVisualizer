@@ -509,19 +509,23 @@ impl Default for RenderSettings {
 }
 
 struct ColorTable {
-    table: ndarray::Array<Color32, ndarray::Dim<[usize; 2]>>,
-    size: usize,
-    max: f32,
+    table: ndarray::Array<(u8, u8, u8), ndarray::Dim<[usize; 2]>>,
+    size: (usize, usize),
+    max: (f32, f32),
 }
 
-const COLOR_TABLE_SIZE: usize = 1024;
+const COLOR_TABLE_CHROMA_SIZE: usize = 512;
+const COLOR_TABLE_LIGHTNESS_SIZE: usize = 1024;
 
 impl ColorTable {
-    fn new(size: usize) -> Self {
+    fn new() -> Self {
         Self {
-            table: Array2::default((size, size)),
-            size,
-            max: (size - 1) as f32,
+            table: Array2::default((COLOR_TABLE_CHROMA_SIZE, COLOR_TABLE_LIGHTNESS_SIZE)),
+            size: (COLOR_TABLE_CHROMA_SIZE, COLOR_TABLE_LIGHTNESS_SIZE),
+            max: (
+                (COLOR_TABLE_CHROMA_SIZE - 1) as f32,
+                (COLOR_TABLE_LIGHTNESS_SIZE - 1) as f32,
+            ),
         }
     }
     fn build(
@@ -543,15 +547,15 @@ impl ColorTable {
             components: [max_lightness, max_chroma, right_hue, 1.0],
         };
 
-        for split_index in 0..self.size {
-            let split = map_value_f32(split_index as f32, 0.0, self.max, -1.0, 1.0);
-            for intensity_index in 0..self.size {
+        for split_index in 0..self.size.0 {
+            let split = map_value_f32(split_index as f32, 0.0, self.max.0, -1.0, 1.0);
+            for intensity_index in 0..self.size.1 {
                 if intensity_index == 0 {
-                    self.table[[split_index, 0]] = Color32::BLACK;
+                    self.table[[split_index, 0]] = (0, 0, 0);
                     continue;
                 }
 
-                let intensity = map_value_f32(intensity_index as f32, 0.0, self.max, 0.0, 1.0);
+                let intensity = map_value_f32(intensity_index as f32, 0.0, self.max.1, 0.0, 1.0);
 
                 let mut color = if split >= 0.0 {
                     let mut color = right_color;
@@ -569,19 +573,21 @@ impl ColorTable {
                 let converted: Rgba8 = color.to_alpha_color::<Srgb>().to_rgba8();
 
                 self.table[[split_index, intensity_index]] =
-                    Color32::from_rgb(converted.r, converted.g, converted.b);
+                    (converted.r, converted.g, converted.b);
             }
         }
     }
     fn lookup(&self, split: f32, intensity: f32) -> Color32 {
-        self.table[[
-            map_value_f32(split, -1.0, 1.0, 0.0, self.max)
+        let color = self.table[[
+            map_value_f32(split, -1.0, 1.0, 0.0, self.max.0)
                 .round()
-                .clamp(0.0, self.max) as usize,
-            map_value_f32(intensity, 0.0, 1.0, 0.0, self.max)
+                .clamp(0.0, self.max.0) as usize,
+            map_value_f32(intensity, 0.0, 1.0, 0.0, self.max.1)
                 .round()
-                .clamp(0.0, self.max) as usize,
-        ]]
+                .clamp(0.0, self.max.1) as usize,
+        ]];
+
+        Color32::from_rgb(color.0, color.1, color.2)
     }
 }
 
@@ -607,7 +613,7 @@ pub fn create(
 
     let shared_state = {
         let settings = RenderSettings::default();
-        let mut color_table = ColorTable::new(COLOR_TABLE_SIZE);
+        let mut color_table = ColorTable::new();
         color_table.build(
             settings.left_hue,
             settings.right_hue,
