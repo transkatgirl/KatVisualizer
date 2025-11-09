@@ -48,6 +48,7 @@ pub struct BetterAnalyzer {
     frequency_bands: Vec<(f64, f64, f64)>,
     frequency_indices: Vec<(usize, usize)>,
     normalizers: Vec<PrecomputedNormalizer>,
+    hearing_threshold: Vec<f64>,
 }
 
 impl BetterAnalyzer {
@@ -96,6 +97,11 @@ impl BetterAnalyzer {
             .map(|band| PrecomputedNormalizer::new(band.center))
             .collect();
 
+        let hearing_threshold: Vec<_> = frequency_bands
+            .iter()
+            .map(|band| approximate_hearing_threshold(band.center))
+            .collect();
+
         let transform = VQsDFT::new(
             &frequency_bands,
             HANN_WINDOW,
@@ -122,6 +128,7 @@ impl BetterAnalyzer {
             frequency_bands,
             frequency_indices,
             normalizers,
+            hearing_threshold,
         }
     }
     pub fn config(&self) -> &BetterAnalyzerConfiguration {
@@ -242,9 +249,10 @@ impl BetterAnalysis {
 
             if let Some(listening_volume) = normalization_volume {
                 let hearing_threshold = left
-                    .frequency_bands
+                    .hearing_threshold
                     .iter()
-                    .map(move |(_, c, _)| approximate_hearing_threshold(*c) - listening_volume);
+                    .copied()
+                    .map(|h| h - listening_volume);
 
                 left.normalizers
                     .iter()
@@ -421,9 +429,10 @@ impl BetterAnalysis {
 
             if let Some(listening_volume) = normalization_volume {
                 let hearing_threshold = center
-                    .frequency_bands
+                    .hearing_threshold
                     .iter()
-                    .map(move |(_, c, _)| approximate_hearing_threshold(*c) - listening_volume);
+                    .copied()
+                    .map(|h| h - listening_volume);
 
                 center
                     .normalizers
