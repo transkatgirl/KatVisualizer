@@ -791,20 +791,20 @@ impl Masker {
 
             let (min, max) = self.range_indices[i];
 
-            (min..i)
-                .map(|i| (i, self.frequency_set[i].1))
-                .for_each(|(i, b)| {
-                    masking_threshold[i] +=
-                        dbfs_to_amplitude(-lower_spread * (bark - b) + offset) * amplitude;
+            masking_threshold[min..i]
+                .iter_mut()
+                .zip(self.frequency_set[min..i].iter().map(|(_, b)| *b))
+                .for_each(|(t, b)| {
+                    *t += dbfs_to_amplitude(-lower_spread * (bark - b) + offset) * amplitude;
                 });
 
             masking_threshold[i] += dbfs_to_amplitude(offset) * amplitude;
 
-            (i..=max)
-                .map(|i| (i, self.frequency_set[i].1))
-                .for_each(|(i, b)| {
-                    masking_threshold[i] +=
-                        dbfs_to_amplitude(-upper_spread * (b - bark) + offset) * amplitude;
+            masking_threshold[i..=max]
+                .iter_mut()
+                .zip(self.frequency_set[i..=max].iter().map(|(_, b)| *b))
+                .for_each(|(t, b)| {
+                    *t += dbfs_to_amplitude(-upper_spread * (b - bark) + offset) * amplitude;
                 });
         }
     }
