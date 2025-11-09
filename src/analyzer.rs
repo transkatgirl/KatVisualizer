@@ -1196,14 +1196,14 @@ impl VQsDFT {
         for sample in samples {
             self.buffer_index = (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
             self.buffer[self.buffer_index] = sample;
+            let latest = self.buffer[self.buffer_index];
 
-            for i in 0..self.coeffs.len() {
-                let coeff = &mut self.coeffs[i];
-                let oldest = (((self.buffer_index as isize - coeff.period as isize)
+            for (coeff, spectrum_data) in self.coeffs.iter_mut().zip(self.spectrum_data.iter_mut())
+            {
+                let oldest = self.buffer[(((self.buffer_index as isize - coeff.period as isize)
                     % buffer_len_int)
                     + buffer_len_int) as usize
-                    % buffer_len;
-                let latest = self.buffer_index;
+                    % buffer_len];
                 let mut sum = (0.0, 0.0);
 
                 for (
@@ -1231,8 +1231,8 @@ impl VQsDFT {
                         ),
                     ),
                 ) {
-                    let comb_x = self.buffer[latest] * fiddle.0 - self.buffer[oldest];
-                    let comb_y = self.buffer[latest] * fiddle.1;
+                    let comb_x = latest * fiddle.0 - oldest;
+                    let comb_y = latest * fiddle.1;
 
                     coeff1.0 = comb_x * twiddle.0 - comb_y * twiddle.1 - coeff2.0;
                     coeff1.1 = comb_x * twiddle.1 + comb_y * twiddle.0 - coeff2.1;
@@ -1252,48 +1252,12 @@ impl VQsDFT {
                     sum.0 += coeff3.0 * gain / coeff.period;
                     sum.1 += coeff3.1 * gain / coeff.period;
                 }
-
-                /*for j in 0..kernel_length {
-                    let fiddle = coeff.fiddles[j];
-                    let twiddle = coeff.twiddles[j];
-
-                    let comb_x = self.buffer[latest] * fiddle.0 - self.buffer[oldest];
-                    let comb_y = self.buffer[latest] * fiddle.1;
-
-                    coeff.coeffs1[j].0 =
-                        comb_x * twiddle.0 - comb_y * twiddle.1 - coeff.coeffs2[j].0;
-                    coeff.coeffs1[j].1 =
-                        comb_x * twiddle.1 + comb_y * twiddle.0 - coeff.coeffs2[j].1;
-
-                    coeff.coeffs2[j].0 = comb_x;
-                    coeff.coeffs2[j].1 = comb_y;
-
-                    coeff.coeffs3[j].0 = coeff.coeffs1[j].0
-                        + coeff.reson_coeffs[j] * coeff.coeffs4[j].0
-                        - coeff.coeffs5[j].0;
-                    coeff.coeffs3[j].1 = coeff.coeffs1[j].1
-                        + coeff.reson_coeffs[j] * coeff.coeffs4[j].1
-                        - coeff.coeffs5[j].1;
-
-                    coeff.coeffs5[j].0 = coeff.coeffs4[j].0;
-                    coeff.coeffs5[j].1 = coeff.coeffs4[j].1;
-
-                    coeff.coeffs4[j].0 = coeff.coeffs3[j].0;
-                    coeff.coeffs4[j].1 = coeff.coeffs3[j].1;
-
-                    sum.0 += coeff.coeffs3[j].0 * self.gains[j] / coeff.period;
-                    sum.1 += coeff.coeffs3[j].1 * self.gains[j] / coeff.period;
-                }*/
-                self.spectrum_data[i] = f64::max(
-                    self.spectrum_data[i],
-                    if self.use_nc {
-                        -(coeff.coeffs3[0].0 / coeff.period * coeff.coeffs3[1].0 / coeff.period)
-                            - (coeff.coeffs3[0].1 / coeff.period * coeff.coeffs3[1].1
-                                / coeff.period)
-                    } else {
-                        sum.0.powi(2) + sum.1.powi(2)
-                    },
-                );
+                *spectrum_data = spectrum_data.max(if self.use_nc {
+                    -(coeff.coeffs3[0].0 / coeff.period * coeff.coeffs3[1].0 / coeff.period)
+                        - (coeff.coeffs3[0].1 / coeff.period * coeff.coeffs3[1].1 / coeff.period)
+                } else {
+                    sum.0.powi(2) + sum.1.powi(2)
+                });
             }
         }
         self.spectrum_data.iter_mut().for_each(|x| *x = x.sqrt());
