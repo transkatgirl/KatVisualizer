@@ -802,20 +802,22 @@ impl Masker {
             let threshold_offset = masking_threshold_offset(bark, flatness);
             let offset = threshold_offset - simultaneous;
 
+            let adjusted_amplitude = dbfs_to_amplitude(offset) * amplitude;
+
             masking_threshold[min_i..i]
                 .iter_mut()
                 .zip(self.bark_set[min_i..i].iter().copied())
                 .for_each(|(t, b)| {
-                    *t += dbfs_to_amplitude(-lower_spread * (bark - b) + offset) * amplitude;
+                    *t += dbfs_to_amplitude(-lower_spread * (bark - b)) * adjusted_amplitude;
                 });
 
-            masking_threshold[i] += dbfs_to_amplitude(offset) * amplitude;
+            masking_threshold[i] += adjusted_amplitude;
 
             masking_threshold[i..=max_i]
                 .iter_mut()
                 .zip(self.bark_set[i..=max_i].iter().copied())
                 .for_each(|(t, b)| {
-                    *t += dbfs_to_amplitude(-upper_spread * (b - bark) + offset) * amplitude;
+                    *t += dbfs_to_amplitude(-upper_spread * (b - bark)) * adjusted_amplitude;
                 });
         }
     }
