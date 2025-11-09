@@ -155,9 +155,9 @@ impl BetterAnalyzer {
             self.transform
                 .spectrum_data
                 .iter_mut()
-                .zip(self.masking.iter())
+                .zip(self.masking.iter().copied())
                 .for_each(|(amplitude, masking_amplitude)| {
-                    *amplitude = amplitude.max(*masking_amplitude)
+                    *amplitude = amplitude.max(masking_amplitude)
                 });
         }
     }
@@ -168,9 +168,9 @@ impl BetterAnalyzer {
         self.transform
             .spectrum_data
             .iter_mut()
-            .zip(self.masking.iter())
+            .zip(self.masking.iter().copied())
             .for_each(|(amplitude, masking_amplitude)| {
-                if masking_amplitude > amplitude {
+                if masking_amplitude > *amplitude {
                     *amplitude = f64::NEG_INFINITY;
                 }
             });
@@ -234,8 +234,9 @@ impl BetterAnalysis {
             let masking_data = left
                 .masking
                 .iter()
-                .zip(right.masking.iter())
-                .map(|(left, right)| calculate_pan_and_volume_from_amplitude(*left, *right));
+                .copied()
+                .zip(right.masking.iter().copied())
+                .map(|(left, right)| calculate_pan_and_volume_from_amplitude(left, right));
 
             let mut masking_sum = 0.0;
 
@@ -290,11 +291,12 @@ impl BetterAnalysis {
                     .transform
                     .spectrum_data
                     .iter()
-                    .zip(right.transform.spectrum_data.iter())
+                    .copied()
+                    .zip(right.transform.spectrum_data.iter().copied())
                     .zip(left.normalizers.iter())
                     .enumerate()
                 {
-                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
+                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
 
                     let volume = normalizer
                         .spl_to_phon(volume + gain + listening_volume)
@@ -313,10 +315,11 @@ impl BetterAnalysis {
                     .transform
                     .spectrum_data
                     .iter()
-                    .zip(right.transform.spectrum_data.iter())
+                    .copied()
+                    .zip(right.transform.spectrum_data.iter().copied())
                     .enumerate()
                 {
-                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
+                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
                     let volume = volume + gain;
 
                     sum += dbfs_to_amplitude(volume);
@@ -336,10 +339,11 @@ impl BetterAnalysis {
                     .transform
                     .spectrum_data
                     .iter()
-                    .zip(right.transform.spectrum_data.iter())
+                    .copied()
+                    .zip(right.transform.spectrum_data.iter().copied())
                     .zip(left.normalizers.iter())
                 {
-                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
+                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
 
                     let volume = normalizer
                         .spl_to_phon(volume + gain + listening_volume)
@@ -360,12 +364,13 @@ impl BetterAnalysis {
                     .transform
                     .spectrum_data
                     .iter()
-                    .zip(right.transform.spectrum_data.iter())
+                    .copied()
+                    .zip(right.transform.spectrum_data.iter().copied())
                 {
-                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(*left, *right);
+                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
                     let volume = volume + gain;
 
-                    sum += (*left + *right) * gain_amplitude;
+                    sum += (left + right) * gain_amplitude;
                     let volume = volume as f32;
 
                     self.data.push(((pan * 2.0) as f32, volume));
@@ -405,7 +410,11 @@ impl BetterAnalysis {
                 }
             }
 
-            let masking_data = center.masking.iter().map(|amplitude| *amplitude * 2.0);
+            let masking_data = center
+                .masking
+                .iter()
+                .copied()
+                .map(|amplitude| amplitude * 2.0);
 
             let gain_amplitude = dbfs_to_amplitude(gain);
             let mut masking_sum = 0.0;
@@ -463,11 +472,12 @@ impl BetterAnalysis {
                     .transform
                     .spectrum_data
                     .iter()
+                    .copied()
                     .zip(center.normalizers.iter())
                     .enumerate()
                 {
                     let volume = normalizer
-                        .spl_to_phon(amplitude_to_dbfs(*amplitude * 2.0) + gain + listening_volume)
+                        .spl_to_phon(amplitude_to_dbfs(amplitude * 2.0) + gain + listening_volume)
                         //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                         .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                         - listening_volume;
@@ -479,8 +489,9 @@ impl BetterAnalysis {
                     self.max = self.max.max(volume);
                 }
             } else {
-                for (index, amplitude) in center.transform.spectrum_data.iter().enumerate() {
-                    let volume = amplitude_to_dbfs(*amplitude * 2.0) + gain;
+                for (index, amplitude) in center.transform.spectrum_data.iter().copied().enumerate()
+                {
+                    let volume = amplitude_to_dbfs(amplitude * 2.0) + gain;
 
                     sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
@@ -499,10 +510,11 @@ impl BetterAnalysis {
                     .transform
                     .spectrum_data
                     .iter()
+                    .copied()
                     .zip(center.normalizers.iter())
                 {
                     let volume = normalizer
-                        .spl_to_phon(amplitude_to_dbfs(*amplitude * 2.0) + gain + listening_volume)
+                        .spl_to_phon(amplitude_to_dbfs(amplitude * 2.0) + gain + listening_volume)
                         //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                         .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                         - listening_volume;
@@ -516,8 +528,8 @@ impl BetterAnalysis {
             } else {
                 let gain_amplitude = dbfs_to_amplitude(gain);
 
-                for amplitude in center.transform.spectrum_data.iter() {
-                    let amplitude = *amplitude * 2.0 * gain_amplitude;
+                for amplitude in center.transform.spectrum_data.iter().copied() {
+                    let amplitude = amplitude * 2.0 * gain_amplitude;
 
                     sum += amplitude;
                     let volume = amplitude_to_dbfs(amplitude) as f32;
@@ -551,19 +563,24 @@ impl BetterAnalysis {
         if self.masking_mean.is_finite() {
             self.data
                 .iter()
-                .zip(self.masking.iter())
+                .copied()
+                .zip(self.masking.iter().copied())
                 .enumerate()
                 .for_each(|(i, ((_, a), (_, m)))| {
-                    if *a > min && *a > *m {
-                        self.sorting_scratchpad.push((*a - *m, i));
+                    if a > min && a > m {
+                        self.sorting_scratchpad.push((a - m, i));
                     }
                 });
         } else {
-            self.data.iter().enumerate().for_each(|(i, (_, a))| {
-                if *a > min {
-                    self.sorting_scratchpad.push((*a - min, i));
-                }
-            });
+            self.data
+                .iter()
+                .copied()
+                .enumerate()
+                .for_each(|(i, (_, a))| {
+                    if a > min {
+                        self.sorting_scratchpad.push((a - min, i));
+                    }
+                });
         }
         self.sorting_scratchpad
             .sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
@@ -580,21 +597,22 @@ impl BetterAnalysis {
 
         self.sorting_scratchpad
             .iter()
+            .copied()
             .rev()
             .filter_map(|(stm, i)| {
-                if !self.peak_scratchpad[*i] {
-                    let (min, max) = analyzer.frequency_indices[*i];
+                if !self.peak_scratchpad[i] {
+                    let (min, max) = analyzer.frequency_indices[i];
 
                     (min..=max).for_each(|i| {
                         self.peak_scratchpad[i] = true;
                     });
 
                     Some((
-                        analyzer.frequency_bands[*i].1 as f32,
-                        (analyzer.frequency_bands[*i].2 - analyzer.frequency_bands[*i].0) as f32,
-                        self.data[*i].0,
-                        self.data[*i].1,
-                        *stm,
+                        analyzer.frequency_bands[i].1 as f32,
+                        (analyzer.frequency_bands[i].2 - analyzer.frequency_bands[i].0) as f32,
+                        self.data[i].0,
+                        self.data[i].1,
+                        stm,
                     ))
                 } else {
                     None
@@ -675,6 +693,7 @@ impl BetterSpectrogram {
     if flatness.is_normal() { flatness } else { 0.0 }
 }*/
 
+#[inline(always)]
 fn masking_threshold_offset(center_bark: f64, flatness: f64) -> f64 {
     let tonal_masking_threshold = -6.025 - (0.275 * center_bark);
     let nontonal_masking_threshold = -2.025 - (0.175 * center_bark);
@@ -1072,6 +1091,7 @@ struct VQsDFTCoeffs {
     coeffs5: Vec<(f64, f64)>,
 }
 
+#[derive(Clone, Copy)]
 struct FrequencyBand {
     low: f64,
     center: f64,
