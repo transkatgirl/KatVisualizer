@@ -774,11 +774,19 @@ impl Masker {
             0.0
         };
 
-        for (i, component) in spectrum.enumerate() {
+        for (i, (component, (frequency, (bark, (min_i, max_i))))) in spectrum
+            .zip(
+                self.frequency_set.iter().copied().zip(
+                    self.bark_set
+                        .iter()
+                        .copied()
+                        .zip(self.range_indices.iter().copied()),
+                ),
+            )
+            .enumerate()
+        {
             let amplitude = component;
             let amplitude_db = amplitude_to_dbfs(component);
-            let frequency = self.frequency_set[i];
-            let bark = self.bark_set[i];
 
             if !amplitude.is_normal() {
                 continue;
@@ -794,20 +802,18 @@ impl Masker {
             let threshold_offset = masking_threshold_offset(bark, flatness);
             let offset = threshold_offset - simultaneous;
 
-            let (min, max) = self.range_indices[i];
-
-            masking_threshold[min..i]
+            masking_threshold[min_i..i]
                 .iter_mut()
-                .zip(self.bark_set[min..i].iter().copied())
+                .zip(self.bark_set[min_i..i].iter().copied())
                 .for_each(|(t, b)| {
                     *t += dbfs_to_amplitude(-lower_spread * (bark - b) + offset) * amplitude;
                 });
 
             masking_threshold[i] += dbfs_to_amplitude(offset) * amplitude;
 
-            masking_threshold[i..=max]
+            masking_threshold[i..=max_i]
                 .iter_mut()
-                .zip(self.bark_set[i..=max].iter().copied())
+                .zip(self.bark_set[i..=max_i].iter().copied())
                 .for_each(|(t, b)| {
                     *t += dbfs_to_amplitude(-upper_spread * (b - bark) + offset) * amplitude;
                 });
