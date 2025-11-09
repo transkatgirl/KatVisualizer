@@ -1216,73 +1216,158 @@ impl VQsDFT {
         let buffer_len = self.buffer.len();
         let buffer_len_int = buffer_len as isize;
 
-        for sample in samples {
-            self.buffer_index = (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
-            self.buffer[self.buffer_index] = sample;
-            let latest = self.buffer[self.buffer_index];
+        if self.use_nc {
+            for sample in samples {
+                self.buffer_index =
+                    (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
+                let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
+                *latest = sample;
+                let latest = sample;
 
-            for (coeff, spectrum_data) in self.coeffs.iter_mut().zip(self.spectrum_data.iter_mut())
-            {
-                let oldest = self.buffer[(((self.buffer_index as isize - coeff.period as isize)
-                    % buffer_len_int)
-                    + buffer_len_int) as usize
-                    % buffer_len];
-                let mut sum = (0.0, 0.0);
+                for (coeff, spectrum_data) in
+                    self.coeffs.iter_mut().zip(self.spectrum_data.iter_mut())
+                {
+                    let oldest = unsafe {
+                        *self.buffer.get_unchecked(
+                            (((self.buffer_index as isize - coeff.period as isize)
+                                % buffer_len_int)
+                                + buffer_len_int) as usize
+                                % buffer_len,
+                        )
+                    };
+                    let mut sum = (0.0, 0.0);
 
-                for (
-                    fiddle,
-                    (
-                        twiddle,
-                        (coeff1, (coeff2, (coeff3, (coeff4, (coeff5, (reson_coeff, gain)))))),
-                    ),
-                ) in coeff.fiddles.iter().copied().zip(
-                    coeff.twiddles.iter().copied().zip(
-                        coeff.coeffs1.iter_mut().zip(
-                            coeff.coeffs2.iter_mut().zip(
-                                coeff.coeffs3.iter_mut().zip(
-                                    coeff.coeffs4.iter_mut().zip(
-                                        coeff.coeffs5.iter_mut().zip(
-                                            coeff
-                                                .reson_coeffs
-                                                .iter()
-                                                .copied()
-                                                .zip(self.gains.iter().copied()),
+                    for (
+                        fiddle,
+                        (
+                            twiddle,
+                            (coeff1, (coeff2, (coeff3, (coeff4, (coeff5, (reson_coeff, gain)))))),
+                        ),
+                    ) in coeff.fiddles.iter().copied().zip(
+                        coeff.twiddles.iter().copied().zip(
+                            coeff.coeffs1.iter_mut().zip(
+                                coeff.coeffs2.iter_mut().zip(
+                                    coeff.coeffs3.iter_mut().zip(
+                                        coeff.coeffs4.iter_mut().zip(
+                                            coeff.coeffs5.iter_mut().zip(
+                                                coeff
+                                                    .reson_coeffs
+                                                    .iter()
+                                                    .copied()
+                                                    .zip(self.gains.iter().copied()),
+                                            ),
                                         ),
                                     ),
                                 ),
                             ),
                         ),
-                    ),
-                ) {
-                    let comb_x = latest * fiddle.0 - oldest;
-                    let comb_y = latest * fiddle.1;
+                    ) {
+                        let comb_x = latest * fiddle.0 - oldest;
+                        let comb_y = latest * fiddle.1;
 
-                    coeff1.0 = comb_x * twiddle.0 - comb_y * twiddle.1 - coeff2.0;
-                    coeff1.1 = comb_x * twiddle.1 + comb_y * twiddle.0 - coeff2.1;
+                        coeff1.0 = comb_x * twiddle.0 - comb_y * twiddle.1 - coeff2.0;
+                        coeff1.1 = comb_x * twiddle.1 + comb_y * twiddle.0 - coeff2.1;
 
-                    coeff2.0 = comb_x;
-                    coeff2.1 = comb_y;
+                        coeff2.0 = comb_x;
+                        coeff2.1 = comb_y;
 
-                    coeff3.0 = coeff1.0 + reson_coeff * coeff4.0 - coeff5.0;
-                    coeff3.1 = coeff1.1 + reson_coeff * coeff4.1 - coeff5.1;
+                        coeff3.0 = coeff1.0 + reson_coeff * coeff4.0 - coeff5.0;
+                        coeff3.1 = coeff1.1 + reson_coeff * coeff4.1 - coeff5.1;
 
-                    coeff5.0 = coeff4.0;
-                    coeff5.1 = coeff4.1;
+                        coeff5.0 = coeff4.0;
+                        coeff5.1 = coeff4.1;
 
-                    coeff4.0 = coeff3.0;
-                    coeff4.1 = coeff3.1;
+                        coeff4.0 = coeff3.0;
+                        coeff4.1 = coeff3.1;
 
-                    sum.0 += coeff3.0 * gain / coeff.period;
-                    sum.1 += coeff3.1 * gain / coeff.period;
+                        sum.0 += coeff3.0 * gain / coeff.period;
+                        sum.1 += coeff3.1 * gain / coeff.period;
+                    }
+                    let (first_coeff3, second_coeff3) = unsafe {
+                        (
+                            *coeff.coeffs3.get_unchecked(0),
+                            *coeff.coeffs3.get_unchecked(1),
+                        )
+                    };
+
+                    *spectrum_data = spectrum_data.max(
+                        -(first_coeff3.0 / coeff.period * second_coeff3.0 / coeff.period)
+                            - (first_coeff3.1 / coeff.period * second_coeff3.1 / coeff.period),
+                    );
                 }
-                *spectrum_data = spectrum_data.max(if self.use_nc {
-                    -(coeff.coeffs3[0].0 / coeff.period * coeff.coeffs3[1].0 / coeff.period)
-                        - (coeff.coeffs3[0].1 / coeff.period * coeff.coeffs3[1].1 / coeff.period)
-                } else {
-                    sum.0.powi(2) + sum.1.powi(2)
-                });
+            }
+        } else {
+            for sample in samples {
+                self.buffer_index =
+                    (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
+                let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
+                *latest = sample;
+                let latest = sample;
+
+                for (coeff, spectrum_data) in
+                    self.coeffs.iter_mut().zip(self.spectrum_data.iter_mut())
+                {
+                    let oldest = unsafe {
+                        *self.buffer.get_unchecked(
+                            (((self.buffer_index as isize - coeff.period as isize)
+                                % buffer_len_int)
+                                + buffer_len_int) as usize
+                                % buffer_len,
+                        )
+                    };
+                    let mut sum = (0.0, 0.0);
+
+                    for (
+                        fiddle,
+                        (
+                            twiddle,
+                            (coeff1, (coeff2, (coeff3, (coeff4, (coeff5, (reson_coeff, gain)))))),
+                        ),
+                    ) in coeff.fiddles.iter().copied().zip(
+                        coeff.twiddles.iter().copied().zip(
+                            coeff.coeffs1.iter_mut().zip(
+                                coeff.coeffs2.iter_mut().zip(
+                                    coeff.coeffs3.iter_mut().zip(
+                                        coeff.coeffs4.iter_mut().zip(
+                                            coeff.coeffs5.iter_mut().zip(
+                                                coeff
+                                                    .reson_coeffs
+                                                    .iter()
+                                                    .copied()
+                                                    .zip(self.gains.iter().copied()),
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ) {
+                        let comb_x = latest * fiddle.0 - oldest;
+                        let comb_y = latest * fiddle.1;
+
+                        coeff1.0 = comb_x * twiddle.0 - comb_y * twiddle.1 - coeff2.0;
+                        coeff1.1 = comb_x * twiddle.1 + comb_y * twiddle.0 - coeff2.1;
+
+                        coeff2.0 = comb_x;
+                        coeff2.1 = comb_y;
+
+                        coeff3.0 = coeff1.0 + reson_coeff * coeff4.0 - coeff5.0;
+                        coeff3.1 = coeff1.1 + reson_coeff * coeff4.1 - coeff5.1;
+
+                        coeff5.0 = coeff4.0;
+                        coeff5.1 = coeff4.1;
+
+                        coeff4.0 = coeff3.0;
+                        coeff4.1 = coeff3.1;
+
+                        sum.0 += coeff3.0 * gain / coeff.period;
+                        sum.1 += coeff3.1 * gain / coeff.period;
+                    }
+                    *spectrum_data = spectrum_data.max(sum.0.powi(2) + sum.1.powi(2));
+                }
             }
         }
+
         self.spectrum_data.iter_mut().for_each(|x| *x = x.sqrt());
 
         &self.spectrum_data

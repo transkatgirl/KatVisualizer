@@ -35,7 +35,7 @@ fn calculate_volume_min_max(
     let mut elapsed = Duration::ZERO;
 
     let mut masking_sum = 0.0;
-    let mut rows = 0.0;
+    let mut rows: usize = 0;
 
     for row in &spectrogram.data {
         elapsed += row.duration;
@@ -45,11 +45,11 @@ fn calculate_volume_min_max(
 
         if row.masking_mean.is_finite() {
             masking_sum += row.masking_mean as f64;
-            rows += 1.0;
+            rows += 1;
         }
     }
 
-    let masking = (masking_sum / rows) as f32;
+    let masking = (masking_sum / rows as f64) as f32;
 
     (
         (masking - settings.agc_below_masking).clamp(settings.agc_minimum, settings.agc_maximum),
