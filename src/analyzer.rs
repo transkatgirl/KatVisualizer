@@ -858,7 +858,6 @@ struct PrecomputedNormalizer {
     l_u: f64,
     param_1: f64,
     param_2: f64,
-    param_3: f64,
 }
 
 impl PrecomputedNormalizer {
@@ -870,7 +869,6 @@ impl PrecomputedNormalizer {
             l_u,
             param_1: 10.0_f64.powf(alpha_f * ((t_f + l_u) / 10.0)),
             param_2: (4.0e-10_f64).powf(0.3 - alpha_f),
-            param_3: 10.0_f64.powf(0.072),
         }
     }
     fn spl_to_phon(&self, db_spl: f64) -> f64 {
@@ -878,7 +876,7 @@ impl PrecomputedNormalizer {
             * f64::log10(
                 ((10.0_f64.powf(self.alpha_f * ((db_spl + self.l_u) / 10.0)) - self.param_1)
                     / self.param_2)
-                    + self.param_3,
+                    + NORM_OFFSET,
             )
     }
 }
@@ -900,6 +898,7 @@ const MAX_COMPLETE_NORM_PHON: f64 = 80.0;*/
 const MIN_INFORMATIVE_NORM_PHON: f64 = 0.0;
 const MAX_INFORMATIVE_NORM_PHON: f64 = 100.0;
 const NORM_MULTIPLE: f64 = 100.0 / 3.0;
+const NORM_OFFSET: f64 = 1.180_320_635_651_729_7; // 10.0_f64.powf(0.072)
 
 const NORM_FREQUENCIES: &[f64] = &[
     20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0, 400.0,
