@@ -361,7 +361,7 @@ fn draw_spectrogram_image(
             .data
             .iter()
             .copied()
-            .zip(image.pixels[(image_width * y)..].iter_mut())
+            .zip(unsafe { image.pixels.get_unchecked_mut((image_width * y)..) }.iter_mut())
         {
             let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0);
             *pixel = color_table.lookup(pan, intensity);
@@ -514,7 +514,7 @@ struct ColorTable {
     max: f32,
 }
 
-const COLOR_TABLE_SIZE: usize = 2048;
+const COLOR_TABLE_SIZE: usize = 1024;
 
 impl ColorTable {
     fn new(size: usize) -> Self {
