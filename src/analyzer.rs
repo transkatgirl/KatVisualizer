@@ -280,9 +280,7 @@ impl BetterAnalysis {
 
             self.masking_mean = f32::NEG_INFINITY;
         } else {
-            self.masking
-                .iter_mut()
-                .for_each(|m| *m = (0.0, f32::NEG_INFINITY));
+            self.masking.fill((0.0, f32::NEG_INFINITY));
             self.masking_mean = f32::NEG_INFINITY;
         }
 
@@ -455,9 +453,7 @@ impl BetterAnalysis {
 
             self.masking_mean = f32::NEG_INFINITY;
         } else {
-            self.masking
-                .iter_mut()
-                .for_each(|m| *m = (0.0, f32::NEG_INFINITY));
+            self.masking.fill((0.0, f32::NEG_INFINITY));
             self.masking_mean = f32::NEG_INFINITY;
         }
 
@@ -746,7 +742,7 @@ impl Masker {
         flatness: f64,
         masking_threshold: &mut [f64],
     ) {
-        masking_threshold.iter_mut().for_each(|s| *s = 0.0);
+        masking_threshold.fill(0.0);
 
         let amplitude_correction_offset = if let Some(listening_volume) = listening_volume {
             listening_volume - 86.0 // Assume the spreading function was calculated for -0dBFS = 86dBSPL
