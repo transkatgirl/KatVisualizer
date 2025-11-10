@@ -43,7 +43,16 @@ The compiled plugin can be loaded into a DAW like any other metering plugin. It'
 
 Once the program is running, the window will display a graphical representation of the input audio, along with additional information in the top corners. The parameters used to render this graphical representation can be adjusted in the dragable settings window.
 
-Keep in mind that this plugin is very CPU intensive, and some systems may struggle to run the default settings. If you experience performance issues, the first thing you should do is open the analysis settings and lower the resolution.
+If you'd like to start improving the spectrogram's readability further, the settings with the largest impact are:
+- Render Options -> Range above masking mean
+- Render Options -> Range below masking mean
+- Analysis Options -> Update rate (increasing it may hurt performance)
+
+If you experience performance issues out of the box, the settings with the largest impact are:
+- Analysis Options -> Resolution (decreasing it may hurt readability)
+- Analysis Options -> Perform simultaneous masking (disabling may hurt readability)
+- Analysis Options -> Update rate (decreasing it may hurt readability)
+- Render Options -> Spectrogram duration
 
 ### Performance Details
 
