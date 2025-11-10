@@ -1113,14 +1113,19 @@ struct VQsDFT {
 #[derive(Clone)]
 struct VQsDFTCoeffs {
     period: f64,
-    twiddles: Vec<(f64, f64)>,
-    fiddles: Vec<(f64, f64)>,
-    reson_coeffs: Vec<f64>,
-    coeffs1: Vec<(f64, f64)>,
-    coeffs2: Vec<(f64, f64)>,
-    coeffs3: Vec<(f64, f64)>,
-    coeffs4: Vec<(f64, f64)>,
-    coeffs5: Vec<(f64, f64)>,
+    kernel: Vec<VQsDFTCoeff>,
+}
+
+#[derive(Clone, Copy)]
+struct VQsDFTCoeff {
+    twiddle: (f64, f64),
+    fiddle: (f64, f64),
+    reson: f64,
+    coeff1: (f64, f64),
+    coeff2: (f64, f64),
+    coeff3: (f64, f64),
+    coeff4: (f64, f64),
+    coeff5: (f64, f64),
 }
 
 #[derive(Clone, Copy)]
@@ -1192,14 +1197,20 @@ impl VQsDFT {
 
                     VQsDFTCoeffs {
                         period,
-                        twiddles,
-                        fiddles,
-                        reson_coeffs,
-                        coeffs1: vec![(0.0, 0.0); items_per_band],
-                        coeffs2: vec![(0.0, 0.0); items_per_band],
-                        coeffs3: vec![(0.0, 0.0); items_per_band],
-                        coeffs4: vec![(0.0, 0.0); items_per_band],
-                        coeffs5: vec![(0.0, 0.0); items_per_band],
+                        kernel: twiddles
+                            .into_iter()
+                            .zip(fiddles.into_iter().zip(reson_coeffs))
+                            .map(|(twiddle, (fiddle, reson))| VQsDFTCoeff {
+                                twiddle,
+                                fiddle,
+                                reson,
+                                coeff1: (0.0, 0.0),
+                                coeff2: (0.0, 0.0),
+                                coeff3: (0.0, 0.0),
+                                coeff4: (0.0, 0.0),
+                                coeff5: (0.0, 0.0),
+                            })
+                            .collect(),
                     }
                 })
                 .collect(),
@@ -1211,12 +1222,14 @@ impl VQsDFT {
     fn reset(&mut self) {
         self.buffer.fill(0.0);
         self.buffer_index = self.buffer.len() - 1;
-        self.coeffs.iter_mut().for_each(|coeff| {
-            coeff.coeffs1.fill((0.0, 0.0));
-            coeff.coeffs2.fill((0.0, 0.0));
-            coeff.coeffs3.fill((0.0, 0.0));
-            coeff.coeffs4.fill((0.0, 0.0));
-            coeff.coeffs5.fill((0.0, 0.0));
+        self.coeffs.iter_mut().for_each(|coeffs| {
+            coeffs.kernel.iter_mut().for_each(|coeff| {
+                coeff.coeff1 = (0.0, 0.0);
+                coeff.coeff2 = (0.0, 0.0);
+                coeff.coeff3 = (0.0, 0.0);
+                coeff.coeff4 = (0.0, 0.0);
+                coeff.coeff5 = (0.0, 0.0);
+            });
         });
     }
     fn analyze(&mut self, samples: impl Iterator<Item = f64>) -> &[f64] {
@@ -1233,12 +1246,12 @@ impl VQsDFT {
                 *latest = sample;
                 let latest = sample;
 
-                for (coeff, spectrum_data) in
+                for (coeffs, spectrum_data) in
                     self.coeffs.iter_mut().zip(self.spectrum_data.iter_mut())
                 {
                     let oldest = unsafe {
                         *self.buffer.get_unchecked(
-                            (((self.buffer_index as isize - coeff.period as isize)
+                            (((self.buffer_index as isize - coeffs.period as isize)
                                 % buffer_len_int)
                                 + buffer_len_int) as usize
                                 % buffer_len,
@@ -1246,62 +1259,44 @@ impl VQsDFT {
                     };
                     let mut sum = (0.0, 0.0);
 
-                    for (
-                        fiddle,
-                        (
-                            twiddle,
-                            (coeff1, (coeff2, (coeff3, (coeff4, (coeff5, (reson_coeff, gain)))))),
-                        ),
-                    ) in coeff.fiddles.iter().copied().zip(
-                        coeff.twiddles.iter().copied().zip(
-                            coeff.coeffs1.iter_mut().zip(
-                                coeff.coeffs2.iter_mut().zip(
-                                    coeff.coeffs3.iter_mut().zip(
-                                        coeff.coeffs4.iter_mut().zip(
-                                            coeff.coeffs5.iter_mut().zip(
-                                                coeff
-                                                    .reson_coeffs
-                                                    .iter()
-                                                    .copied()
-                                                    .zip(self.gains.iter().copied()),
-                                            ),
-                                        ),
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ) {
-                        let comb_x = latest * fiddle.0 - oldest;
-                        let comb_y = latest * fiddle.1;
+                    let period = coeffs.period;
 
-                        coeff1.0 = comb_x * twiddle.0 - comb_y * twiddle.1 - coeff2.0;
-                        coeff1.1 = comb_x * twiddle.1 + comb_y * twiddle.0 - coeff2.1;
+                    for (coeff, gain) in coeffs.kernel.iter_mut().zip(self.gains.iter().copied()) {
+                        let comb_x = latest * coeff.fiddle.0 - oldest;
+                        let comb_y = latest * coeff.fiddle.1;
 
-                        coeff2.0 = comb_x;
-                        coeff2.1 = comb_y;
+                        coeff.coeff1.0 =
+                            comb_x * coeff.twiddle.0 - comb_y * coeff.twiddle.1 - coeff.coeff2.0;
+                        coeff.coeff1.1 =
+                            comb_x * coeff.twiddle.1 + comb_y * coeff.twiddle.0 - coeff.coeff2.1;
 
-                        coeff3.0 = coeff1.0 + reson_coeff * coeff4.0 - coeff5.0;
-                        coeff3.1 = coeff1.1 + reson_coeff * coeff4.1 - coeff5.1;
+                        coeff.coeff2.0 = comb_x;
+                        coeff.coeff2.1 = comb_y;
 
-                        coeff5.0 = coeff4.0;
-                        coeff5.1 = coeff4.1;
+                        coeff.coeff3.0 =
+                            coeff.coeff1.0 + coeff.reson * coeff.coeff4.0 - coeff.coeff5.0;
+                        coeff.coeff3.1 =
+                            coeff.coeff1.1 + coeff.reson * coeff.coeff4.1 - coeff.coeff5.1;
 
-                        coeff4.0 = coeff3.0;
-                        coeff4.1 = coeff3.1;
+                        coeff.coeff5.0 = coeff.coeff4.0;
+                        coeff.coeff5.1 = coeff.coeff4.1;
 
-                        sum.0 += coeff3.0 * gain / coeff.period;
-                        sum.1 += coeff3.1 * gain / coeff.period;
+                        coeff.coeff4.0 = coeff.coeff3.0;
+                        coeff.coeff4.1 = coeff.coeff3.1;
+
+                        sum.0 += coeff.coeff3.0 * gain / period;
+                        sum.1 += coeff.coeff3.1 * gain / period;
                     }
                     let (first_coeff3, second_coeff3) = unsafe {
                         (
-                            *coeff.coeffs3.get_unchecked(0),
-                            *coeff.coeffs3.get_unchecked(1),
+                            coeffs.kernel.get_unchecked(0).coeff3,
+                            coeffs.kernel.get_unchecked(1).coeff3,
                         )
                     };
 
                     *spectrum_data = spectrum_data.max(
-                        -(first_coeff3.0 / coeff.period * second_coeff3.0 / coeff.period)
-                            - (first_coeff3.1 / coeff.period * second_coeff3.1 / coeff.period),
+                        -(first_coeff3.0 / period * second_coeff3.0 / period)
+                            - (first_coeff3.1 / period * second_coeff3.1 / period),
                     );
                 }
             }
@@ -1313,12 +1308,12 @@ impl VQsDFT {
                 *latest = sample;
                 let latest = sample;
 
-                for (coeff, spectrum_data) in
+                for (coeffs, spectrum_data) in
                     self.coeffs.iter_mut().zip(self.spectrum_data.iter_mut())
                 {
                     let oldest = unsafe {
                         *self.buffer.get_unchecked(
-                            (((self.buffer_index as isize - coeff.period as isize)
+                            (((self.buffer_index as isize - coeffs.period as isize)
                                 % buffer_len_int)
                                 + buffer_len_int) as usize
                                 % buffer_len,
@@ -1326,51 +1321,33 @@ impl VQsDFT {
                     };
                     let mut sum = (0.0, 0.0);
 
-                    for (
-                        fiddle,
-                        (
-                            twiddle,
-                            (coeff1, (coeff2, (coeff3, (coeff4, (coeff5, (reson_coeff, gain)))))),
-                        ),
-                    ) in coeff.fiddles.iter().copied().zip(
-                        coeff.twiddles.iter().copied().zip(
-                            coeff.coeffs1.iter_mut().zip(
-                                coeff.coeffs2.iter_mut().zip(
-                                    coeff.coeffs3.iter_mut().zip(
-                                        coeff.coeffs4.iter_mut().zip(
-                                            coeff.coeffs5.iter_mut().zip(
-                                                coeff
-                                                    .reson_coeffs
-                                                    .iter()
-                                                    .copied()
-                                                    .zip(self.gains.iter().copied()),
-                                            ),
-                                        ),
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ) {
-                        let comb_x = latest * fiddle.0 - oldest;
-                        let comb_y = latest * fiddle.1;
+                    let period = coeffs.period;
 
-                        coeff1.0 = comb_x * twiddle.0 - comb_y * twiddle.1 - coeff2.0;
-                        coeff1.1 = comb_x * twiddle.1 + comb_y * twiddle.0 - coeff2.1;
+                    for (coeff, gain) in coeffs.kernel.iter_mut().zip(self.gains.iter().copied()) {
+                        let comb_x = latest * coeff.fiddle.0 - oldest;
+                        let comb_y = latest * coeff.fiddle.1;
 
-                        coeff2.0 = comb_x;
-                        coeff2.1 = comb_y;
+                        coeff.coeff1.0 =
+                            comb_x * coeff.twiddle.0 - comb_y * coeff.twiddle.1 - coeff.coeff2.0;
+                        coeff.coeff1.1 =
+                            comb_x * coeff.twiddle.1 + comb_y * coeff.twiddle.0 - coeff.coeff2.1;
 
-                        coeff3.0 = coeff1.0 + reson_coeff * coeff4.0 - coeff5.0;
-                        coeff3.1 = coeff1.1 + reson_coeff * coeff4.1 - coeff5.1;
+                        coeff.coeff2.0 = comb_x;
+                        coeff.coeff2.1 = comb_y;
 
-                        coeff5.0 = coeff4.0;
-                        coeff5.1 = coeff4.1;
+                        coeff.coeff3.0 =
+                            coeff.coeff1.0 + coeff.reson * coeff.coeff4.0 - coeff.coeff5.0;
+                        coeff.coeff3.1 =
+                            coeff.coeff1.1 + coeff.reson * coeff.coeff4.1 - coeff.coeff5.1;
 
-                        coeff4.0 = coeff3.0;
-                        coeff4.1 = coeff3.1;
+                        coeff.coeff5.0 = coeff.coeff4.0;
+                        coeff.coeff5.1 = coeff.coeff4.1;
 
-                        sum.0 += coeff3.0 * gain / coeff.period;
-                        sum.1 += coeff3.1 * gain / coeff.period;
+                        coeff.coeff4.0 = coeff.coeff3.0;
+                        coeff.coeff4.1 = coeff.coeff3.1;
+
+                        sum.0 += coeff.coeff3.0 * gain / period;
+                        sum.1 += coeff.coeff3.1 * gain / period;
                     }
                     *spectrum_data = spectrum_data.max(sum.0.powi(2) + sum.1.powi(2));
                 }
