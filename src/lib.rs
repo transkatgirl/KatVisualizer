@@ -248,8 +248,8 @@ impl Plugin for MyPlugin {
             {
                 let mut midi_on = false;
 
-                for (note, pressure) in self.midi_output.iter().enumerate() {
-                    if *pressure > 0.0 {
+                for (note, pressure) in self.midi_output.iter().copied().enumerate() {
+                    if pressure > 0.0 {
                         if !self.midi_on {
                             context.send_event(NoteEvent::MidiCC {
                                 timing: 0,
@@ -268,7 +268,7 @@ impl Plugin for MyPlugin {
                                 voice_id: Some(note as i32),
                                 channel: 0,
                                 note: note as u8,
-                                velocity: *pressure,
+                                velocity: pressure,
                             });
                             self.midi_notes[note] = true;
                         } else {
@@ -277,7 +277,7 @@ impl Plugin for MyPlugin {
                                 voice_id: Some(note as i32),
                                 channel: 0,
                                 note: note as u8,
-                                pressure: *pressure,
+                                pressure,
                             });
                         }
                     } else if self.midi_notes[note] {
@@ -286,7 +286,7 @@ impl Plugin for MyPlugin {
                             voice_id: Some(note as i32),
                             channel: 0,
                             note: note as u8,
-                            velocity: 1.0 - *pressure,
+                            velocity: 1.0 - pressure,
                         });
                         self.midi_notes[note] = false;
                     }
@@ -691,13 +691,16 @@ impl AnalysisChain {
                 let mut osc_output = self.osc_output.lock();
                 osc_output.clear();
 
-                for ((lower, center, upper), ((pan, volume), (_, mask))) in frequencies.iter().zip(
-                    spectrogram.data[0]
-                        .data
-                        .iter()
-                        .zip(spectrogram.data[0].masking.iter()),
-                ) {
-                    osc_output.push((*center, *upper - *lower, *pan, *volume, *volume - *mask));
+                for ((lower, center, upper), ((pan, volume), (_, mask))) in
+                    frequencies.iter().copied().zip(
+                        spectrogram.data[0]
+                            .data
+                            .iter()
+                            .copied()
+                            .zip(spectrogram.data[0].masking.iter().copied()),
+                    )
+                {
+                    osc_output.push((center, upper - lower, pan, volume, volume - mask));
                 }
             }
 
@@ -782,28 +785,30 @@ impl AnalysisChain {
                     let data = osc_output.lock();
                     let message_data = if let Some(listening_volume) = listening_volume {
                         data.iter()
+                            .copied()
                             .map(|(f, w, p, v, stm)| {
                                 OscType::Array(OscArray {
                                     content: vec![
-                                        OscType::Float(*f),
-                                        OscType::Float(*w),
-                                        OscType::Float(*p),
-                                        OscType::Float(*v + listening_volume),
-                                        OscType::Float(*stm),
+                                        OscType::Float(f),
+                                        OscType::Float(w),
+                                        OscType::Float(p),
+                                        OscType::Float(v + listening_volume),
+                                        OscType::Float(stm),
                                     ],
                                 })
                             })
                             .collect()
                     } else {
                         data.iter()
+                            .copied()
                             .map(|(f, w, p, v, stm)| {
                                 OscType::Array(OscArray {
                                     content: vec![
-                                        OscType::Float(*f),
-                                        OscType::Float(*w),
-                                        OscType::Float(*p),
-                                        OscType::Float(*v),
-                                        OscType::Float(*stm),
+                                        OscType::Float(f),
+                                        OscType::Float(w),
+                                        OscType::Float(p),
+                                        OscType::Float(v),
+                                        OscType::Float(stm),
                                     ],
                                 })
                             })
