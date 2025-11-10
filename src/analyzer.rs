@@ -719,11 +719,19 @@ fn masking_threshold_offset(center_bark: f64, flatness: f64) -> f64 {
 
 const MAX_MASKING_DYNAMIC_RANGE: f64 = 100.0;
 
+#[derive(Clone, Copy)]
+struct MaskerCoeff {
+    bark: f64,
+    tonal_masking_threshold: f64,
+    //nontonal_masking_threshold: f64,
+    masking_coeff_1: f64,
+    range: (usize, usize),
+}
+
 #[derive(Clone)]
 struct Masker {
-    frequency_set: Vec<f64>,
+    coeffs: Vec<MaskerCoeff>,
     bark_set: Vec<f64>,
-    range_indices: Vec<(usize, usize)>,
 }
 
 impl Masker {
@@ -737,37 +745,42 @@ impl Masker {
             .collect();
 
         let band_count = frequency_bands.len();
-        let range_indices = frequency_bands
-            .iter()
-            .enumerate()
-            .map(|(i, f)| {
-                let center_bark = FrequencyScale::Bark.scale(f.center);
+        let range_indices = frequency_bands.iter().enumerate().map(|(i, f)| {
+            let center_bark = FrequencyScale::Bark.scale(f.center);
 
-                let min_masking_spread = (22.0 + (230.0 / f.center).min(10.0)).min(27.0);
-                let bark_spread = MAX_MASKING_DYNAMIC_RANGE / min_masking_spread;
+            let min_masking_spread = (22.0 + (230.0 / f.center).min(10.0)).min(27.0);
+            let bark_spread = MAX_MASKING_DYNAMIC_RANGE / min_masking_spread;
 
-                let lower = (0..i.saturating_sub(1))
-                    .rev()
-                    .find(|i| {
-                        FrequencyScale::Bark.scale(frequency_bands[*i].high)
-                            <= (center_bark - bark_spread)
-                    })
-                    .unwrap_or(0);
-                let upper = (i..band_count)
-                    .find(|i| {
-                        FrequencyScale::Bark.scale(frequency_bands[*i].low)
-                            >= (center_bark + bark_spread)
-                    })
-                    .unwrap_or(band_count - 1);
+            let lower = (0..i.saturating_sub(1))
+                .rev()
+                .find(|i| {
+                    FrequencyScale::Bark.scale(frequency_bands[*i].high)
+                        <= (center_bark - bark_spread)
+                })
+                .unwrap_or(0);
+            let upper = (i..band_count)
+                .find(|i| {
+                    FrequencyScale::Bark.scale(frequency_bands[*i].low)
+                        >= (center_bark + bark_spread)
+                })
+                .unwrap_or(band_count - 1);
 
-                ((lower + 1).min(i), upper.saturating_sub(1))
-            })
-            .collect();
+            ((lower + 1).min(i), upper.saturating_sub(1))
+        });
 
         Self {
-            frequency_set,
+            coeffs: frequency_set
+                .into_iter()
+                .zip(bark_set.iter().copied().zip(range_indices))
+                .map(|(frequency, (bark, range))| MaskerCoeff {
+                    bark,
+                    tonal_masking_threshold: -6.025 - (0.275 * bark),
+                    //nontonal_masking_threshold: -2.025 - (0.175 * bark),
+                    masking_coeff_1: 22.0 + (230.0 / frequency).min(10.0),
+                    range,
+                })
+                .collect(),
             bark_set,
-            range_indices,
         }
     }
     fn calculate_masking_threshold(
@@ -777,7 +790,7 @@ impl Masker {
         //flatness: f64,
         masking_threshold: &mut [f64],
     ) {
-        assert_eq!(masking_threshold.len(), self.frequency_set.len());
+        assert_eq!(masking_threshold.len(), self.bark_set.len());
 
         masking_threshold.fill(0.0);
 
@@ -787,17 +800,7 @@ impl Masker {
             0.0
         };
 
-        for (i, (component, (frequency, (bark, (min_i, max_i))))) in spectrum
-            .zip(
-                self.frequency_set.iter().copied().zip(
-                    self.bark_set
-                        .iter()
-                        .copied()
-                        .zip(self.range_indices.iter().copied()),
-                ),
-            )
-            .enumerate()
-        {
+        for (i, (component, coeff)) in spectrum.zip(self.coeffs.iter().copied()).enumerate() {
             let amplitude = component;
             let amplitude_db = amplitude_to_dbfs(component);
 
@@ -807,37 +810,35 @@ impl Masker {
 
             let (lower_spread, upper_spread, simultaneous) = (
                 27.0,
-                22.0 + (230.0 / frequency).min(10.0)
-                    - 0.2 * (amplitude_db + amplitude_correction_offset),
+                coeff.masking_coeff_1 - 0.2 * (amplitude_db + amplitude_correction_offset),
                 27.0,
             );
 
             //let threshold_offset = masking_threshold_offset(bark, flatness);
-            let threshold_offset = -6.025 - (0.275 * bark);
-            let offset = threshold_offset - simultaneous;
+            let offset = coeff.tonal_masking_threshold - simultaneous;
 
             let adjusted_amplitude = dbfs_to_amplitude(offset) * amplitude;
 
-            unsafe { masking_threshold.get_unchecked_mut(min_i..i) }
+            unsafe { masking_threshold.get_unchecked_mut(coeff.range.0..i) }
                 .iter_mut()
                 .zip(
-                    unsafe { self.bark_set.get_unchecked(min_i..i) }
+                    unsafe { self.bark_set.get_unchecked(coeff.range.0..i) }
                         .iter()
                         .copied(),
                 )
                 .for_each(|(t, b)| {
-                    *t += dbfs_to_amplitude(-lower_spread * (bark - b)) * adjusted_amplitude;
+                    *t += dbfs_to_amplitude(-lower_spread * (coeff.bark - b)) * adjusted_amplitude;
                 });
 
-            unsafe { masking_threshold.get_unchecked_mut(i..=max_i) }
+            unsafe { masking_threshold.get_unchecked_mut(i..=coeff.range.1) }
                 .iter_mut()
                 .zip(
-                    unsafe { self.bark_set.get_unchecked(i..=max_i) }
+                    unsafe { self.bark_set.get_unchecked(i..=coeff.range.1) }
                         .iter()
                         .copied(),
                 )
                 .for_each(|(t, b)| {
-                    *t += dbfs_to_amplitude(-upper_spread * (b - bark)) * adjusted_amplitude;
+                    *t += dbfs_to_amplitude(-upper_spread * (b - coeff.bark)) * adjusted_amplitude;
                 });
         }
     }
