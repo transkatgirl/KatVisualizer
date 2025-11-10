@@ -828,8 +828,6 @@ impl Masker {
                     *t += dbfs_to_amplitude(-lower_spread * (bark - b)) * adjusted_amplitude;
                 });
 
-            masking_threshold[i] += adjusted_amplitude;
-
             unsafe { masking_threshold.get_unchecked_mut(i..=max_i) }
                 .iter_mut()
                 .zip(
