@@ -156,7 +156,7 @@ impl BetterAnalyzer {
             self.masker.calculate_masking_threshold(
                 self.transform.spectrum_data.iter().copied(),
                 listening_volume,
-                0.0,
+                //0.0,
                 &mut self.masking,
             );
             self.transform
@@ -704,13 +704,13 @@ impl BetterSpectrogram {
     if flatness.is_normal() { flatness } else { 0.0 }
 }*/
 
-#[inline(always)]
+/*#[inline(always)]
 fn masking_threshold_offset(center_bark: f64, flatness: f64) -> f64 {
     let tonal_masking_threshold = -6.025 - (0.275 * center_bark);
     let nontonal_masking_threshold = -2.025 - (0.175 * center_bark);
 
     tonal_masking_threshold * (1.0 - flatness) + (nontonal_masking_threshold * flatness)
-}
+}*/
 
 // ----- Below algorithm is based on the following: -----
 // https://link.springer.com/chapter/10.1007/978-3-319-07974-5_2 chapter 2.4
@@ -774,7 +774,7 @@ impl Masker {
         &self,
         spectrum: impl Iterator<Item = f64>,
         listening_volume: Option<f64>,
-        flatness: f64,
+        //flatness: f64,
         masking_threshold: &mut [f64],
     ) {
         assert_eq!(masking_threshold.len(), self.frequency_set.len());
@@ -812,7 +812,8 @@ impl Masker {
                 27.0,
             );
 
-            let threshold_offset = masking_threshold_offset(bark, flatness);
+            //let threshold_offset = masking_threshold_offset(bark, flatness);
+            let threshold_offset = -6.025 - (0.275 * bark);
             let offset = threshold_offset - simultaneous;
 
             let adjusted_amplitude = dbfs_to_amplitude(offset) * amplitude;
