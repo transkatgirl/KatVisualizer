@@ -19,7 +19,9 @@ If you don't already have a host for the plugin, [Element](https://github.com/Ku
 
 ### Building from Source
 
-Compiling this program requires the [Rust Programming Language](https://rust-lang.org/tools/install/).
+Building from source code allows hardware-specific optimizations to be applied and allows you to change the [default settings](https://github.com/transkatgirl/KatVisualizer/blob/eb719ba00199b7ad11a89d0bc20a209c1c71d969/src/lib.rs#L353).
+
+Compiling this program requires the [Rust Programming Language](https://rust-lang.org/tools/install/) to be installed.
 
 In order to build this program as a VST3 plugin, run the following command:
 
@@ -55,6 +57,8 @@ If you experience performance issues out of the box, the settings with the large
 - Analysis Options -> Update rate (decreasing it may hurt readability)
 - Analysis Options -> Perform simultaneous masking (disabling may hurt readability)
 - Render Options -> Spectrogram duration
+
+At the moment, settings are not saved between sessions, but this functionality is planned to be added in a future release.
 
 ### Performance Details
 
