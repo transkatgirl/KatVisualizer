@@ -358,7 +358,7 @@ impl Default for AnalysisChainConfig {
             normalize_amplitude: true,
             masking: true,
             internal_buffering: true,
-            update_rate_hz: 1024.0,
+            update_rate_hz: 2048.0,
             resolution: 512,
             latency_offset: Duration::ZERO,
 
