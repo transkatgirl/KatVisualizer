@@ -177,7 +177,7 @@ impl BetterAnalyzer {
             .iter_mut()
             .zip(self.masking.iter().copied())
             .for_each(|(amplitude, masking_amplitude)| {
-                if masking_amplitude > *amplitude {
+                if masking_amplitude >= *amplitude {
                     *amplitude = f64::NEG_INFINITY;
                 }
             });

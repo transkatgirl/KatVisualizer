@@ -93,7 +93,13 @@ fn draw_bargraph(
                     .iter()
                     .take(max_index + 1)
                     .map(|row| unsafe { *row.data.get_unchecked(i) })
-                    .fold((0.0, 0.0), |acc, d| (acc.0 + d.0, acc.1 + d.1));
+                    .fold((0.0, 0.0), |acc, d| {
+                        if d.1.is_finite() {
+                            (acc.0 + d.0, acc.1 + d.1)
+                        } else {
+                            (acc.0, acc.1 + min_db)
+                        }
+                    });
 
                 (sum.0 / count, sum.1 / count)
             });
@@ -1447,6 +1453,21 @@ pub fn create(
                                 update(&analysis_settings);
                                 egui_ctx.request_discard("Changed setting");
                                 return;
+                            }
+
+                            if analysis_settings.masking {
+                                if ui
+                                    .checkbox(
+                                        &mut analysis_settings.remove_masked_components,
+                                        "Remove masked components",
+                                    )
+                                    .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, tones underneath the simultaneous masking threshold are replaced with an amplitude of zero, creating a more readable but less psychoacoustically accurate output.\nIf this is disabled, tones underneath the simultaneous masking threshold are replaced with the simultaneous masking threshold's value.")
+                                    .changed()
+                                {
+                                    update(&analysis_settings);
+                                    egui_ctx.request_discard("Changed setting");
+                                    return;
+                                }
                             }
                         }
 
