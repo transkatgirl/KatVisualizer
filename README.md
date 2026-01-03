@@ -46,7 +46,7 @@ The compiled plugin can be loaded into a DAW like any other metering plugin. It'
 Once the program is running, the window will display a graphical representation of the input audio, along with additional information in the top corners. The parameters used to render this graphical representation can be adjusted in the dragable settings window.
 
 If you'd like to start improving the spectrogram's readability further, the settings with the largest impact are (in order of importance):
-- Analysis Options -> Remove masked components (significantly improves readability **at the expense of reducing psychoacoustic accuracy**)
+- Analysis Options -> Remove masked components (**significantly improves readability at the expense of psychoacoustic accuracy**)
 - Render Options -> Range above masking mean
 - Render Options -> Range below masking mean
 - Analysis Options -> Update rate (increasing it may hurt performance)
