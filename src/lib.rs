@@ -354,7 +354,7 @@ impl Default for AnalysisChainConfig {
     fn default() -> Self {
         Self {
             gain: 0.0,
-            listening_volume: 86.0,
+            listening_volume: 90.0,
             normalize_amplitude: true,
             masking: true,
             internal_buffering: true,
@@ -374,9 +374,9 @@ impl Default for AnalysisChainConfig {
             ),
             output_midi: false,
             midi_max_simultaneous_tones: 24,
-            midi_tone_amplitude_threshold: 30.0 - 86.0,
-            midi_pressure_min_amplitude: 30.0 - 86.0,
-            midi_pressure_max_amplitude: 70.0 - 86.0,
+            midi_tone_amplitude_threshold: 30.0 - 90.0,
+            midi_pressure_min_amplitude: 30.0 - 90.0,
+            midi_pressure_max_amplitude: 70.0 - 90.0,
 
             start_frequency: BetterAnalyzerConfiguration::default().start_frequency,
             end_frequency: BetterAnalyzerConfiguration::default().end_frequency,
