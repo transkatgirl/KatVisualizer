@@ -503,7 +503,7 @@ impl Default for RenderSettings {
             max_db: 80.0 - AnalysisChainConfig::default().listening_volume as f32,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f64(0.67),
-            bargraph_averaging: Duration::from_secs_f64(0.004),
+            bargraph_averaging: Duration::from_secs_f64(0.008),
             show_performance: true,
             show_format: false,
             show_hover: true,

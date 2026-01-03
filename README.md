@@ -48,7 +48,7 @@ Once the program is running, the window will display a graphical representation 
 If you'd like to start improving the spectrogram's readability further, the settings with the largest impact are (in order of importance):
 - Render Options -> Range above masking mean
 - Render Options -> Range below masking mean
-- Analysis Options -> Remove masked components (reduces psychoacoustic accuracy)
+- Analysis Options -> Remove masked components (hurts psychoacoustic accuracy)
 - Analysis Options -> Update rate (increasing it may hurt performance)
 - Analysis Options -> ERB bandwidth divisor (ideal value depends on what you're trying to analyze; if in doubt, the default value of 2.0 is usually a good middle ground)
 - Analysis Options -> Resolution (increasing it may hurt performance)
