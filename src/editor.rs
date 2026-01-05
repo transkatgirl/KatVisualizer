@@ -357,6 +357,14 @@ fn draw_spectrogram_image(
     let image_height = image.height();
 
     if clamp_using_smr {
+        let masking_ranges: Vec<f32> = frequencies
+            .iter()
+            .copied()
+            .map(|(_, center, _)| {
+                27.0 - (6.025 - (0.275 * FrequencyScale::Bark.scale(center as f64) as f32))
+            })
+            .collect();
+
         for (y, analysis) in spectrogram.data.iter().enumerate() {
             if analysis.data.len() != image_width
                 || y == image_height
@@ -365,13 +373,13 @@ fn draw_spectrogram_image(
                 break;
             }
 
-            for ((pan, volume), (((_, masking), (_, center, _)), pixel)) in
+            for ((pan, volume), (((_, masking), range), pixel)) in
                 analysis.data.iter().copied().zip(
                     analysis
                         .masking
                         .iter()
                         .copied()
-                        .zip(frequencies.iter().copied())
+                        .zip(masking_ranges.iter().copied())
                         .zip(
                             unsafe { image.pixels.get_unchecked_mut((image_width * y)..) }
                                 .iter_mut(),
@@ -381,7 +389,7 @@ fn draw_spectrogram_image(
                 let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).min(map_value_f32(
                     volume - masking,
                     0.0,
-                    27.0 - (6.025 - (0.275 * FrequencyScale::Bark.scale(center as f64) as f32)),
+                    range,
                     0.0,
                     1.0,
                 ));
