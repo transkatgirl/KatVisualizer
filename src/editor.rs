@@ -546,7 +546,7 @@ impl Default for RenderSettings {
             agc_maximum: 100.0 - AnalysisChainConfig::default().listening_volume as f32,
             min_db: 20.0 - AnalysisChainConfig::default().listening_volume as f32,
             max_db: 80.0 - AnalysisChainConfig::default().listening_volume as f32,
-            clamp_using_smr: false,
+            clamp_using_smr: true,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f64(0.67),
             bargraph_averaging: Duration::from_secs_f64(0.008),
@@ -1292,7 +1292,7 @@ pub fn create(
                         }
 
                         if analysis_settings.masking {
-                            ui.checkbox(&mut render_settings.clamp_using_smr, "Clamp spectrogram shading using signal-to-mask ratio");
+                            ui.checkbox(&mut render_settings.clamp_using_smr, "Clamp spectrogram shading using signal-to-mask ratio (increases readability at the expense of being less psychoacoustically accurate)");
                         }
 
                         let mut spectrogram_duration = render_settings.spectrogram_duration.as_secs_f64();
@@ -1513,7 +1513,7 @@ pub fn create(
                                         &mut analysis_settings.remove_masked_components,
                                         "Remove masked components",
                                     )
-                                    .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, tones underneath the simultaneous masking threshold are replaced with an amplitude of zero, creating a more readable but less psychoacoustically accurate output.\nIf this is disabled, tones underneath the simultaneous masking threshold are replaced with the simultaneous masking threshold's value.")
+                                    .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, tones underneath the simultaneous masking threshold are replaced with an amplitude of zero, creating a (sometimes) more readable but less psychoacoustically accurate output.\nIf this is disabled, tones underneath the simultaneous masking threshold are replaced with the simultaneous masking threshold's value.")
                                     .changed()
                                 {
                                     update(&analysis_settings);
