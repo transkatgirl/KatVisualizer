@@ -348,28 +348,57 @@ fn draw_spectrogram_image(
     spectrogram: &BetterSpectrogram,
     color_table: &ColorTable,
     (max_db, min_db): (f32, f32),
+    smr_clamp_range: Option<f32>,
 ) {
     let target_duration = spectrogram.data.front().unwrap().duration;
 
     let image_width = image.width();
     let image_height = image.height();
 
-    for (y, analysis) in spectrogram.data.iter().enumerate() {
-        if analysis.data.len() != image_width
-            || y == image_height
-            || analysis.duration != target_duration
-        {
-            break;
-        }
+    if let Some(smr_clamp_range) = smr_clamp_range {
+        for (y, analysis) in spectrogram.data.iter().enumerate() {
+            if analysis.data.len() != image_width
+                || y == image_height
+                || analysis.duration != target_duration
+            {
+                break;
+            }
 
-        for ((pan, volume), pixel) in analysis
-            .data
-            .iter()
-            .copied()
-            .zip(unsafe { image.pixels.get_unchecked_mut((image_width * y)..) }.iter_mut())
-        {
-            let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0);
-            *pixel = color_table.lookup(pan, intensity);
+            for ((pan, volume), ((_, masking), pixel)) in
+                analysis.data.iter().copied().zip(
+                    analysis.masking.iter().copied().zip(
+                        unsafe { image.pixels.get_unchecked_mut((image_width * y)..) }.iter_mut(),
+                    ),
+                )
+            {
+                let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).min(map_value_f32(
+                    volume - masking,
+                    0.0,
+                    smr_clamp_range,
+                    0.0,
+                    1.0,
+                ));
+                *pixel = color_table.lookup(pan, intensity);
+            }
+        }
+    } else {
+        for (y, analysis) in spectrogram.data.iter().enumerate() {
+            if analysis.data.len() != image_width
+                || y == image_height
+                || analysis.duration != target_duration
+            {
+                break;
+            }
+
+            for ((pan, volume), pixel) in analysis
+                .data
+                .iter()
+                .copied()
+                .zip(unsafe { image.pixels.get_unchecked_mut((image_width * y)..) }.iter_mut())
+            {
+                let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0);
+                *pixel = color_table.lookup(pan, intensity);
+            }
         }
     }
 }
@@ -475,6 +504,8 @@ struct RenderSettings {
     agc_maximum: f32,
     min_db: f32,
     max_db: f32,
+    clamp_using_smr: bool,
+    smr_range: f32,
     bargraph_height: f32,
     spectrogram_duration: Duration,
     bargraph_averaging: Duration,
@@ -501,6 +532,8 @@ impl Default for RenderSettings {
             agc_maximum: 100.0 - AnalysisChainConfig::default().listening_volume as f32,
             min_db: 20.0 - AnalysisChainConfig::default().listening_volume as f32,
             max_db: 80.0 - AnalysisChainConfig::default().listening_volume as f32,
+            clamp_using_smr: false,
+            smr_range: 25.0,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f64(0.67),
             bargraph_averaging: Duration::from_secs_f64(0.008),
@@ -771,6 +804,11 @@ pub fn create(
                         spectrogram,
                         color_table,
                         (max_db, min_db),
+                        if settings.clamp_using_smr {
+                            Some(settings.smr_range)
+                        } else {
+                            None
+                        },
                     );
                 }
 
@@ -1240,6 +1278,20 @@ pub fn create(
                                         .fixed_decimals(0)
                                         .text("Minimum amplitude"),
                                 );
+                            }
+                        }
+
+                        if analysis_settings.masking {
+                            ui.checkbox(&mut render_settings.clamp_using_smr, "Clamp spectrogram shading using signal-to-mask ratio");
+                            if render_settings.clamp_using_smr {
+                                ui.add(
+                                egui::Slider::new(&mut render_settings.smr_range, 0.0..=100.0)
+                                    .clamping(egui::SliderClamping::Never)
+                                    .suffix("dB")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("Signal-to-mask ratio upper range"),
+                            );
                             }
                         }
 
