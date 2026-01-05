@@ -533,7 +533,7 @@ impl Default for RenderSettings {
             min_db: 20.0 - AnalysisChainConfig::default().listening_volume as f32,
             max_db: 80.0 - AnalysisChainConfig::default().listening_volume as f32,
             clamp_using_smr: false,
-            smr_range: 25.0,
+            smr_range: 24.0,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f64(0.67),
             bargraph_averaging: Duration::from_secs_f64(0.008),
