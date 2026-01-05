@@ -20,7 +20,7 @@ use std::{
 use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS,
     MAX_OSC_FREQUENCY_BINS, MyPlugin, PluginParams, PluginStateInfo, SPECTROGRAM_SLICES,
-    analyzer::{BetterSpectrogram, map_value_f32},
+    analyzer::{BetterSpectrogram, FrequencyScale, map_value_f32},
 };
 
 fn calculate_volume_min_max(
@@ -346,16 +346,17 @@ fn draw_secondary_bargraph_from_iter(
 fn draw_spectrogram_image(
     image: &mut ColorImage,
     spectrogram: &BetterSpectrogram,
+    frequencies: &[(f32, f32, f32)],
     color_table: &ColorTable,
     (max_db, min_db): (f32, f32),
-    smr_clamp_range: Option<f32>,
+    clamp_using_smr: bool,
 ) {
     let target_duration = spectrogram.data.front().unwrap().duration;
 
     let image_width = image.width();
     let image_height = image.height();
 
-    if let Some(smr_clamp_range) = smr_clamp_range {
+    if clamp_using_smr {
         for (y, analysis) in spectrogram.data.iter().enumerate() {
             if analysis.data.len() != image_width
                 || y == image_height
@@ -364,17 +365,23 @@ fn draw_spectrogram_image(
                 break;
             }
 
-            for ((pan, volume), ((_, masking), pixel)) in
+            for ((pan, volume), (((_, masking), (_, center, _)), pixel)) in
                 analysis.data.iter().copied().zip(
-                    analysis.masking.iter().copied().zip(
-                        unsafe { image.pixels.get_unchecked_mut((image_width * y)..) }.iter_mut(),
-                    ),
+                    analysis
+                        .masking
+                        .iter()
+                        .copied()
+                        .zip(frequencies.iter().copied())
+                        .zip(
+                            unsafe { image.pixels.get_unchecked_mut((image_width * y)..) }
+                                .iter_mut(),
+                        ),
                 )
             {
                 let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).min(map_value_f32(
                     volume - masking,
                     0.0,
-                    smr_clamp_range,
+                    27.0 - (6.025 - (0.275 * FrequencyScale::Bark.scale(center as f64) as f32)),
                     0.0,
                     1.0,
                 ));
@@ -505,7 +512,6 @@ struct RenderSettings {
     min_db: f32,
     max_db: f32,
     clamp_using_smr: bool,
-    smr_range: f32,
     bargraph_height: f32,
     spectrogram_duration: Duration,
     bargraph_averaging: Duration,
@@ -533,7 +539,6 @@ impl Default for RenderSettings {
             min_db: 20.0 - AnalysisChainConfig::default().listening_volume as f32,
             max_db: 80.0 - AnalysisChainConfig::default().listening_volume as f32,
             clamp_using_smr: false,
-            smr_range: 24.0,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f64(0.67),
             bargraph_averaging: Duration::from_secs_f64(0.008),
@@ -802,13 +807,10 @@ pub fn create(
                     draw_spectrogram_image(
                         &mut spectrogram_image,
                         spectrogram,
+                        &frequencies,
                         color_table,
                         (max_db, min_db),
-                        if settings.clamp_using_smr {
-                            Some(settings.smr_range)
-                        } else {
-                            None
-                        },
+                        settings.clamp_using_smr,
                     );
                 }
 
@@ -1283,16 +1285,6 @@ pub fn create(
 
                         if analysis_settings.masking {
                             ui.checkbox(&mut render_settings.clamp_using_smr, "Clamp spectrogram shading using signal-to-mask ratio");
-                            if render_settings.clamp_using_smr {
-                                ui.add(
-                                egui::Slider::new(&mut render_settings.smr_range, 0.0..=100.0)
-                                    .clamping(egui::SliderClamping::Never)
-                                    .suffix("dB")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Signal-to-mask ratio upper range"),
-                            );
-                            }
                         }
 
                         let mut spectrogram_duration = render_settings.spectrogram_duration.as_secs_f64();
