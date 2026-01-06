@@ -1292,7 +1292,7 @@ pub fn create(
                         }
 
                         if analysis_settings.masking {
-                            ui.checkbox(&mut render_settings.clamp_using_smr, "Limit spectrogram lightness using signal-to-mask ratio");
+                            ui.checkbox(&mut render_settings.clamp_using_smr, "Use signal-to-mask ratio when calculating spectrogram shading");
                         }
 
                         let mut spectrogram_duration = render_settings.spectrogram_duration.as_secs_f64();
