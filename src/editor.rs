@@ -1292,7 +1292,7 @@ pub fn create(
                         }
 
                         if analysis_settings.masking {
-                            ui.checkbox(&mut render_settings.clamp_using_smr, "Clamp spectrogram shading using signal-to-mask ratio (increases readability at the expense of being less psychoacoustically accurate)");
+                            ui.checkbox(&mut render_settings.clamp_using_smr, "Clamp spectrogram shading using signal-to-mask ratio (increases readability at the expense of being somewhat less psychoacoustically accurate)");
                         }
 
                         let mut spectrogram_duration = render_settings.spectrogram_duration.as_secs_f64();
@@ -1507,7 +1507,7 @@ pub fn create(
                                 return;
                             }
 
-                            if analysis_settings.masking {
+                            /*if analysis_settings.masking {
                                 if ui
                                     .checkbox(
                                         &mut analysis_settings.remove_masked_components,
@@ -1520,7 +1520,7 @@ pub fn create(
                                     egui_ctx.request_discard("Changed setting");
                                     return;
                                 }
-                            }
+                            }*/
                         }
 
                         if ui

@@ -51,7 +51,6 @@ If you'd like to start improving the spectrogram's readability further, the sett
 - Analysis Options -> Update rate (increasing it may hurt performance)
 - Analysis Options -> ERB bandwidth divisor (ideal value depends on what you're trying to analyze; if in doubt, the default value of 2.0 is usually a good middle ground)
 - Analysis Options -> Resolution (increasing it may hurt performance)
-- Analysis Options -> Remove masked components (**may further improve readability at the expense of psychoacoustic accuracy**)
 
 If you experience performance issues out of the box, the settings with the largest impact are:
 - Analysis Options -> Resolution (decreasing it may hurt readability)
