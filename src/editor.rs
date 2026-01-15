@@ -540,7 +540,7 @@ impl Default for RenderSettings {
             maximum_chroma: 0.09,
             automatic_gain: true,
             agc_duration: Duration::from_secs_f64(1.0),
-            agc_above_masking: 36.0,
+            agc_above_masking: 33.0,
             agc_below_masking: 0.0,
             agc_minimum: 3.0 - AnalysisChainConfig::default().listening_volume as f32,
             agc_maximum: 100.0 - AnalysisChainConfig::default().listening_volume as f32,
