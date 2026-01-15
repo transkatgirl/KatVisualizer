@@ -549,7 +549,7 @@ impl Default for RenderSettings {
             clamp_using_smr: true,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f64(0.67),
-            bargraph_averaging: Duration::from_secs_f64(0.008),
+            bargraph_averaging: Duration::from_secs_f64(1.0 / 60.0),
             show_performance: true,
             show_format: false,
             show_hover: true,
