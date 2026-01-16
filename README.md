@@ -47,8 +47,8 @@ Once the program is running, the window will display a graphical representation 
 
 If you'd like to start improving the spectrogram's readability further, the settings with the largest impact are (in order of importance):
 - Render Options -> Use signal-to-mask ratio when calculating spectrogram shading
-	- Enabling this makes timbre more readable at the expense of amplitude differences;
-	  Disabling this makes amplitude differences more readable at the expense of timbre
+	- Enabling this makes timbre more readable at the expense of amplitude differences; Disabling this makes amplitude differences more readable at the expense of timbre
+		- This trade-off becomes more apparent as the spectrogram's dynamic range is reduced
 - Render Options -> Range above masking mean
 - Render Options -> Range below masking mean
 - Analysis Options -> Update rate (increasing it may hurt performance)
