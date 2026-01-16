@@ -46,6 +46,9 @@ The compiled plugin can be loaded into a DAW like any other metering plugin. It'
 Once the program is running, the window will display a graphical representation of the input audio, along with additional information in the top corners. The parameters used to render this graphical representation can be adjusted in the dragable settings window.
 
 If you'd like to start improving the spectrogram's readability further, the settings with the largest impact are (in order of importance):
+- Render Options -> Use signal-to-mask ratio when calculating spectrogram shading
+	- Enabling this makes timbre more readable at the expense of amplitude differences;
+	  Disabling this makes amplitude differences more readable at the expense of timbre
 - Render Options -> Range above masking mean
 - Render Options -> Range below masking mean
 - Analysis Options -> Update rate (increasing it may hurt performance)
