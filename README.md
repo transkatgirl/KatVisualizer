@@ -56,8 +56,8 @@ If you'd like to start improving the spectrogram's readability further, the sett
 - Analysis Options -> Update rate (increasing it may hurt performance)
 
 If you experience performance issues out of the box, the settings with the largest impact are:
-- Analysis Options -> Resolution (decreasing it may hurt readability)
 - Analysis Options -> Update rate (decreasing it may hurt readability)
+- Analysis Options -> Resolution (decreasing it may hurt readability)
 - Analysis Options -> Perform simultaneous masking (disabling may hurt readability)
 - Render Options -> Spectrogram duration
 
