@@ -1543,7 +1543,7 @@ pub fn create(
                                 .add(
                                     egui::Slider::new(
                                         &mut analysis_settings.update_rate_hz,
-                                        128.0..=4096.0,
+                                        128.0..=8192.0,
                                     )
                                     .logarithmic(true)
                                     .suffix("hz")
