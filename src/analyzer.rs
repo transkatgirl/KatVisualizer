@@ -144,7 +144,11 @@ impl BetterAnalyzer {
     pub fn clear_buffers(&mut self) {
         self.transform.reset();
     }
-    pub fn analyze(&mut self, samples: impl Iterator<Item = f64>, listening_volume: Option<f64>) {
+    pub fn analyze(
+        &mut self,
+        samples: impl ExactSizeIterator<Item = f64>,
+        listening_volume: Option<f64>,
+    ) {
         self.transform.analyze(samples);
 
         /*let flatness = if spectrum.len() > 128 {
@@ -1236,13 +1240,15 @@ impl VQsDFT {
             });
         });
     }
-    fn analyze(&mut self, samples: impl Iterator<Item = f64>) -> &[f64] {
+    fn analyze(&mut self, samples: impl ExactSizeIterator<Item = f64>) -> &[f64] {
         self.spectrum_data.fill(0.0);
 
         let buffer_len = self.buffer.len();
         let buffer_len_int = buffer_len as isize;
 
         if self.use_nc {
+            let sample_count = samples.len() as f64;
+
             for sample in samples {
                 self.buffer_index =
                     (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
@@ -1298,12 +1304,16 @@ impl VQsDFT {
                         )
                     };
 
-                    *spectrum_data = spectrum_data.max(
-                        -(first_coeff3.0 / period * second_coeff3.0 / period)
-                            - (first_coeff3.1 / period * second_coeff3.1 / period),
-                    );
+                    *spectrum_data += (-(first_coeff3.0 / period * second_coeff3.0 / period)
+                        - (first_coeff3.1 / period * second_coeff3.1 / period))
+                        .max(0.0)
+                        .sqrt();
                 }
             }
+
+            self.spectrum_data
+                .iter_mut()
+                .for_each(|x| *x /= sample_count);
         } else {
             for sample in samples {
                 self.buffer_index =
@@ -1356,9 +1366,9 @@ impl VQsDFT {
                     *spectrum_data = spectrum_data.max(sum.0.powi(2) + sum.1.powi(2));
                 }
             }
-        }
 
-        self.spectrum_data.iter_mut().for_each(|x| *x = x.sqrt());
+            self.spectrum_data.iter_mut().for_each(|x| *x = x.sqrt());
+        }
 
         &self.spectrum_data
     }
