@@ -1,6 +1,7 @@
 use std::{collections::VecDeque, f64::consts::PI, time::Duration};
 
 use serde::{Deserialize, Serialize};
+use tinyvec::ArrayVec;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BetterAnalyzerConfiguration {
@@ -1081,6 +1082,8 @@ impl FrequencyScale {
     }
 }
 
+const MAX_WINDOW_TERMS: usize = 2;
+
 const HANN_WINDOW: &[f64] = &[1.0, 0.5];
 /*#[allow(clippy::excessive_precision)]
 const HAMMING_WINDOW: &[f64] = &[1.0, 0.4259434938430786];
@@ -1104,20 +1107,20 @@ const FLAT_TOP_WINDOW: &[f64] = &[
 #[derive(Clone)]
 struct VQsDFT {
     coeffs: Vec<VQsDFTCoeffs>,
-    gains: Vec<f64>,
+    gains: ArrayVec<[f64; MAX_WINDOW_TERMS]>,
     buffer: Vec<f64>,
     buffer_index: usize,
     spectrum_data: Vec<f64>,
     use_nc: bool,
 }
 
-#[derive(Clone)]
+#[derive(Default, Clone)]
 struct VQsDFTCoeffs {
     period: f64,
-    kernel: Vec<VQsDFTCoeff>,
+    kernel: ArrayVec<[VQsDFTCoeff; MAX_WINDOW_TERMS]>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 struct VQsDFTCoeff {
     twiddle: (f64, f64),
     fiddle: (f64, f64),
@@ -1156,8 +1159,8 @@ impl VQsDFT {
         };
         let items_per_band = (max_idx - min_idx) as usize;
 
-        let gains = if use_nc {
-            vec![0.0; 2]
+        let gains: ArrayVec<[f64; MAX_WINDOW_TERMS]> = if use_nc {
+            ArrayVec::from_iter(vec![0.0; 2])
         } else {
             (min_idx..max_idx)
                 .map(|i| window[i.unsigned_abs()] * (-((i as f64).abs() % 2.0) * 2.0 + 1.0))

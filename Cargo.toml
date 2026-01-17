@@ -40,6 +40,7 @@ mimalloc = { version = "0.1.48", features = [
 ] }
 voracious_radix_sort = "1.2.0"
 rosc = "0.11.4"
+tinyvec = { version = "1.10.0", features = ["std", "alloc"] }
 
 [profile.dev]
 opt-level = 3
