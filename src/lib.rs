@@ -325,7 +325,6 @@ pub(crate) struct AnalysisChainConfig {
     listening_volume: f64,
     normalize_amplitude: bool,
     masking: bool,
-    remove_masked_components: bool,
     internal_buffering: bool,
     update_rate_hz: f64,
     latency_offset: Duration,
@@ -358,7 +357,6 @@ impl Default for AnalysisChainConfig {
             listening_volume: 90.0,
             normalize_amplitude: true,
             masking: true,
-            remove_masked_components: false,
             internal_buffering: true,
             update_rate_hz: 2048.0,
             resolution: 512,
@@ -411,7 +409,6 @@ pub(crate) struct AnalysisChain {
     update_rate: f64,
     listening_volume: Option<f64>,
     masking: bool,
-    remove_masked_components: bool,
     pub(crate) latency_samples: u32,
     additional_latency: Duration,
     sample_rate: f32,
@@ -464,7 +461,6 @@ impl AnalysisChain {
         Self {
             sample_rate,
             internal_buffering: config.internal_buffering,
-
             output_osc: config.output_osc,
             osc_socket_address: config.osc_socket_address.clone(),
             osc_resource_address_frequencies: Arc::new(
@@ -494,7 +490,6 @@ impl AnalysisChain {
                 None
             },
             masking: config.masking,
-            remove_masked_components: config.remove_masked_components,
             chunk_size,
             chunk_duration: Duration::from_secs_f64(chunk_size as f64 / sample_rate as f64),
             single_input: layout.main_input_channels == NonZero::new(1),
@@ -524,9 +519,6 @@ impl AnalysisChain {
                         let (ref _buffer, ref mut analyzer) = *lock;
 
                         analyzer.analyze(buffer.iter().map(|s| *s as f64), self.listening_volume);
-                        if self.masking && self.remove_masked_components {
-                            analyzer.remove_masked_components();
-                        }
                     } else {
                         let analyzer = if channel_idx == 0 {
                             self.left_analyzer.clone()
@@ -537,17 +529,11 @@ impl AnalysisChain {
 
                         analyzer.lock().0.copy_from_slice(buffer);
 
-                        let masking = self.masking;
-                        let remove_masked_components = self.remove_masked_components;
-
                         self.analyzer_pool.execute(move || {
                             let mut lock = analyzer.lock();
                             let (ref mut buffer, ref mut analyzer) = *lock;
 
                             analyzer.analyze(buffer.iter().map(|s| *s as f64), listening_volume);
-                            if masking && remove_masked_components {
-                                analyzer.remove_masked_components();
-                            }
                         });
                     }
 
@@ -858,7 +844,7 @@ impl AnalysisChain {
 
         #[cfg(feature = "midi")]
         if self.output_midi {
-            if self.masking && !self.remove_masked_components {
+            if self.masking {
                 left_analyzer.remove_masked_components();
                 right_analyzer.remove_masked_components();
             }
@@ -946,7 +932,6 @@ impl AnalysisChain {
                 .unwrap_or(AnalysisChainConfig::default().listening_volume),
             normalize_amplitude: self.listening_volume.is_some(),
             masking: self.masking,
-            remove_masked_components: self.remove_masked_components,
             internal_buffering: self.internal_buffering,
             output_osc: self.output_osc,
             osc_socket_address: self.osc_socket_address.to_string(),
@@ -978,7 +963,6 @@ impl AnalysisChain {
             None
         };
         self.masking = config.masking;
-        self.remove_masked_components = config.remove_masked_components;
 
         let old_left_analyzer = self.left_analyzer.lock();
         let old_analyzer_config = old_left_analyzer.1.config();
