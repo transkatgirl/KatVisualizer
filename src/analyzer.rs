@@ -725,7 +725,7 @@ const MAX_MASKING_DYNAMIC_RANGE: f64 = 100.0;
 
 #[derive(Clone, Copy)]
 struct MaskerCoeff {
-    //bark: f64,
+    bark: f64,
     tonal_masking_threshold: f64,
     //nontonal_masking_threshold: f64,
     masking_coeff_1: f64,
@@ -777,7 +777,7 @@ impl Masker {
                 .into_iter()
                 .zip(bark_set.iter().copied().zip(range_indices))
                 .map(|(frequency, (bark, range))| MaskerCoeff {
-                    //bark,
+                    bark,
                     tonal_masking_threshold: -6.025 - (0.275 * bark),
                     //nontonal_masking_threshold: -2.025 - (0.175 * bark),
                     masking_coeff_1: 22.0 + (230.0 / frequency).min(10.0),
@@ -804,15 +804,7 @@ impl Masker {
             0.0
         };
 
-        for (i, (component, (coeff, bark))) in spectrum
-            .zip(
-                self.coeffs
-                    .iter()
-                    .copied()
-                    .zip(self.bark_set.iter().copied()),
-            )
-            .enumerate()
-        {
+        for (i, (component, coeff)) in spectrum.zip(self.coeffs.iter().copied()).enumerate() {
             let amplitude = component;
             let amplitude_db = amplitude_to_dbfs(component);
 
@@ -835,14 +827,14 @@ impl Masker {
                 let t = unsafe { masking_threshold.get_unchecked_mut(i) };
                 let b = unsafe { self.bark_set.get_unchecked(i) };
 
-                *t += dbfs_to_amplitude(-lower_spread * (bark - b)) * adjusted_amplitude;
+                *t += dbfs_to_amplitude(-lower_spread * (coeff.bark - b)) * adjusted_amplitude;
             });
 
             (i..=coeff.range.1).for_each(|i| {
                 let t = unsafe { masking_threshold.get_unchecked_mut(i) };
                 let b = unsafe { self.bark_set.get_unchecked(i) };
 
-                *t += dbfs_to_amplitude(-upper_spread * (b - bark)) * adjusted_amplitude;
+                *t += dbfs_to_amplitude(-upper_spread * (b - coeff.bark)) * adjusted_amplitude;
             });
         }
     }
