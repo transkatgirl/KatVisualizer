@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, f64::consts::PI, time::Duration};
+use std::{collections::VecDeque, f64::consts::PI, sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
@@ -637,15 +637,16 @@ impl BetterAnalysis {
     }
 }
 
+#[derive(Clone)]
 pub struct BetterSpectrogram {
-    pub data: VecDeque<BetterAnalysis>,
+    pub data: VecDeque<Arc<BetterAnalysis>>,
 }
 
 impl BetterSpectrogram {
     pub fn new(length: usize, slice_capacity: usize) -> Self {
         Self {
-            data: VecDeque::from(vec![
-                BetterAnalysis {
+            data: VecDeque::from_iter((0..length).map(|_| {
+                Arc::new(BetterAnalysis {
                     duration: Duration::from_secs(1),
                     data: vec![(0.0, f32::NEG_INFINITY); slice_capacity],
                     masking: vec![(0.0, f32::NEG_INFINITY); slice_capacity],
@@ -654,10 +655,9 @@ impl BetterSpectrogram {
                     max: f32::NEG_INFINITY,
                     masking_mean: f32::NEG_INFINITY,
                     sorting_scratchpad: vec![(f32::NEG_INFINITY, 0); slice_capacity],
-                    peak_scratchpad: vec![false; slice_capacity]
-                };
-                length
-            ]),
+                    peak_scratchpad: vec![false; slice_capacity],
+                })
+            })),
         }
     }
     pub fn update(&mut self, analysis: &BetterAnalysis) {
@@ -680,8 +680,17 @@ impl BetterSpectrogram {
     where
         F: Fn(&mut BetterAnalysis),
     {
-        let mut buffer = self.data.pop_back().unwrap();
-        callback(&mut buffer);
+        let buffer = self.data.pop_back().unwrap();
+
+        callback(unsafe { &mut *Arc::as_ptr(&buffer).cast_mut() }); // *Intentional* race condition; This can only cause visual glitches, as all other references are read-only
+
+        /*loop {
+            if let Some(buffer) = Arc::get_mut(&mut buffer) {
+                callback(buffer);
+                break;
+            }
+        }*/
+
         self.data.push_front(buffer);
     }
     pub fn clone_from(&mut self, source: &Self) {

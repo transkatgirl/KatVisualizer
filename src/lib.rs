@@ -849,7 +849,7 @@ impl AnalysisChain {
                 right_analyzer.remove_masked_components();
             }
 
-            let peaks = spectrogram.data[0].peaks(
+            let peaks = Arc::make_mut(&mut spectrogram.data[0]).peaks(
                 self.midi_tone_amplitude_threshold,
                 self.midi_max_simultaneous_tones,
                 left_analyzer,

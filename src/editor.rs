@@ -761,7 +761,13 @@ pub fn create(
                 let start = Instant::now();
 
                 let lock = analysis_output.lock();
-                let (ref spectrogram, ref metrics) = *lock;
+                let (ref spectrogram, metrics) = *lock;
+
+                let spectrogram = spectrogram.clone();
+
+                drop(lock);
+
+                let copying_duration = start.elapsed();
 
                 let front = spectrogram.data.front().unwrap();
 
@@ -785,13 +791,13 @@ pub fn create(
                 let processing_duration = metrics.processing;
                 let chunk_duration = front.duration;
 
-                let (min_db, max_db) = calculate_volume_min_max(&settings, spectrogram);
+                let (min_db, max_db) = calculate_volume_min_max(&settings, &spectrogram);
 
                 if settings.bargraph_height != 0.0 {
                     if settings.show_masking {
                         draw_bargraph(
                             &mut bargraph_mesh,
-                            spectrogram,
+                            &spectrogram,
                             bargraph_bounds,
                             color_table,
                             Some(settings.masking_color),
@@ -801,7 +807,7 @@ pub fn create(
                     } else {
                         draw_bargraph(
                             &mut bargraph_mesh,
-                            spectrogram,
+                            &spectrogram,
                             bargraph_bounds,
                             color_table,
                             None,
@@ -814,7 +820,7 @@ pub fn create(
                 if settings.bargraph_height != 1.0 {
                     draw_spectrogram_image(
                         &mut spectrogram_image,
-                        spectrogram,
+                        &spectrogram,
                         &frequencies,
                         color_table,
                         (max_db, min_db),
@@ -826,7 +832,7 @@ pub fn create(
                     if let Some(pointer) = egui_ctx.pointer_latest_pos() {
                         get_under_cursor(
                             pointer,
-                            spectrogram,
+                            &spectrogram,
                             &frequencies,
                             bargraph_bounds,
                             spectrogram_bounds,
@@ -840,7 +846,7 @@ pub fn create(
                     None
                 };
 
-                drop(lock);
+                drop(spectrogram);
 
                 egui_ctx.tex_manager().write().set(
                     spectrogram_texture,
@@ -993,14 +999,19 @@ pub fn create(
                     let rasterize_elapsed = now.duration_since(start);
 
                     let rasterize_secs = rasterize_elapsed.as_secs_f64();
+                    let copy_secs = copying_duration.as_secs_f64();
                     let chunk_secs = chunk_duration.as_secs_f64();
                     let frame_secs = frame_elapsed.as_secs_f64();
 
-                    let rasterize_processing_duration = rasterize_secs / (frame_secs / chunk_secs);
+                    /*let rasterize_processing_duration = rasterize_secs / (frame_secs / chunk_secs);
                     let adjusted_processing_duration =
-                        processing_duration.as_secs_f64() + rasterize_processing_duration;
+                        processing_duration.as_secs_f64() + rasterize_processing_duration;*/
+                    let copy_processing_duration = copy_secs / (frame_secs / chunk_secs);
+                    let adjusted_processing_duration =
+                        processing_duration.as_secs_f64() + copy_processing_duration;
                     let rasterize_proportion = rasterize_secs / frame_secs;
                     let processing_proportion = adjusted_processing_duration / chunk_secs;
+                    let copying_proportion = copy_secs / frame_secs;
                     let buffering_proportion = buffering_duration.as_secs_f64() / frame_secs;
 
                     if buffering_duration < Duration::from_millis(500) {
@@ -1027,7 +1038,7 @@ pub fn create(
                                 Color32::from_rgb(224, 224, 224)
                             },
                         );
-                        painter.text(
+                        /*painter.text(
                             Pos2 {
                                 x: max_x - 32.0,
                                 y: 64.0,
@@ -1044,6 +1055,48 @@ pub fn create(
                             if buffering_proportion >= 1.0 {
                                 Color32::RED
                             } else if buffering_proportion >= 0.6 {
+                                Color32::YELLOW
+                            } else {
+                                Color32::from_rgb(224, 224, 224)
+                            },
+                        );*/
+                        /*painter.text(
+                            Pos2 {
+                                x: max_x - 32.0,
+                                y: 64.0,
+                            },
+                            Align2::RIGHT_TOP,
+                            format!("{:.1}ms copying", copy_secs * 1000.0),
+                            FontId {
+                                size: 12.0,
+                                family: egui::FontFamily::Monospace,
+                            },
+                            if copying_proportion >= 1.0 {
+                                Color32::RED
+                            } else if copying_proportion >= 0.6 {
+                                Color32::YELLOW
+                            } else {
+                                Color32::from_rgb(224, 224, 224)
+                            },
+                        );*/
+                        painter.text(
+                            Pos2 {
+                                x: max_x - 32.0,
+                                y: 64.0,
+                            },
+                            Align2::RIGHT_TOP,
+                            format!(
+                                //"{:.1}ms buffering+copying",
+                                "{:.1}ms buffering",
+                                (buffering_duration.as_secs_f64() + copy_secs) * 1000.0
+                            ),
+                            FontId {
+                                size: 12.0,
+                                family: egui::FontFamily::Monospace,
+                            },
+                            if buffering_proportion + copying_proportion >= 1.0 {
+                                Color32::RED
+                            } else if buffering_proportion + copying_proportion >= 0.6 {
                                 Color32::YELLOW
                             } else {
                                 Color32::from_rgb(224, 224, 224)
