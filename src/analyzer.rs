@@ -1107,7 +1107,7 @@ const FLAT_TOP_WINDOW: &[f64] = &[
 #[derive(Clone)]
 struct VQsDFT {
     coeffs: Vec<VQsDFTCoeffs>,
-    gains: ArrayVec<[f64; MAX_WINDOW_TERMS]>,
+    gains: ArrayVec<[f64; MAX_WINDOW_TERMS * 2]>,
     buffer: Vec<f64>,
     buffer_index: usize,
     spectrum_data: Vec<f64>,
@@ -1117,7 +1117,7 @@ struct VQsDFT {
 #[derive(Default, Clone)]
 struct VQsDFTCoeffs {
     period: f64,
-    kernel: ArrayVec<[VQsDFTCoeff; MAX_WINDOW_TERMS]>,
+    kernel: ArrayVec<[VQsDFTCoeff; MAX_WINDOW_TERMS * 2]>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -1159,7 +1159,7 @@ impl VQsDFT {
         };
         let items_per_band = (max_idx - min_idx) as usize;
 
-        let gains: ArrayVec<[f64; MAX_WINDOW_TERMS]> = if use_nc {
+        let gains: ArrayVec<[f64; MAX_WINDOW_TERMS * 2]> = if use_nc {
             ArrayVec::from_iter(vec![0.0; 2])
         } else {
             (min_idx..max_idx)
