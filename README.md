@@ -67,7 +67,9 @@ At the moment, settings are not saved between sessions, but this functionality i
 
 The visualizer uses different threads for different tasks. The audio thread\* performs DSP on audio samples provided by the plugin host, and the render thread uses the resulting data to render a visualization. If OSC output is enabled, a separate thread is used to send OSC packets over the network.
 
+<!--
 Only one thread can access the shared data at a time: When the render thread is generating a spectrogram, the audio thread cannot continue processing, and vice versa. However, the different threads try to do as much of their work as possible before locking the shared data and try to lock it for the minimum amount of time necessary.
+-->
 
 \* When processing stereo inputs, some components of the audio processing chain use one thread per channel.
 
@@ -76,7 +78,7 @@ Only one thread can access the shared data at a time: When the render thread is 
 If you're having performance or latency issues, enabling performance counters can help you troubleshoot the issue.
 
 - processing = Proportion of the available time budget spent processing audio.
-	- Affected by rasterize time
+	- Affected by buffering time
 	- Affected by the following settings:
 		- Update rate
 			- If internal buffering is disabled, the update rate is determined by the buffer size set in the plugin's host
@@ -85,7 +87,7 @@ If you're having performance or latency issues, enabling performance counters ca
 		- Use NC method
 		- Output analysis via MIDI
 		- Output analysis via OSC
-- rasterize = Proportion of the processing time taken up by the render thread.
+- rasterize = Proportion of the frame budget taken up by rasterization.
 	- Affected by the following settings:
 		- Spectrogram duration
 		- Bargraph averaging
