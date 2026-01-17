@@ -684,6 +684,8 @@ impl BetterSpectrogram {
 
         callback(unsafe { &mut *Arc::as_ptr(&buffer).cast_mut() }); // *Intentional* race condition; This can only cause visual glitches, as all other references are read-only
 
+        // TODO: Add measures to ensure safety in the future! This is currently an ugly hack
+
         /*loop {
             if let Some(buffer) = Arc::get_mut(&mut buffer) {
                 callback(buffer);
