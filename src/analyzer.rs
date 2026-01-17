@@ -1,7 +1,6 @@
 use std::{collections::VecDeque, f64::consts::PI, time::Duration};
 
 use serde::{Deserialize, Serialize};
-use tinyvec::ArrayVec;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BetterAnalyzerConfiguration {
@@ -1078,8 +1077,6 @@ impl FrequencyScale {
     }
 }
 
-const MAX_WINDOW_TERMS: usize = 2;
-
 const HANN_WINDOW: &[f64] = &[1.0, 0.5];
 /*#[allow(clippy::excessive_precision)]
 const HAMMING_WINDOW: &[f64] = &[1.0, 0.4259434938430786];
@@ -1103,7 +1100,7 @@ const FLAT_TOP_WINDOW: &[f64] = &[
 #[derive(Clone)]
 struct VQsDFT {
     coeffs: Vec<VQsDFTCoeffs>,
-    gains: ArrayVec<[f64; MAX_WINDOW_TERMS * 2]>,
+    gains: Vec<f64>,
     buffer: Vec<f64>,
     buffer_index: usize,
     spectrum_data: Vec<f64>,
@@ -1113,7 +1110,7 @@ struct VQsDFT {
 #[derive(Default, Clone)]
 struct VQsDFTCoeffs {
     period: f64,
-    kernel: ArrayVec<[VQsDFTCoeff; MAX_WINDOW_TERMS * 2]>,
+    kernel: Vec<VQsDFTCoeff>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -1155,8 +1152,9 @@ impl VQsDFT {
         };
         let items_per_band = (max_idx - min_idx) as usize;
 
-        let gains: ArrayVec<[f64; MAX_WINDOW_TERMS * 2]> = if use_nc {
-            ArrayVec::from_iter(vec![0.0; 2])
+        let gains: Vec<f64> = if use_nc {
+            //vec![0.0; 2]
+            vec![]
         } else {
             (min_idx..max_idx)
                 .map(|i| window[i.unsigned_abs()] * (-((i as f64).abs() % 2.0) * 2.0 + 1.0))
@@ -1259,11 +1257,10 @@ impl VQsDFT {
                                 % buffer_len,
                         )
                     };
-                    let mut sum = (0.0, 0.0);
 
                     let period = coeffs.period;
 
-                    for (coeff, gain) in coeffs.kernel.iter_mut().zip(self.gains.iter().copied()) {
+                    for coeff in coeffs.kernel.iter_mut() {
                         let comb_x = latest * coeff.fiddle.0 - oldest;
                         let comb_y = latest * coeff.fiddle.1;
 
@@ -1285,9 +1282,6 @@ impl VQsDFT {
 
                         coeff.coeff4.0 = coeff.coeff3.0;
                         coeff.coeff4.1 = coeff.coeff3.1;
-
-                        sum.0 += coeff.coeff3.0 * gain / period;
-                        sum.1 += coeff.coeff3.1 * gain / period;
                     }
                     let (first_coeff3, second_coeff3) = unsafe {
                         (
