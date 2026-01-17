@@ -767,8 +767,6 @@ pub fn create(
 
                 drop(lock);
 
-                let copying_duration = start.elapsed();
-
                 let front = spectrogram.data.front().unwrap();
 
                 let spectrogram_width = front.data.len();
@@ -998,21 +996,20 @@ pub fn create(
                 if settings.show_performance {
                     let rasterize_elapsed = now.duration_since(start);
 
+                    let buffering_secs = buffering_duration.as_secs_f64();
                     let rasterize_secs = rasterize_elapsed.as_secs_f64();
-                    let copy_secs = copying_duration.as_secs_f64();
                     let chunk_secs = chunk_duration.as_secs_f64();
                     let frame_secs = frame_elapsed.as_secs_f64();
 
                     /*let rasterize_processing_duration = rasterize_secs / (frame_secs / chunk_secs);
                     let adjusted_processing_duration =
                         processing_duration.as_secs_f64() + rasterize_processing_duration;*/
-                    let copy_processing_duration = copy_secs / (frame_secs / chunk_secs);
+                    let buffer_processing_duration = buffering_secs / (frame_secs / chunk_secs);
                     let adjusted_processing_duration =
-                        processing_duration.as_secs_f64() + copy_processing_duration;
+                        processing_duration.as_secs_f64() + buffer_processing_duration;
                     let rasterize_proportion = rasterize_secs / frame_secs;
                     let processing_proportion = adjusted_processing_duration / chunk_secs;
-                    let copying_proportion = copy_secs / frame_secs;
-                    let buffering_proportion = buffering_duration.as_secs_f64() / frame_secs;
+                    let buffering_proportion = buffering_secs / frame_secs;
 
                     if buffering_duration < Duration::from_millis(500) {
                         painter.text(
@@ -1038,16 +1035,13 @@ pub fn create(
                                 Color32::from_rgb(224, 224, 224)
                             },
                         );
-                        /*painter.text(
+                        painter.text(
                             Pos2 {
                                 x: max_x - 32.0,
                                 y: 64.0,
                             },
                             Align2::RIGHT_TOP,
-                            format!(
-                                "{:.1}ms buffering",
-                                buffering_duration.as_secs_f64() * 1000.0
-                            ),
+                            format!("{:.1}ms buffering", buffering_secs * 1000.0),
                             FontId {
                                 size: 12.0,
                                 family: egui::FontFamily::Monospace,
@@ -1055,48 +1049,6 @@ pub fn create(
                             if buffering_proportion >= 1.0 {
                                 Color32::RED
                             } else if buffering_proportion >= 0.6 {
-                                Color32::YELLOW
-                            } else {
-                                Color32::from_rgb(224, 224, 224)
-                            },
-                        );*/
-                        /*painter.text(
-                            Pos2 {
-                                x: max_x - 32.0,
-                                y: 64.0,
-                            },
-                            Align2::RIGHT_TOP,
-                            format!("{:.1}ms copying", copy_secs * 1000.0),
-                            FontId {
-                                size: 12.0,
-                                family: egui::FontFamily::Monospace,
-                            },
-                            if copying_proportion >= 1.0 {
-                                Color32::RED
-                            } else if copying_proportion >= 0.6 {
-                                Color32::YELLOW
-                            } else {
-                                Color32::from_rgb(224, 224, 224)
-                            },
-                        );*/
-                        painter.text(
-                            Pos2 {
-                                x: max_x - 32.0,
-                                y: 64.0,
-                            },
-                            Align2::RIGHT_TOP,
-                            format!(
-                                //"{:.1}ms buffering+copying",
-                                "{:.1}ms buffering",
-                                (buffering_duration.as_secs_f64() + copy_secs) * 1000.0
-                            ),
-                            FontId {
-                                size: 12.0,
-                                family: egui::FontFamily::Monospace,
-                            },
-                            if buffering_proportion + copying_proportion >= 1.0 {
-                                Color32::RED
-                            } else if buffering_proportion + copying_proportion >= 0.6 {
                                 Color32::YELLOW
                             } else {
                                 Color32::from_rgb(224, 224, 224)
