@@ -1246,9 +1246,9 @@ impl VQsDFT {
         let buffer_len = self.buffer.len();
         let buffer_len_int = buffer_len as isize;
 
-        if self.use_nc {
-            let sample_count = samples.len() as f64;
+        let sample_count = samples.len() as f64;
 
+        if self.use_nc {
             for sample in samples {
                 self.buffer_index =
                     (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
@@ -1310,10 +1310,6 @@ impl VQsDFT {
                         .sqrt();
                 }
             }
-
-            self.spectrum_data
-                .iter_mut()
-                .for_each(|x| *x /= sample_count);
         } else {
             for sample in samples {
                 self.buffer_index =
@@ -1363,12 +1359,14 @@ impl VQsDFT {
                         sum.0 += coeff.coeff3.0 * gain / period;
                         sum.1 += coeff.coeff3.1 * gain / period;
                     }
-                    *spectrum_data = spectrum_data.max(sum.0.powi(2) + sum.1.powi(2));
+                    *spectrum_data += (sum.0.powi(2) + sum.1.powi(2)).sqrt();
                 }
             }
-
-            self.spectrum_data.iter_mut().for_each(|x| *x = x.sqrt());
         }
+
+        self.spectrum_data
+            .iter_mut()
+            .for_each(|x| *x /= sample_count);
 
         &self.spectrum_data
     }
