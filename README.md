@@ -52,6 +52,7 @@ If you'd like to start improving the spectrogram's readability further, the sett
 - Render Options -> Range above masking mean
 - Render Options -> Range below masking mean
 - Analysis Options -> ERB bandwidth divisor (ideal value depends on what you're trying to analyze; if in doubt, the default value of 2.0 is usually a good middle ground)
+- Analysis Options -> Frequency range (ideal value depends on what you're trying to analyze)
 - Analysis Options -> Resolution (increasing it may hurt performance)
 - Analysis Options -> Update rate (increasing it may hurt performance)
 
