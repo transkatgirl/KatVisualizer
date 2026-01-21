@@ -6,8 +6,7 @@ use mimalloc::MiMalloc;
 use nih_plug::{
     midi::control_change::{ALL_NOTES_OFF, POLY_MODE_ON},
     prelude::*,
-    util::StftHelper,
-    util::freq_to_midi_note,
+    util::{StftHelper, freq_to_midi_note},
 };
 use nih_plug_egui::EguiState;
 use parking_lot::{FairMutex, Mutex, RwLock};
