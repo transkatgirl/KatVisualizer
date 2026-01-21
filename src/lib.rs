@@ -91,7 +91,7 @@ impl Default for MyPlugin {
 impl Default for PluginParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(1200, 900),
+            editor_state: EguiState::from_size(1400, 900),
         }
     }
 }
