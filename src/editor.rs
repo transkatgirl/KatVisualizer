@@ -540,7 +540,7 @@ impl Default for RenderSettings {
             maximum_chroma: 0.09,
             automatic_gain: true,
             agc_duration: Duration::from_secs_f64(1.0),
-            agc_above_masking: 36.0,
+            agc_above_masking: 33.0,
             agc_below_masking: 3.0,
             agc_minimum: 3.0 - AnalysisChainConfig::default().listening_volume as f32,
             agc_maximum: 100.0 - AnalysisChainConfig::default().listening_volume as f32,
@@ -1556,7 +1556,7 @@ pub fn create(
                                     .fixed_decimals(0)
                                     .text("Update rate"),
                                 )
-                                .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows. This setting allows you to adjust the number of overlapping windows per second, effectively setting the spectrogram's vertical resolution (and the associated amount of CPU usage required).\n\nThe default value for the setting is roughly half the length of the just-noticeable-difference in onset time between two auditory events.\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution.)")
+                                .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows. This setting allows you to adjust the number of overlapping windows per second, effectively setting the spectrogram's vertical resolution (and the associated amount of CPU usage required).\n\nThe default value for the setting is roughly the length of the just-noticeable-difference in onset time between two auditory events.\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution.)")
                                 .changed()
                             {
                                 update_and_clear(&analysis_settings);
