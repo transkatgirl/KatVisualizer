@@ -54,11 +54,13 @@ If you'd like to start improving the spectrogram's readability further, the sett
 - Analysis Options -> ERB bandwidth divisor (ideal value depends on what you're trying to analyze; if in doubt, the default value of 2.0 is usually a good middle ground)
 - Analysis Options -> Frequency range (ideal value depends on what you're trying to analyze)
 - Analysis Options -> Resolution (increasing it may hurt performance)
+	- Will require "Range above masking mean" and "Range below masking mean" to be adjusted
 - Analysis Options -> Update rate (increasing it may hurt performance)
 
 If you experience performance issues out of the box, the settings with the largest impact are:
 - Analysis Options -> Update rate (decreasing it may hurt readability)
 - Analysis Options -> Resolution (decreasing it may hurt readability)
+	- Will require "Range above masking mean" and "Range below masking mean" to be adjusted
 - Analysis Options -> Perform simultaneous masking (disabling may hurt readability)
 - Render Options -> Spectrogram duration
 
