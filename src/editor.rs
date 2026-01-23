@@ -710,7 +710,7 @@ pub fn create(
                 "spectrogram".to_string(),
                 ImageData::Color(Arc::new(ColorImage::filled([1, 1], Color32::TRANSPARENT))),
                 TextureOptions {
-                    magnification: egui::TextureFilter::Nearest,
+                    magnification: egui::TextureFilter::Linear,
                     minification: egui::TextureFilter::Linear,
                     wrap_mode: egui::TextureWrapMode::ClampToEdge,
                     mipmap_mode: None,
