@@ -173,25 +173,14 @@ impl BetterAnalyzer {
                 &mut self.masking,
             );
 
-            let (spectrum_chunks, _spectrum_rem) =
-                self.transform.spectrum_data.as_chunks_mut::<64>();
-            let (masking_chunks, _masking_rem) = self.masking.as_chunks::<64>();
-
-            spectrum_chunks
+            unsafe { self.transform.spectrum_data.as_chunks_unchecked_mut::<64>() }
                 .iter_mut()
-                .zip(masking_chunks)
+                .zip(unsafe { self.masking.as_chunks_unchecked::<64>() })
                 .for_each(|(spectrum, masking)| {
                     *spectrum = f64x64::from_array(*spectrum)
                         .simd_max(f64x64::from_array(*masking))
                         .to_array();
                 });
-
-            /*spectrum_rem
-            .iter_mut()
-            .zip(masking_rem.iter().copied())
-            .for_each(|(amplitude, masking_amplitude)| {
-                *amplitude = amplitude.max(masking_amplitude)
-            });*/
         }
     }
     pub fn raw_analysis(&self) -> &[f64] {
@@ -1389,10 +1378,11 @@ impl VQsDFT {
 
                         let period = coeffs.period;
 
-                        let [comb_0_x, comb_0_y, comb_1_x, comb_1_y] = f64x4::splat(latest)
+                        let comb = f64x4::splat(latest)
                             .mul(coeffs.fiddle)
-                            .sub(f64x4::from_array([oldest, 0.0, oldest, 0.0]))
-                            .to_array();
+                            .sub(f64x4::from_array([oldest, 0.0, oldest, 0.0]));
+
+                        let [comb_0_x, comb_0_y, comb_1_x, comb_1_y] = comb.to_array();
 
                         coeffs.coeff1 = f64x4::from_array([comb_0_x, comb_0_x, comb_1_x, comb_1_x])
                             .mul(coeffs.twiddle)
@@ -1402,7 +1392,7 @@ impl VQsDFT {
                             )
                             .sub(coeffs.coeff2);
 
-                        coeffs.coeff2 = f64x4::from_array([comb_0_x, comb_0_y, comb_1_x, comb_1_y]);
+                        coeffs.coeff2 = comb;
 
                         coeffs.coeff3 = coeffs
                             .coeff1
@@ -1490,15 +1480,13 @@ impl VQsDFT {
             }
         }
 
-        let (chunks, _rem) = self.spectrum_data.as_chunks_mut::<64>();
-
-        chunks.iter_mut().for_each(|chunk| {
-            *chunk = f64x64::from_array(*chunk)
-                .div(f64x64::splat(sample_count))
-                .to_array();
-        });
-
-        //rem.iter_mut().for_each(|x| *x /= sample_count);
+        unsafe { self.spectrum_data.as_chunks_unchecked_mut::<64>() }
+            .iter_mut()
+            .for_each(|chunk| {
+                *chunk = f64x64::from_array(*chunk)
+                    .div(f64x64::splat(sample_count))
+                    .to_array();
+            });
 
         &self.spectrum_data
     }

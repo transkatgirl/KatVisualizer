@@ -360,7 +360,7 @@ impl Default for AnalysisChainConfig {
             masking: true,
             internal_buffering: true,
             update_rate_hz: 2048.0,
-            resolution: 704,
+            resolution: 768,
             latency_offset: Duration::ZERO,
 
             output_osc: false,
