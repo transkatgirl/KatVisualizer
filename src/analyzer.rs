@@ -737,8 +737,9 @@ const MAX_MASKING_DYNAMIC_RANGE: f64 = 100.0;
 #[derive(Clone, Copy)]
 struct MaskerCoeff {
     bark: f64,
-    tonal_masking_threshold: f64,
-    //nontonal_masking_threshold: f64,
+    masking_offset_amplitude: f64,
+    /*tonal_masking_threshold: f64,
+    nontonal_masking_threshold: f64,*/
     masking_coeff_1: f64,
     range: (usize, usize),
 }
@@ -783,14 +784,19 @@ impl Masker {
             ((lower + 1).min(i), upper.saturating_sub(1))
         });
 
+        const SIMULTANEOUS: f64 = 27.0;
+
         Self {
             coeffs: frequency_set
                 .into_iter()
                 .zip(bark_set.iter().copied().zip(range_indices))
                 .map(|(frequency, (bark, range))| MaskerCoeff {
                     bark,
-                    tonal_masking_threshold: -6.025 - (0.275 * bark),
-                    //nontonal_masking_threshold: -2.025 - (0.175 * bark),
+                    masking_offset_amplitude: dbfs_to_amplitude(
+                        (-6.025 - (0.275 * bark)) - SIMULTANEOUS,
+                    ),
+                    /*tonal_masking_threshold: -6.025 - (0.275 * bark),
+                    nontonal_masking_threshold: -2.025 - (0.175 * bark),*/
                     masking_coeff_1: 22.0 + (230.0 / frequency).min(10.0),
                     range,
                 })
@@ -823,22 +829,23 @@ impl Masker {
                 continue;
             }
 
-            let (lower_spread, upper_spread, simultaneous) = (
-                27.0,
-                coeff.masking_coeff_1 - 0.2 * (amplitude_db + amplitude_correction_offset),
-                27.0,
-            );
+            const LOWER_SPREAD: f64 = 27.0;
 
-            //let threshold_offset = masking_threshold_offset(bark, flatness);
+            let upper_spread =
+                coeff.masking_coeff_1 - 0.2 * (amplitude_db + amplitude_correction_offset);
+
+            /*let threshold_offset = masking_threshold_offset(bark, flatness);
             let offset = coeff.tonal_masking_threshold - simultaneous;
 
-            let adjusted_amplitude = dbfs_to_amplitude(offset) * amplitude;
+            let adjusted_amplitude = dbfs_to_amplitude(offset) * amplitude;*/
+
+            let adjusted_amplitude = coeff.masking_offset_amplitude * amplitude;
 
             (coeff.range.0..i).for_each(|i| {
                 let t = unsafe { masking_threshold.get_unchecked_mut(i) };
                 let b = unsafe { self.bark_set.get_unchecked(i) };
 
-                *t += dbfs_to_amplitude(-lower_spread * (coeff.bark - b)) * adjusted_amplitude;
+                *t += dbfs_to_amplitude(-LOWER_SPREAD * (coeff.bark - b)) * adjusted_amplitude;
             });
 
             (i..=coeff.range.1).for_each(|i| {
@@ -1247,11 +1254,7 @@ impl VQsDFT {
         let buffer_len = self.buffer.len();
         let buffer_len_int = buffer_len as isize;
 
-        if samples.len() == 0 {
-            return &self.spectrum_data;
-        }
-
-        let sample_count = samples.len() as f64;
+        let sample_count = samples.len().max(1) as f64;
 
         if self.use_nc {
             for sample in samples {
