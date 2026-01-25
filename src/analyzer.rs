@@ -819,7 +819,7 @@ impl Masker {
             let amplitude = component;
             let amplitude_db = amplitude_to_dbfs(component);
 
-            if !amplitude.is_normal() {
+            if amplitude == 0.0 {
                 continue;
             }
 
@@ -1246,6 +1246,10 @@ impl VQsDFT {
 
         let buffer_len = self.buffer.len();
         let buffer_len_int = buffer_len as isize;
+
+        if samples.len() == 0 {
+            return &self.spectrum_data;
+        }
 
         let sample_count = samples.len() as f64;
 
