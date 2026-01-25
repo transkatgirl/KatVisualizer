@@ -170,10 +170,23 @@ impl BetterAnalyzer {
                 //0.0,
                 &mut self.masking,
             );
-            self.transform
-                .spectrum_data
+
+            let (spectrum_chunks, spectrum_rem) =
+                self.transform.spectrum_data.as_chunks_mut::<64>();
+            let (masking_chunks, masking_rem) = self.masking.as_chunks::<64>();
+
+            spectrum_chunks
                 .iter_mut()
-                .zip(self.masking.iter().copied())
+                .zip(masking_chunks)
+                .for_each(|(spectrum, masking)| {
+                    *spectrum = f64x64::from_array(*spectrum)
+                        .simd_max(f64x64::from_array(*masking))
+                        .to_array();
+                });
+
+            spectrum_rem
+                .iter_mut()
+                .zip(masking_rem.iter().copied())
                 .for_each(|(amplitude, masking_amplitude)| {
                     *amplitude = amplitude.max(masking_amplitude)
                 });
