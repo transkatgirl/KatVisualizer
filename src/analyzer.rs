@@ -126,6 +126,8 @@ impl BetterAnalyzer {
             .map(|band| (band.low, band.center, band.high))
             .collect();
 
+        assert!(frequency_bands.len().is_multiple_of(64));
+
         Self {
             config,
             buffer_size: transform.buffer.len(),
@@ -171,9 +173,9 @@ impl BetterAnalyzer {
                 &mut self.masking,
             );
 
-            let (spectrum_chunks, spectrum_rem) =
+            let (spectrum_chunks, _spectrum_rem) =
                 self.transform.spectrum_data.as_chunks_mut::<64>();
-            let (masking_chunks, masking_rem) = self.masking.as_chunks::<64>();
+            let (masking_chunks, _masking_rem) = self.masking.as_chunks::<64>();
 
             spectrum_chunks
                 .iter_mut()
@@ -184,12 +186,12 @@ impl BetterAnalyzer {
                         .to_array();
                 });
 
-            spectrum_rem
-                .iter_mut()
-                .zip(masking_rem.iter().copied())
-                .for_each(|(amplitude, masking_amplitude)| {
-                    *amplitude = amplitude.max(masking_amplitude)
-                });
+            /*spectrum_rem
+            .iter_mut()
+            .zip(masking_rem.iter().copied())
+            .for_each(|(amplitude, masking_amplitude)| {
+                *amplitude = amplitude.max(masking_amplitude)
+            });*/
         }
     }
     pub fn raw_analysis(&self) -> &[f64] {
@@ -1218,6 +1220,8 @@ impl VQsDFT {
                 .collect()
         };
 
+        assert!(freq_bands.len().is_multiple_of(64));
+
         VQsDFT {
             spectrum_data: vec![0.0; freq_bands.len()],
             gains,
@@ -1486,7 +1490,7 @@ impl VQsDFT {
             }
         }
 
-        let (chunks, rem) = self.spectrum_data.as_chunks_mut::<64>();
+        let (chunks, _rem) = self.spectrum_data.as_chunks_mut::<64>();
 
         chunks.iter_mut().for_each(|chunk| {
             *chunk = f64x64::from_array(*chunk)
@@ -1494,7 +1498,7 @@ impl VQsDFT {
                 .to_array();
         });
 
-        rem.iter_mut().for_each(|x| *x /= sample_count);
+        //rem.iter_mut().for_each(|x| *x /= sample_count);
 
         &self.spectrum_data
     }
