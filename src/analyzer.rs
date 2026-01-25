@@ -341,7 +341,7 @@ impl BetterAnalysis {
                     sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
-                    *result = ((pan * 2.0) as f32, volume);
+                    *result = (pan as f32, volume);
                     self.max = self.max.max(volume);
                 }
             } else {
@@ -359,7 +359,7 @@ impl BetterAnalysis {
                     sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
-                    *result = ((pan * 2.0) as f32, volume);
+                    *result = (pan as f32, volume);
                     self.max = self.max.max(volume);
                 }
             }
@@ -388,7 +388,7 @@ impl BetterAnalysis {
                     sum += dbfs_to_amplitude(volume);
                     let volume = volume as f32;
 
-                    self.data.push(((pan * 2.0) as f32, volume));
+                    self.data.push((pan as f32, volume));
                     self.max = self.max.max(volume);
                 }
             } else {
@@ -407,7 +407,7 @@ impl BetterAnalysis {
                     sum += (left + right) * gain_amplitude;
                     let volume = volume as f32;
 
-                    self.data.push(((pan * 2.0) as f32, volume));
+                    self.data.push((pan as f32, volume));
                     self.max = self.max.max(volume);
                 }
             }
@@ -891,9 +891,9 @@ pub fn calculate_pan_and_volume_from_amplitude(
     let pan = if ratio == 1.0 {
         0.0
     } else if left_amplitude == 0.0 && right_amplitude > 0.0 {
-        0.5
+        1.0
     } else if right_amplitude == 0.0 && left_amplitude > 0.0 {
-        -0.5
+        -1.0
     } else if ratio.is_nan() {
         0.0
     } else {
@@ -901,7 +901,7 @@ pub fn calculate_pan_and_volume_from_amplitude(
             (-f64::sqrt(2.0) * f64::sqrt(ratio * ratio + 1.0) + ratio + 1.0) / (ratio - 1.0),
         ))
         .to_degrees()
-            / 45.0
+            / 22.5
     };
 
     (pan, amplitude_to_dbfs(left_amplitude + right_amplitude))
