@@ -111,10 +111,7 @@ impl BetterAnalyzer {
 
         let transform = VQsDFT::new(
             &frequency_bands,
-            HANN_WINDOW,
-            1000.0,
-            1.0,
-            1000.0,
+            Window::Hann.coeffs(),
             config.sample_rate as f64,
             config.nc_method,
         );
@@ -1106,26 +1103,48 @@ impl FrequencyScale {
     }
 }
 
-const HANN_WINDOW: &[f64] = &[1.0, 0.5];
-/*#[allow(clippy::excessive_precision)]
-const HAMMING_WINDOW: &[f64] = &[1.0, 0.4259434938430786];
-#[allow(clippy::excessive_precision)]
-const BLACKMAN_WINDOW: &[f64] = &[1.0, 0.595257580280304, 0.0952545627951622];
-#[allow(clippy::excessive_precision)]
-const NUTTALL_WINDOW: &[f64] = &[
-    1.0,
-    0.6850073933601379,
-    0.20272639393806458,
-    0.017719272524118423,
-];
-#[allow(clippy::excessive_precision)]
-const FLAT_TOP_WINDOW: &[f64] = &[
-    1.0,
-    0.966312825679779,
-    0.6430955529212952,
-    0.19387830793857574,
-    0.016120079904794693,
-];*/
+#[derive(Clone, Copy)]
+struct FrequencyBand {
+    low: f64,
+    center: f64,
+    high: f64,
+}
+
+#[allow(dead_code)]
+enum Window {
+    Rectangular,
+    Hann,
+    Hamming,
+    Blackman,
+    Nuttall,
+    FlatTop,
+}
+
+impl Window {
+    fn coeffs(&self) -> &'static [f64] {
+        #[allow(clippy::excessive_precision)]
+        match self {
+            Self::Rectangular => &[1.0],
+            Self::Hann => &[1.0, 0.5],
+            Self::Hamming => &[1.0, 0.4259434938430786],
+            Self::Blackman => &[1.0, 0.595257580280304, 0.0952545627951622],
+            Self::Nuttall => &[
+                1.0,
+                0.6850073933601379,
+                0.20272639393806458,
+                0.017719272524118423,
+            ],
+            Self::FlatTop => &[
+                1.0,
+                0.966312825679779,
+                0.6430955529212952,
+                0.19387830793857574,
+                0.016120079904794693,
+            ],
+        }
+    }
+}
+
 #[derive(Clone)]
 struct VQsDFT {
     coeffs: VQsDFTCoeffWrapper,
@@ -1173,24 +1192,9 @@ struct VQsDFTNCCoeffs {
     coeff5: f64x4,
 }
 
-#[derive(Clone, Copy)]
-struct FrequencyBand {
-    low: f64,
-    center: f64,
-    high: f64,
-}
-
 impl VQsDFT {
-    fn new(
-        freq_bands: &[FrequencyBand],
-        window: &[f64],
-        time_res: f64,
-        bandwidth: f64,
-        max_time_res: f64,
-        sample_rate: f64,
-        use_nc: bool,
-    ) -> Self {
-        let buffer_size = (sample_rate * max_time_res / 1000.0).round() as usize;
+    fn new(freq_bands: &[FrequencyBand], window: &[f64], sample_rate: f64, use_nc: bool) -> Self {
+        let buffer_size = sample_rate.trunc() as usize;
         let buffer_size_f64 = buffer_size as f64;
 
         let (min_idx, max_idx) = if use_nc {
@@ -1219,16 +1223,15 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let period = (f64::min(
-                                buffer_size_f64,
-                                sample_rate
-                                    / (bandwidth * (x.high - x.low).abs()
-                                        + 1.0 / (time_res / 1000.0)),
-                            ))
-                            .trunc();
+                            let q = x.center / (x.high - x.low).abs();
+                            let period = (sample_rate / x.center) * q;
 
-                            let k_0 = (x.center * period) / sample_rate + 0.0 - 0.5;
-                            let k_1 = (x.center * period) / sample_rate + 1.0 - 0.5;
+                            let period = period.ceil();
+                            assert!(period >= 1.0 && period <= buffer_size_f64);
+                            let q = (x.center * period) / sample_rate;
+
+                            let k_0 = q - 0.5;
+                            let k_1 = q + 0.5;
                             let fid_0 = -2.0 * PI * k_0;
                             let twid_0 = (2.0 * PI * k_0) / period;
                             let reson_0 = 2.0 * f64::cos(twid_0);
@@ -1271,13 +1274,12 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let period = (f64::min(
-                                buffer_size_f64,
-                                sample_rate
-                                    / (bandwidth * (x.high - x.low).abs()
-                                        + 1.0 / (time_res / 1000.0)),
-                            ))
-                            .trunc();
+                            let q = x.center / (x.high - x.low).abs();
+                            let period = (sample_rate / x.center) * q;
+
+                            let period = period.ceil();
+                            assert!(period >= 1.0 && period <= buffer_size_f64);
+                            let q = (x.center * period) / sample_rate;
 
                             let mut fiddles = Vec::with_capacity(items_per_band);
                             let mut twiddles = Vec::with_capacity(items_per_band);
@@ -1286,7 +1288,7 @@ impl VQsDFT {
                             for i in min_idx..max_idx {
                                 let i = i as f64;
 
-                                let k = (x.center * period) / sample_rate + i;
+                                let k = q + i;
                                 let fid = -2.0 * PI * k;
                                 let twid = (2.0 * PI * k) / period;
                                 let reson = 2.0 * f64::cos(twid);
