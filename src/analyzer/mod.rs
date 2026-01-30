@@ -53,7 +53,6 @@ pub struct BetterAnalyzer {
     transform: VQsDFT,
     masker: Masker,
     masking: Vec<f64>,
-    buffer_size: usize,
     frequency_bands: Vec<(f64, f64, f64)>,
     frequency_indices: Vec<(usize, usize)>,
     normalizers: Vec<PrecomputedNormalizer>,
@@ -129,7 +128,6 @@ impl BetterAnalyzer {
 
         Self {
             config,
-            buffer_size: transform.buffer.len(),
             masker,
             masking: vec![0.0; frequency_bands.len()],
             transform,
@@ -141,9 +139,6 @@ impl BetterAnalyzer {
     }
     pub fn config(&self) -> &BetterAnalyzerConfiguration {
         &self.config
-    }
-    pub fn chunk_size(&self) -> usize {
-        self.buffer_size
     }
     pub fn frequencies(&self) -> &[(f64, f64, f64)] {
         &self.frequency_bands

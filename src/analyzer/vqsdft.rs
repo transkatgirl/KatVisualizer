@@ -22,7 +22,7 @@ pub enum Window {
 #[derive(Clone)]
 pub(super) struct VQsDFT {
     coeffs: VQsDFTCoeffWrapper,
-    pub(super) buffer: Vec<f64>,
+    buffer: Vec<f64>,
     buffer_index: usize,
     pub(super) spectrum_data: Vec<f64>,
 }
@@ -192,6 +192,12 @@ impl VQsDFTCoeffSet<6> {
     }
 }
 
+impl VQsDFTCoeffSet<10> {}
+
+impl VQsDFTCoeffSet<14> {}
+
+impl VQsDFTCoeffSet<18> {}
+
 impl VQsDFT {
     pub(super) fn new(
         freq_bands: &[FrequencyBand],
@@ -199,8 +205,24 @@ impl VQsDFT {
         sample_rate: f64,
         use_nc: bool,
     ) -> Self {
-        let buffer_size = sample_rate.trunc() as usize;
-        let buffer_size_f64 = buffer_size as f64;
+        assert!(sample_rate > 0.0);
+
+        let max_period = freq_bands
+            .iter()
+            .map(|x| {
+                let q = x.center / (x.high - x.low).abs();
+                let period = (sample_rate / x.center) * q;
+
+                let period = period.ceil();
+                assert!(period >= 1.0);
+
+                period as usize
+            })
+            .max()
+            .unwrap();
+
+        let buffer_size = max_period;
+        let buffer_size_f64 = max_period as f64;
 
         let window_coeffs: &[f64] = match window {
             Window::Rectangular => &[1.0],
