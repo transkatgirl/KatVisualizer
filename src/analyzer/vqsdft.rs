@@ -6,6 +6,8 @@ use std::{
 
 use super::FrequencyBand;
 
+// ----- Below algorithm is based on https://codepen.io/TF3RDL/pen/MWLzPoO -----
+
 #[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Window {
@@ -29,8 +31,11 @@ pub(super) struct VQsDFT {
 enum VQsDFTCoeffWrapper {
     Rectangular(Vec<(f64, VQsDFTCoeffSet<2>)>),
     NC(Vec<(f64, VQsDFTCoeffSet<4>)>),
-    ShortWindow((Simd<f64, 6>, Vec<(f64, VQsDFTCoeffSet<6>)>)),
-    LongWindow((Vec<f64>, Vec<(f64, Vec<VQsDFTCoeffSet<2>>)>)),
+    Window2Term((Simd<f64, 6>, Vec<(f64, VQsDFTCoeffSet<6>)>)),
+    //Window3Term((Simd<f64, 10>, Vec<(f64, VQsDFTCoeffSet<10>)>)),
+    //Window4Term((Simd<f64, 14>, Vec<(f64, VQsDFTCoeffSet<14>)>)),
+    //Window5Term((Simd<f64, 18>, Vec<(f64, VQsDFTCoeffSet<18>)>)),
+    ArbitraryWindow((Vec<f64>, Vec<(f64, Vec<VQsDFTCoeffSet<2>>)>)),
 }
 
 #[derive(Default, Clone)]
@@ -330,7 +335,7 @@ impl VQsDFT {
                         .collect(),
                 )
             } else if window == Window::Hann || window == Window::Hamming {
-                VQsDFTCoeffWrapper::ShortWindow((
+                VQsDFTCoeffWrapper::Window2Term((
                     Simd::<f64, 6>::from_array([
                         gains[0], gains[0], gains[1], gains[1], gains[2], gains[2],
                     ]),
@@ -398,7 +403,7 @@ impl VQsDFT {
                         .collect(),
                 ))
             } else {
-                VQsDFTCoeffWrapper::LongWindow((
+                VQsDFTCoeffWrapper::ArbitraryWindow((
                     gains,
                     freq_bands
                         .iter()
@@ -467,12 +472,12 @@ impl VQsDFT {
                     coeff.reset();
                 });
             }
-            VQsDFTCoeffWrapper::ShortWindow((_, coeffs)) => {
+            VQsDFTCoeffWrapper::Window2Term((_, coeffs)) => {
                 coeffs.iter_mut().for_each(|(_, coeff)| {
                     coeff.reset();
                 });
             }
-            VQsDFTCoeffWrapper::LongWindow((_, coeffs)) => {
+            VQsDFTCoeffWrapper::ArbitraryWindow((_, coeffs)) => {
                 coeffs.iter_mut().for_each(|(_, coeffs)| {
                     coeffs.iter_mut().for_each(|coeff| {
                         coeff.reset();
@@ -550,7 +555,7 @@ impl VQsDFT {
                     }
                 }
             }
-            VQsDFTCoeffWrapper::ShortWindow((gains, coeffs)) => {
+            VQsDFTCoeffWrapper::Window2Term((gains, coeffs)) => {
                 let gains = *gains;
 
                 for sample in samples {
@@ -583,7 +588,7 @@ impl VQsDFT {
                     }
                 }
             }
-            VQsDFTCoeffWrapper::LongWindow((gains, coeffs)) => {
+            VQsDFTCoeffWrapper::ArbitraryWindow((gains, coeffs)) => {
                 for sample in samples {
                     self.buffer_index =
                         (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
