@@ -1,7 +1,9 @@
 use std::{
     f64::consts::PI,
     ops::{Add, AddAssign, Div, Mul, Neg, Sub},
-    simd::{LaneCount, Simd, SupportedLaneCount, f64x2, f64x4, f64x64, num::SimdFloat},
+    simd::{
+        LaneCount, Simd, SupportedLaneCount, f64x2, f64x4, f64x64, num::SimdFloat, simd_swizzle,
+    },
 };
 
 use super::FrequencyBand;
@@ -31,10 +33,10 @@ pub(super) struct VQsDFT {
 enum VQsDFTCoeffWrapper {
     Rectangular(Vec<(f64, VQsDFTCoeffSet<2>)>),
     NC(Vec<(f64, VQsDFTCoeffSet<4>)>),
-    Window2Term((Simd<f64, 6>, Vec<(f64, VQsDFTCoeffSet<6>)>)),
+    /*Window2Term((Simd<f64, 6>, Vec<(f64, VQsDFTCoeffSet<6>)>)),
     Window3Term((Simd<f64, 10>, Vec<(f64, VQsDFTCoeffSet<10>)>)),
     Window4Term((Simd<f64, 14>, Vec<(f64, VQsDFTCoeffSet<14>)>)),
-    Window5Term((Simd<f64, 18>, Vec<(f64, VQsDFTCoeffSet<18>)>)),
+    Window5Term((Simd<f64, 18>, Vec<(f64, VQsDFTCoeffSet<18>)>)),*/
     ArbitraryWindow((Vec<f64>, Vec<(f64, Vec<VQsDFTCoeffSet<2>>)>)),
 }
 
@@ -44,7 +46,6 @@ where
     LaneCount<N>: SupportedLaneCount,
 {
     twiddle: Simd<f64, N>,
-    flipped_twiddle: Simd<f64, N>,
     fiddle: Simd<f64, N>,
     reson: Simd<f64, N>,
     coeff1: Simd<f64, N>,
@@ -69,49 +70,53 @@ where
 
 impl VQsDFTCoeffSet<2> {
     fn calculate(&mut self, latest: f64, oldest: f64, gain: f64, period: f64) -> Simd<f64, 2> {
-        let comb = f64x2::splat(latest)
-            .mul(self.fiddle)
-            .sub(f64x2::from_array([oldest, 0.0]));
+        let batch = simd_swizzle!(f64x2::splat(latest), self.reson, [0, 1, 2, 3])
+            .mul(simd_swizzle!(self.fiddle, self.coeff4, [0, 1, 2, 3]))
+            .sub(simd_swizzle!(
+                f64x2::from_array([oldest, 0.0]),
+                self.coeff5,
+                [0, 1, 2, 3]
+            ));
 
-        let [comb_x, comb_y] = comb.to_array();
+        let comb = simd_swizzle!(batch, [0, 1]);
 
-        self.coeff1 = f64x2::splat(comb_x)
-            .mul(self.twiddle)
-            .add(f64x2::from_array([-comb_y, comb_y]).mul(self.flipped_twiddle))
+        let twiddled =
+            simd_swizzle!(comb, [0, 0, 1, 1]).mul(simd_swizzle!(self.twiddle, [0, 1, 1, 0]));
+
+        self.coeff1 = simd_swizzle!(twiddled, [0, 1])
+            .add(simd_swizzle!(twiddled, [2, 3]).mul(f64x2::from_array([-1.0, 1.0])))
             .sub(self.coeff2);
 
         self.coeff2 = comb;
 
-        self.coeff3 = self
-            .coeff1
-            .add(self.reson.mul(self.coeff4))
-            .sub(self.coeff5);
+        self.coeff3 = self.coeff1.add(simd_swizzle!(batch, [2, 3]));
 
         self.coeff5 = self.coeff4;
         self.coeff4 = self.coeff3;
 
-        self.coeff3
-            .mul(f64x2::splat(gain))
-            .div(f64x2::splat(period))
+        self.coeff3.mul(f64x2::splat(gain / period))
     }
     fn calculate_gainless(&mut self, latest: f64, oldest: f64, period: f64) -> Simd<f64, 2> {
-        let comb = f64x2::splat(latest)
-            .mul(self.fiddle)
-            .sub(f64x2::from_array([oldest, 0.0]));
+        let batch = simd_swizzle!(f64x2::splat(latest), self.reson, [0, 1, 2, 3])
+            .mul(simd_swizzle!(self.fiddle, self.coeff4, [0, 1, 2, 3]))
+            .sub(simd_swizzle!(
+                f64x2::from_array([oldest, 0.0]),
+                self.coeff5,
+                [0, 1, 2, 3]
+            ));
 
-        let [comb_x, comb_y] = comb.to_array();
+        let comb = simd_swizzle!(batch, [0, 1]);
 
-        self.coeff1 = f64x2::splat(comb_x)
-            .mul(self.twiddle)
-            .add(f64x2::from_array([-comb_y, comb_y]).mul(self.flipped_twiddle))
+        let twiddled =
+            simd_swizzle!(comb, [0, 0, 1, 1]).mul(simd_swizzle!(self.twiddle, [0, 1, 1, 0]));
+
+        self.coeff1 = simd_swizzle!(twiddled, [0, 1])
+            .add(simd_swizzle!(twiddled, [2, 3]).mul(f64x2::from_array([-1.0, 1.0])))
             .sub(self.coeff2);
 
         self.coeff2 = comb;
 
-        self.coeff3 = self
-            .coeff1
-            .add(self.reson.mul(self.coeff4))
-            .sub(self.coeff5);
+        self.coeff3 = self.coeff1.add(simd_swizzle!(batch, [2, 3]));
 
         self.coeff5 = self.coeff4;
         self.coeff4 = self.coeff3;
@@ -122,26 +127,33 @@ impl VQsDFTCoeffSet<2> {
 
 impl VQsDFTCoeffSet<4> {
     fn calculate_gainless(&mut self, latest: f64, oldest: f64, period: f64) -> Simd<f64, 4> {
-        let comb = f64x4::splat(latest)
-            .mul(self.fiddle)
-            .sub(f64x4::from_array([oldest, 0.0, oldest, 0.0]));
+        let batch = simd_swizzle!(f64x4::splat(latest), self.reson, [0, 1, 2, 3, 4, 5, 6, 7])
+            .mul(simd_swizzle!(
+                self.fiddle,
+                self.coeff4,
+                [0, 1, 2, 3, 4, 5, 6, 7]
+            ))
+            .sub(simd_swizzle!(
+                f64x4::from_array([oldest, 0.0, oldest, 0.0]),
+                self.coeff5,
+                [0, 1, 2, 3, 4, 5, 6, 7]
+            ));
 
-        let [comb_0_x, comb_0_y, comb_1_x, comb_1_y] = comb.to_array();
+        let comb = simd_swizzle!(batch, [0, 1, 2, 3]);
 
-        self.coeff1 = f64x4::from_array([comb_0_x, comb_0_x, comb_1_x, comb_1_x])
-            .mul(self.twiddle)
+        let twiddled = simd_swizzle!(comb, [0, 0, 2, 2, 1, 1, 3, 3])
+            .mul(simd_swizzle!(self.twiddle, [0, 1, 2, 3, 1, 0, 3, 2]));
+
+        self.coeff1 = simd_swizzle!(twiddled, [0, 1, 2, 3])
             .add(
-                f64x4::from_array([-comb_0_y, comb_0_y, -comb_1_y, comb_1_y])
-                    .mul(self.flipped_twiddle),
+                simd_swizzle!(twiddled, [4, 5, 6, 7])
+                    .mul(f64x4::from_array([-1.0, 1.0, -1.0, 1.0])),
             )
             .sub(self.coeff2);
 
         self.coeff2 = comb;
 
-        self.coeff3 = self
-            .coeff1
-            .add(self.reson.mul(self.coeff4))
-            .sub(self.coeff5);
+        self.coeff3 = self.coeff1.add(simd_swizzle!(batch, [4, 5, 6, 7]));
 
         self.coeff5 = self.coeff4;
         self.coeff4 = self.coeff3;
@@ -150,7 +162,7 @@ impl VQsDFTCoeffSet<4> {
     }
 }
 
-impl VQsDFTCoeffSet<6> {
+/*impl VQsDFTCoeffSet<6> {
     fn calculate(
         &mut self,
         latest: f64,
@@ -374,7 +386,7 @@ impl VQsDFTCoeffSet<18> {
 
         self.coeff3.mul(gain).div(Simd::<f64, 18>::splat(period))
     }
-}
+}*/
 
 impl VQsDFT {
     pub(super) fn new(
@@ -488,12 +500,6 @@ impl VQsDFT {
                                         f64::cos(twid_1),
                                         f64::sin(twid_1),
                                     ]),
-                                    flipped_twiddle: f64x4::from_array([
-                                        f64::sin(twid_0),
-                                        f64::cos(twid_0),
-                                        f64::sin(twid_1),
-                                        f64::cos(twid_1),
-                                    ]),
                                     fiddle: f64x4::from_array([
                                         f64::cos(fid_0),
                                         f64::sin(fid_0),
@@ -531,10 +537,6 @@ impl VQsDFT {
                                 period,
                                 VQsDFTCoeffSet {
                                     twiddle: f64x2::from_array([f64::cos(twid), f64::sin(twid)]),
-                                    flipped_twiddle: f64x2::from_array([
-                                        f64::sin(twid),
-                                        f64::cos(twid),
-                                    ]),
                                     fiddle: f64x2::from_array([f64::cos(fid), f64::sin(fid)]),
                                     reson: f64x2::splat(reson),
                                     coeff1: f64x2::splat(0.0),
@@ -547,7 +549,7 @@ impl VQsDFT {
                         })
                         .collect(),
                 )
-            } else if window == Window::Hann || window == Window::Hamming {
+            /*} else if window == Window::Hann || window == Window::Hamming {
                 VQsDFTCoeffWrapper::Window2Term((
                     Simd::<f64, 6>::from_array([
                         gains[0], gains[0], gains[1], gains[1], gains[2], gains[2],
@@ -794,7 +796,7 @@ impl VQsDFT {
                             )
                         })
                         .collect(),
-                ))
+                ))*/
             } else {
                 VQsDFTCoeffWrapper::ArbitraryWindow((
                     gains,
@@ -832,7 +834,6 @@ impl VQsDFT {
                                     .zip(fiddles.into_iter().zip(reson_coeffs))
                                     .map(|(twiddle, (fiddle, reson))| VQsDFTCoeffSet {
                                         twiddle,
-                                        flipped_twiddle: twiddle.reverse(),
                                         fiddle,
                                         reson: f64x2::splat(reson),
                                         coeff1: f64x2::splat(0.0),
@@ -865,7 +866,7 @@ impl VQsDFT {
                     coeff.reset();
                 });
             }
-            VQsDFTCoeffWrapper::Window2Term((_, coeffs)) => {
+            /*VQsDFTCoeffWrapper::Window2Term((_, coeffs)) => {
                 coeffs.iter_mut().for_each(|(_, coeff)| {
                     coeff.reset();
                 });
@@ -884,7 +885,7 @@ impl VQsDFT {
                 coeffs.iter_mut().for_each(|(_, coeff)| {
                     coeff.reset();
                 });
-            }
+            }*/
             VQsDFTCoeffWrapper::ArbitraryWindow((_, coeffs)) => {
                 coeffs.iter_mut().for_each(|(_, coeffs)| {
                     coeffs.iter_mut().for_each(|coeff| {
@@ -924,11 +925,10 @@ impl VQsDFT {
                             )
                         };
 
-                        let [coeff3_0_0, coeff3_0_1, coeff3_1_0, coeff3_1_1] =
-                            coeffs.calculate_gainless(latest, oldest, period).to_array();
+                        let result = coeffs.calculate_gainless(latest, oldest, period);
 
-                        *spectrum_data += f64x2::from_array([coeff3_0_0, coeff3_0_1])
-                            .mul(f64x2::from_array([coeff3_1_0, coeff3_1_1]))
+                        *spectrum_data += simd_swizzle!(result, [0, 1])
+                            .mul(simd_swizzle!(result, [2, 3]))
                             .neg()
                             .reduce_sum()
                             .max(0.0)
@@ -963,7 +963,7 @@ impl VQsDFT {
                     }
                 }
             }
-            VQsDFTCoeffWrapper::Window2Term((gains, coeffs)) => {
+            /*VQsDFTCoeffWrapper::Window2Term((gains, coeffs)) => {
                 let gains = *gains;
 
                 for sample in samples {
@@ -1106,7 +1106,7 @@ impl VQsDFT {
                         *spectrum_data += sum.mul(sum).reduce_sum().sqrt();
                     }
                 }
-            }
+            }*/
             VQsDFTCoeffWrapper::ArbitraryWindow((gains, coeffs)) => {
                 for sample in samples {
                     self.buffer_index =
