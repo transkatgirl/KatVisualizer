@@ -7,6 +7,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+mod gammatone;
 mod vqsdft;
 
 use vqsdft::{VQsDFT, Window};
@@ -73,7 +74,7 @@ impl BetterAnalyzer {
             config.end_frequency,
             |center| {
                 if config.erb_time_resolution {
-                    (24.7 * (0.00437 * center + 1.0)) / config.erb_bandwidth_divisor
+                    (24.7 + (0.108 * center)) / config.erb_bandwidth_divisor
                 } else {
                     center / config.q_time_resolution
                 }
@@ -115,6 +116,7 @@ impl BetterAnalyzer {
             Window::Hann,
             config.sample_rate as f64,
             config.nc_method,
+            false,
         );
 
         let masker = Masker::new(&frequency_bands);

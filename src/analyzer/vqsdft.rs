@@ -382,6 +382,7 @@ impl VQsDFT {
         window: Window,
         sample_rate: f64,
         use_nc: bool,
+        strict_nc: bool,
     ) -> Self {
         assert!(sample_rate > 0.0);
 
@@ -389,9 +390,16 @@ impl VQsDFT {
             .iter()
             .map(|x| {
                 let q = x.center / (x.high - x.low).abs();
-                let period = (sample_rate / x.center) * q;
+                let period = if strict_nc {
+                    // Alternate formula from https://arxiv.org/html/2410.07982v2#S3.E3
+                    (((x.center * 2.0) / (x.center * (1.0 / q))).round()
+                        * (sample_rate / (x.center * 2.0)))
+                        .round()
+                        .max(1.0)
+                } else {
+                    ((sample_rate / x.center) * q).ceil()
+                };
 
-                let period = period.ceil();
                 assert!(period >= 1.0);
 
                 period as usize
@@ -450,9 +458,15 @@ impl VQsDFT {
                         .iter()
                         .map(|x| {
                             let q = x.center / (x.high - x.low).abs();
-                            let period = (sample_rate / x.center) * q;
+                            let period = if strict_nc {
+                                (((x.center * 2.0) / (x.center * (1.0 / q))).round()
+                                    * (sample_rate / (x.center * 2.0)))
+                                    .round()
+                                    .max(1.0)
+                            } else {
+                                ((sample_rate / x.center) * q).ceil()
+                            };
 
-                            let period = period.ceil();
                             assert!(period >= 1.0 && period <= buffer_size_f64);
                             let q = (x.center * period) / sample_rate;
 
