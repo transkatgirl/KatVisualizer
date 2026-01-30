@@ -40,6 +40,12 @@ mimalloc = { version = "0.1.48", features = [
 ] }
 voracious_radix_sort = "1.2.0"
 rosc = "0.11.4"
+realfft = { version = "3.5.0", features = [
+	"avx",
+	"neon",
+	"sse",
+	"wasm_simd",
+] }
 
 [profile.dev]
 opt-level = 3
