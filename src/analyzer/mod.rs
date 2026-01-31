@@ -86,6 +86,8 @@ impl BetterAnalyzer {
 
         let band_count = frequency_bands.len();
 
+        assert!(band_count.is_multiple_of(64));
+
         let frequency_indices = frequency_bands
             .iter()
             .enumerate()
