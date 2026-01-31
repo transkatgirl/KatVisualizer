@@ -1,5 +1,6 @@
 use std::{
     collections::VecDeque,
+    f64::consts::{PI, SQRT_2},
     simd::{f64x64, num::SimdFloat},
     sync::Arc,
     time::Duration,
@@ -867,11 +868,13 @@ impl Masker {
 
 // ----- Below formula is based on https://stackoverflow.com/a/35614871 -----
 
+const NEG_SQRT_2: f64 = -SQRT_2;
+
 pub fn calculate_pan_and_volume_from_amplitude(
     left_amplitude: f64,
     right_amplitude: f64,
 ) -> (f64, f64) {
-    let ratio = left_amplitude / right_amplitude;
+    let ratio = left_amplitude.algebraic_div(right_amplitude);
 
     let pan = if ratio == 1.0 {
         0.0
@@ -882,14 +885,22 @@ pub fn calculate_pan_and_volume_from_amplitude(
     } else if ratio.is_nan() {
         0.0
     } else {
+        const COEFF: f64 = (180.0 / PI) / 22.5;
+
         (f64::atan(
-            (-f64::sqrt(2.0) * f64::sqrt(ratio * ratio + 1.0) + ratio + 1.0) / (ratio - 1.0),
+            (NEG_SQRT_2
+                .algebraic_mul(f64::sqrt(ratio.algebraic_mul(ratio).algebraic_add(1.0)))
+                .algebraic_add(ratio)
+                .algebraic_add(1.0))
+            .algebraic_div(ratio.algebraic_sub(1.0)),
         ))
-        .to_degrees()
-            / 22.5
+        .algebraic_mul(COEFF)
     };
 
-    (pan, amplitude_to_dbfs(left_amplitude + right_amplitude))
+    (
+        pan,
+        amplitude_to_dbfs(left_amplitude.algebraic_add(right_amplitude)),
+    )
 }
 
 // ----- Below formulas are taken from ISO 226:2023 -----
@@ -1032,12 +1043,18 @@ pub fn dbfs_to_amplitude(decibels: f64) -> f64 {
 
 #[inline(always)]
 pub fn map_value_f64(x: f64, min: f64, max: f64, target_min: f64, target_max: f64) -> f64 {
-    (x - min) / (max - min) * (target_max - target_min) + target_min
+    (x.algebraic_sub(min))
+        .algebraic_div(max.algebraic_sub(min))
+        .algebraic_mul(target_max.algebraic_sub(target_min))
+        .algebraic_add(target_min)
 }
 
 #[inline(always)]
 pub fn map_value_f32(x: f32, min: f32, max: f32, target_min: f32, target_max: f32) -> f32 {
-    (x - min) / (max - min) * (target_max - target_min) + target_min
+    (x.algebraic_sub(min))
+        .algebraic_div(max.algebraic_sub(min))
+        .algebraic_mul(target_max.algebraic_sub(target_min))
+        .algebraic_add(target_min)
 }
 
 pub enum FrequencyScale {
