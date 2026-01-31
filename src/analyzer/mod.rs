@@ -914,12 +914,16 @@ impl PrecomputedNormalizer {
         }
     }
     fn spl_to_phon(&self, db_spl: f64) -> f64 {
-        NORM_MULTIPLE
-            * f64::log10(
-                ((10.0_f64.powf(self.alpha_f * ((db_spl + self.l_u) / 10.0)) - self.param_1)
-                    / self.param_2)
-                    + NORM_OFFSET,
-            )
+        NORM_MULTIPLE.algebraic_mul(f64::log10(
+            ((10.0_f64
+                .powf(
+                    self.alpha_f
+                        .algebraic_mul((db_spl.algebraic_add(self.l_u)).algebraic_div(10.0)),
+                )
+                .algebraic_sub(self.param_1))
+            .algebraic_div(self.param_2))
+            .algebraic_add(NORM_OFFSET),
+        ))
     }
 }
 
@@ -1018,12 +1022,12 @@ fn approximate_hearing_threshold(frequency: f64) -> f64 {
 
 #[inline(always)]
 pub fn amplitude_to_dbfs(amplitude: f64) -> f64 {
-    20.0 * f64::log10(amplitude)
+    20.0_f64.algebraic_mul(f64::log10(amplitude))
 }
 
 #[inline(always)]
 pub fn dbfs_to_amplitude(decibels: f64) -> f64 {
-    10.0_f64.powf(decibels / 20.0)
+    10.0_f64.powf(decibels.algebraic_div(20.0))
 }
 
 #[inline(always)]
