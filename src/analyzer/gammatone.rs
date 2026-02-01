@@ -36,13 +36,11 @@ impl GammatoneFilterbank {
                 for (filter, spectrum_data) in filter_chunk.iter_mut().zip(spectrum_chunk) {
                     let result = filter.process(sample);
 
-                    *spectrum_data = spectrum_data.algebraic_add(
-                        result
-                            .0
-                            .algebraic_mul(result.0)
-                            .algebraic_add(result.1.algebraic_mul(result.1))
-                            .sqrt(),
-                    );
+                    *spectrum_data = result
+                        .0
+                        .algebraic_mul(result.0)
+                        .algebraic_add(result.1.algebraic_mul(result.1))
+                        .sqrt();
                 }
             }
         }
