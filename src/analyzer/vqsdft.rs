@@ -1,9 +1,7 @@
 use std::{
     f64::consts::PI,
     ops::{Add, AddAssign, Div, Mul, Neg, Sub},
-    simd::{
-        LaneCount, Simd, SupportedLaneCount, f64x2, f64x4, f64x64, num::SimdFloat, simd_swizzle,
-    },
+    simd::{Simd, f64x2, f64x4, f64x64, num::SimdFloat, simd_swizzle},
 };
 
 use super::FrequencyBand;
@@ -41,10 +39,7 @@ enum VQsDFTCoeffWrapper {
 }
 
 #[derive(Default, Clone)]
-struct VQsDFTCoeffSet<const N: usize>
-where
-    LaneCount<N>: SupportedLaneCount,
-{
+struct VQsDFTCoeffSet<const N: usize> {
     twiddle: Simd<f64, N>,
     fiddle: Simd<f64, N>,
     reson: Simd<f64, N>,
@@ -56,10 +51,7 @@ where
     period_gain: Simd<f64, N>,
 }
 
-impl<const N: usize> VQsDFTCoeffSet<N>
-where
-    LaneCount<N>: SupportedLaneCount,
-{
+impl<const N: usize> VQsDFTCoeffSet<N> {
     fn reset(&mut self) {
         self.coeff1 = Simd::<f64, N>::splat(0.0);
         self.coeff2 = Simd::<f64, N>::splat(0.0);
