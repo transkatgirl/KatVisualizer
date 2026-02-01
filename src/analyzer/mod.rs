@@ -247,18 +247,20 @@ impl BetterAnalysis {
 
         let new_length = left.raw_analysis().len();
 
-        let mut sum = 0.0;
+        let mut sum: f64 = 0.0;
         self.max = f32::NEG_INFINITY;
 
-        if left.config.masking {
-            if self.data.len() != new_length {
-                self.masking.clear();
+        if self.data.len() != new_length {
+            self.data.clear();
+            self.masking.clear();
 
-                for _ in 0..new_length {
-                    self.masking.push((0.0, 0.0));
-                }
+            for _ in 0..new_length {
+                self.data.push((0.0, 0.0));
+                self.masking.push((0.0, 0.0));
             }
+        }
 
+        if left.config.masking {
             let masking_data = left
                 .raw_masking()
                 .iter()
@@ -266,14 +268,14 @@ impl BetterAnalysis {
                 .zip(right.raw_masking().iter().copied())
                 .map(|(left, right)| calculate_pan_and_volume_from_amplitude(left, right));
 
-            let mut masking_sum = 0.0;
+            let mut masking_sum: f64 = 0.0;
 
             if let Some(listening_volume) = normalization_volume {
                 let hearing_threshold = left
                     .hearing_threshold
                     .iter()
                     .copied()
-                    .map(|h| h - listening_volume);
+                    .map(|h| h.algebraic_sub(listening_volume));
 
                 left.normalizers
                     .iter()
@@ -281,136 +283,86 @@ impl BetterAnalysis {
                     .for_each(
                         |(normalizer, (threshold, ((mask_pan, mask_volume), masking_result)))| {
                             let masking_norm_db = normalizer
-                                .spl_to_phon((mask_volume + gain).max(threshold) + listening_volume)
+                                .spl_to_phon(
+                                    (mask_volume.algebraic_add(gain))
+                                        .max(threshold)
+                                        .algebraic_add(listening_volume),
+                                )
                                 //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                                 .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                                - listening_volume;
+                                .algebraic_sub(listening_volume);
 
                             *masking_result = (mask_pan as f32, masking_norm_db as f32);
-                            masking_sum += dbfs_to_amplitude(masking_norm_db);
+                            masking_sum =
+                                masking_sum.algebraic_add(dbfs_to_amplitude(masking_norm_db));
                         },
                     );
             } else {
                 masking_data.zip(self.masking.iter_mut()).for_each(
                     |((mask_pan, mask_volume), masking_result)| {
-                        let masking_norm_db = mask_volume + gain;
+                        let masking_norm_db = mask_volume.algebraic_add(gain);
 
                         *masking_result = (mask_pan as f32, masking_norm_db as f32);
-                        masking_sum += dbfs_to_amplitude(masking_norm_db);
+                        masking_sum = masking_sum.algebraic_add(dbfs_to_amplitude(masking_norm_db));
                     },
                 );
             }
 
-            self.masking_mean = amplitude_to_dbfs(masking_sum / self.masking.len() as f64) as f32;
-        } else if self.data.len() != new_length {
-            self.masking.clear();
-
-            for _ in 0..new_length {
-                self.masking.push((0.0, f32::NEG_INFINITY));
-            }
-
-            self.masking_mean = f32::NEG_INFINITY;
+            self.masking_mean =
+                amplitude_to_dbfs(masking_sum.algebraic_div(self.masking.len() as f64)) as f32;
         } else {
             self.masking.fill((0.0, f32::NEG_INFINITY));
             self.masking_mean = f32::NEG_INFINITY;
         }
 
-        if self.data.len() == new_length {
-            if let Some(listening_volume) = normalization_volume {
-                for ((left, right), (normalizer, result)) in left
-                    .raw_analysis()
-                    .iter()
-                    .copied()
-                    .zip(right.raw_analysis().iter().copied())
-                    .zip(left.normalizers.iter().zip(self.data.iter_mut()))
-                {
-                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
+        if let Some(listening_volume) = normalization_volume {
+            for ((left, right), (normalizer, result)) in left
+                .raw_analysis()
+                .iter()
+                .copied()
+                .zip(right.raw_analysis().iter().copied())
+                .zip(left.normalizers.iter().zip(self.data.iter_mut()))
+            {
+                let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
 
-                    let volume = normalizer
-                        .spl_to_phon(volume + gain + listening_volume)
-                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                        .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                        - listening_volume;
+                let volume = normalizer
+                    .spl_to_phon(volume.algebraic_add(gain).algebraic_add(listening_volume))
+                    //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                    .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                    .algebraic_sub(listening_volume);
 
-                    sum += dbfs_to_amplitude(volume);
-                    let volume = volume as f32;
+                sum = sum.algebraic_add(dbfs_to_amplitude(volume));
+                let volume = volume as f32;
 
-                    *result = (pan as f32, volume);
-                    self.max = self.max.max(volume);
-                }
-            } else {
-                for (left, (right, result)) in left.raw_analysis().iter().copied().zip(
-                    right
-                        .raw_analysis()
-                        .iter()
-                        .copied()
-                        .zip(self.data.iter_mut()),
-                ) {
-                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
-                    let volume = volume + gain;
-
-                    sum += dbfs_to_amplitude(volume);
-                    let volume = volume as f32;
-
-                    *result = (pan as f32, volume);
-                    self.max = self.max.max(volume);
-                }
+                *result = (pan as f32, volume);
+                self.max = self.max.max(volume);
             }
         } else {
-            assert!(self.data.capacity() >= new_length);
-
-            self.data.clear();
-
-            if let Some(listening_volume) = normalization_volume {
-                for ((left, right), normalizer) in left
+            for (left, (right, result)) in left.raw_analysis().iter().copied().zip(
+                right
                     .raw_analysis()
                     .iter()
                     .copied()
-                    .zip(right.raw_analysis().iter().copied())
-                    .zip(left.normalizers.iter())
-                {
-                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
+                    .zip(self.data.iter_mut()),
+            ) {
+                let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
+                let volume = volume.algebraic_add(gain);
 
-                    let volume = normalizer
-                        .spl_to_phon(volume + gain + listening_volume)
-                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                        .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                        - listening_volume;
+                sum = sum.algebraic_add(dbfs_to_amplitude(volume));
+                let volume = volume as f32;
 
-                    sum += dbfs_to_amplitude(volume);
-                    let volume = volume as f32;
-
-                    self.data.push((pan as f32, volume));
-                    self.max = self.max.max(volume);
-                }
-            } else {
-                let gain_amplitude = dbfs_to_amplitude(gain);
-
-                for (left, right) in left
-                    .raw_analysis()
-                    .iter()
-                    .copied()
-                    .zip(right.raw_analysis().iter().copied())
-                {
-                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
-                    let volume = volume + gain;
-
-                    sum += (left + right) * gain_amplitude;
-                    let volume = volume as f32;
-
-                    self.data.push((pan as f32, volume));
-                    self.max = self.max.max(volume);
-                }
+                *result = (pan as f32, volume);
+                self.max = self.max.max(volume);
             }
         }
 
         if let Some(listening_volume) = normalization_volume {
-            self.min = (3.0 - listening_volume) as f32;
+            self.min = (3.0_f64.algebraic_sub(listening_volume)) as f32;
         } else {
             self.min = f32::NEG_INFINITY;
         }
 
-        self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
+        self.mean = amplitude_to_dbfs(sum.algebraic_div(self.data.len() as f64)) as f32;
 
         self.duration = duration;
     }
@@ -423,33 +375,35 @@ impl BetterAnalysis {
     ) {
         let new_length = center.raw_analysis().len();
 
-        let mut sum = 0.0;
+        let mut sum: f64 = 0.0;
         self.max = f32::NEG_INFINITY;
 
-        if center.config.masking {
-            if self.data.len() != new_length {
-                self.masking.clear();
+        if self.data.len() != new_length {
+            self.data.clear();
+            self.masking.clear();
 
-                for _ in 0..new_length {
-                    self.masking.push((0.0, 0.0));
-                }
+            for _ in 0..new_length {
+                self.data.push((0.0, 0.0));
+                self.masking.push((0.0, 0.0));
             }
+        }
 
+        if center.config.masking {
             let masking_data = center
                 .raw_masking()
                 .iter()
                 .copied()
-                .map(|amplitude| amplitude * 2.0);
+                .map(|amplitude| amplitude.algebraic_mul(2.0));
 
             let gain_amplitude = dbfs_to_amplitude(gain);
-            let mut masking_sum = 0.0;
+            let mut masking_sum: f64 = 0.0;
 
             if let Some(listening_volume) = normalization_volume {
                 let hearing_threshold = center
                     .hearing_threshold
                     .iter()
                     .copied()
-                    .map(|h| h - listening_volume);
+                    .map(|h| h.algebraic_sub(listening_volume));
 
                 center
                     .normalizers
@@ -459,125 +413,84 @@ impl BetterAnalysis {
                         |(normalizer, (threshold, (mask_amplitude, masking_result)))| {
                             let masking_norm_db = normalizer
                                 .spl_to_phon(
-                                    amplitude_to_dbfs(mask_amplitude * gain_amplitude)
+                                    amplitude_to_dbfs(mask_amplitude.algebraic_mul(gain_amplitude))
                                         .max(threshold)
-                                        + listening_volume,
+                                        .algebraic_add(listening_volume),
                                 )
                                 //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                                 .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                                - listening_volume;
+                                .algebraic_sub(listening_volume);
 
                             *masking_result = (0.0, masking_norm_db as f32);
-                            masking_sum += dbfs_to_amplitude(masking_norm_db);
+                            masking_sum =
+                                masking_sum.algebraic_add(dbfs_to_amplitude(masking_norm_db));
                         },
                     );
             } else {
                 masking_data.zip(self.masking.iter_mut()).for_each(
                     |(mask_amplitude, masking_result)| {
-                        let masking_amplitude = mask_amplitude * gain_amplitude;
+                        let masking_amplitude = mask_amplitude.algebraic_mul(gain_amplitude);
 
                         *masking_result = (0.0, amplitude_to_dbfs(masking_amplitude) as f32);
-                        masking_sum += masking_amplitude;
+                        masking_sum = mask_amplitude.algebraic_add(masking_amplitude);
                     },
                 );
             }
 
-            self.masking_mean = amplitude_to_dbfs(masking_sum / self.masking.len() as f64) as f32;
-        } else if self.data.len() != new_length {
-            self.masking.clear();
-
-            for _ in 0..new_length {
-                self.masking.push((0.0, f32::NEG_INFINITY));
-            }
-
-            self.masking_mean = f32::NEG_INFINITY;
+            self.masking_mean =
+                amplitude_to_dbfs(masking_sum.algebraic_div(self.masking.len() as f64)) as f32;
         } else {
             self.masking.fill((0.0, f32::NEG_INFINITY));
             self.masking_mean = f32::NEG_INFINITY;
         }
 
-        if self.data.len() == new_length {
-            if let Some(listening_volume) = normalization_volume {
-                for (amplitude, (normalizer, result)) in center
-                    .raw_analysis()
-                    .iter()
-                    .copied()
-                    .zip(center.normalizers.iter().zip(self.data.iter_mut()))
-                {
-                    let volume = normalizer
-                        .spl_to_phon(amplitude_to_dbfs(amplitude * 2.0) + gain + listening_volume)
-                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                        .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                        - listening_volume;
+        if let Some(listening_volume) = normalization_volume {
+            for (amplitude, (normalizer, result)) in center
+                .raw_analysis()
+                .iter()
+                .copied()
+                .zip(center.normalizers.iter().zip(self.data.iter_mut()))
+            {
+                let volume = normalizer
+                    .spl_to_phon(
+                        amplitude_to_dbfs(amplitude.algebraic_mul(2.0))
+                            .algebraic_add(gain)
+                            .algebraic_add(listening_volume),
+                    )
+                    //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                    .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                    .algebraic_sub(listening_volume);
 
-                    sum += dbfs_to_amplitude(volume);
-                    let volume = volume as f32;
+                sum = sum.algebraic_add(dbfs_to_amplitude(volume));
+                let volume = volume as f32;
 
-                    *result = (0.0, volume);
-                    self.max = self.max.max(volume);
-                }
-            } else {
-                for (amplitude, result) in center
-                    .raw_analysis()
-                    .iter()
-                    .copied()
-                    .zip(self.data.iter_mut())
-                {
-                    let volume = amplitude_to_dbfs(amplitude * 2.0) + gain;
-
-                    sum += dbfs_to_amplitude(volume);
-                    let volume = volume as f32;
-
-                    *result = (0.0, volume);
-                    self.max = self.max.max(volume);
-                }
+                *result = (0.0, volume);
+                self.max = self.max.max(volume);
             }
         } else {
-            assert!(self.data.capacity() >= new_length);
+            for (amplitude, result) in center
+                .raw_analysis()
+                .iter()
+                .copied()
+                .zip(self.data.iter_mut())
+            {
+                let volume = amplitude_to_dbfs(amplitude.algebraic_mul(2.0)).algebraic_add(gain);
 
-            self.data.clear();
+                sum = sum.algebraic_add(dbfs_to_amplitude(volume));
+                let volume = volume as f32;
 
-            if let Some(listening_volume) = normalization_volume {
-                for (amplitude, normalizer) in center
-                    .raw_analysis()
-                    .iter()
-                    .copied()
-                    .zip(center.normalizers.iter())
-                {
-                    let volume = normalizer
-                        .spl_to_phon(amplitude_to_dbfs(amplitude * 2.0) + gain + listening_volume)
-                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                        .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                        - listening_volume;
-
-                    sum += dbfs_to_amplitude(volume);
-                    let volume = volume as f32;
-
-                    self.data.push((0.0, volume));
-                    self.max = self.max.max(volume);
-                }
-            } else {
-                let gain_amplitude = dbfs_to_amplitude(gain);
-
-                for amplitude in center.raw_analysis().iter().copied() {
-                    let amplitude = amplitude * 2.0 * gain_amplitude;
-
-                    sum += amplitude;
-                    let volume = amplitude_to_dbfs(amplitude) as f32;
-
-                    self.data.push((0.0, volume));
-                    self.max = self.max.max(volume);
-                }
+                *result = (0.0, volume);
+                self.max = self.max.max(volume);
             }
         }
 
         if let Some(listening_volume) = normalization_volume {
-            self.min = (3.0 - listening_volume) as f32;
+            self.min = (3.0_f64.algebraic_sub(listening_volume)) as f32;
         } else {
             self.min = f32::NEG_INFINITY;
         }
 
-        self.mean = amplitude_to_dbfs(sum / self.data.len() as f64) as f32;
+        self.mean = amplitude_to_dbfs(sum.algebraic_div(self.data.len() as f64)) as f32;
 
         self.duration = duration;
     }
