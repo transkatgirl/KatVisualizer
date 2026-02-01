@@ -1,5 +1,3 @@
-use std::{ops::Mul, simd::f64x64};
-
 use super::{FrequencyBand, FrequencyScale, amplitude_to_dbfs, dbfs_to_amplitude};
 
 // ----- Below algorithms are taken from https://www.gammaelectronics.xyz/poda_6e_11b.html -----
@@ -166,11 +164,11 @@ impl Masker {
 pub(super) fn bulk_multiply(data: &mut [f64], multiplier: f64) {
     assert!(data.len().is_multiple_of(64));
 
-    let multipler = f64x64::splat(multiplier);
-
     unsafe { data.as_chunks_unchecked_mut::<64>() }
         .iter_mut()
         .for_each(|chunk| {
-            *chunk = f64x64::from_array(*chunk).mul(multipler).to_array();
+            for i in chunk {
+                *i = i.algebraic_mul(multiplier);
+            }
         });
 }

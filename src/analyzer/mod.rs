@@ -1,7 +1,6 @@
 use std::{
     collections::VecDeque,
     f64::consts::{PI, SQRT_2},
-    simd::{f64x64, num::SimdFloat},
     sync::Arc,
     time::Duration,
 };
@@ -181,10 +180,10 @@ impl BetterAnalyzer {
             unsafe { self.transform.spectrum_data.as_chunks_unchecked_mut::<64>() }
                 .iter_mut()
                 .zip(unsafe { self.masking.as_chunks_unchecked::<64>() })
-                .for_each(|(spectrum, masking)| {
-                    *spectrum = f64x64::from_array(*spectrum)
-                        .simd_max(f64x64::from_array(*masking))
-                        .to_array();
+                .for_each(|(spectrum_chunk, masking_chunk)| {
+                    for (spectrum, masking) in spectrum_chunk.iter_mut().zip(masking_chunk) {
+                        *spectrum = spectrum.max(*masking);
+                    }
                 });
         }
     }
