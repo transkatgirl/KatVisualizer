@@ -1,8 +1,4 @@
-use std::{
-    f64::consts::PI,
-    ops::{Add, AddAssign, Div, Mul, Neg, Sub},
-    simd::{Simd, f64x2, f64x4, f64x64, num::SimdFloat, simd_swizzle},
-};
+use std::f64::consts::PI;
 
 use super::FrequencyBand;
 
@@ -29,364 +25,70 @@ pub(super) struct VQsDFT {
 
 #[derive(Clone)]
 enum VQsDFTCoeffWrapper {
-    Rectangular(Vec<(isize, VQsDFTCoeffSet<2>)>),
-    NC(Vec<(isize, VQsDFTCoeffSet<4>)>),
-    Window2Term(Vec<(isize, VQsDFTCoeffSet<6>)>),
-    Window3Term(Vec<(isize, VQsDFTCoeffSet<10>)>),
-    Window4Term(Vec<(isize, VQsDFTCoeffSet<14>)>),
-    Window5Term(Vec<(isize, VQsDFTCoeffSet<18>)>),
-    ArbitraryWindow(Vec<(isize, Vec<VQsDFTCoeffSet<2>>)>),
+    Rectangular(Vec<(isize, VQsDFTCoeffSet)>),
+    NC(Vec<(isize, [VQsDFTCoeffSet; 2])>),
+    Window2Term(Vec<(isize, [VQsDFTCoeffSet; 3])>),
+    Window3Term(Vec<(isize, [VQsDFTCoeffSet; 5])>),
+    Window4Term(Vec<(isize, [VQsDFTCoeffSet; 7])>),
+    Window5Term(Vec<(isize, [VQsDFTCoeffSet; 9])>),
+    ArbitraryWindow(Vec<(isize, Vec<VQsDFTCoeffSet>)>),
 }
 
 #[derive(Default, Clone)]
-struct VQsDFTCoeffSet<const N: usize> {
-    twiddle: Simd<f64, N>,
-    fiddle: Simd<f64, N>,
-    reson: Simd<f64, N>,
-    coeff1: Simd<f64, N>,
-    coeff2: Simd<f64, N>,
-    coeff3: Simd<f64, N>,
-    coeff4: Simd<f64, N>,
-    coeff5: Simd<f64, N>,
-    period_gain: Simd<f64, N>,
+struct VQsDFTCoeffSet {
+    twiddle: (f64, f64),
+    fiddle: (f64, f64),
+    reson: f64,
+    coeff1: (f64, f64),
+    coeff2: (f64, f64),
+    coeff3: (f64, f64),
+    coeff4: (f64, f64),
+    coeff5: (f64, f64),
+    period_gain: f64,
 }
 
-impl<const N: usize> VQsDFTCoeffSet<N> {
+impl VQsDFTCoeffSet {
     fn reset(&mut self) {
-        self.coeff1 = Simd::<f64, N>::splat(0.0);
-        self.coeff2 = Simd::<f64, N>::splat(0.0);
-        self.coeff3 = Simd::<f64, N>::splat(0.0);
-        self.coeff4 = Simd::<f64, N>::splat(0.0);
-        self.coeff5 = Simd::<f64, N>::splat(0.0);
+        self.coeff1 = (0.0, 0.0);
+        self.coeff2 = (0.0, 0.0);
+        self.coeff3 = (0.0, 0.0);
+        self.coeff4 = (0.0, 0.0);
+        self.coeff5 = (0.0, 0.0);
     }
-}
+    #[inline(always)]
+    fn calculate(&mut self, latest: f64, oldest: f64) -> (f64, f64) {
+        let comb_x = latest.algebraic_mul(self.fiddle.0).algebraic_sub(oldest);
+        let comb_y = latest.algebraic_mul(self.fiddle.1);
 
-impl VQsDFTCoeffSet<2> {
-    fn calculate(&mut self, latest: f64, oldest: f64) -> Simd<f64, 2> {
-        let batch = simd_swizzle!(f64x2::splat(latest), self.reson, [0, 1, 2, 3])
-            .mul(simd_swizzle!(self.fiddle, self.coeff4, [0, 1, 2, 3]))
-            .sub(simd_swizzle!(
-                f64x2::from_array([oldest, 0.0]),
-                self.coeff5,
-                [0, 1, 2, 3]
-            ));
+        self.coeff1.0 = comb_x
+            .algebraic_mul(self.twiddle.0)
+            .algebraic_sub(comb_y.algebraic_mul(self.twiddle.1))
+            .algebraic_sub(self.coeff2.0);
+        self.coeff1.1 = comb_x
+            .algebraic_mul(self.twiddle.1)
+            .algebraic_add(comb_y.algebraic_mul(self.twiddle.0))
+            .algebraic_sub(self.coeff2.1);
 
-        let comb = simd_swizzle!(batch, [0, 1]);
+        self.coeff2 = (comb_x, comb_y);
 
-        let twiddled =
-            simd_swizzle!(comb, [0, 0, 1, 1]).mul(simd_swizzle!(self.twiddle, [0, 1, 1, 0]));
-
-        self.coeff1 = simd_swizzle!(twiddled, [0, 1])
-            .add(simd_swizzle!(twiddled, [2, 3]).mul(f64x2::from_array([-1.0, 1.0])))
-            .sub(self.coeff2);
-
-        self.coeff2 = comb;
-
-        self.coeff3 = self.coeff1.add(simd_swizzle!(batch, [2, 3]));
+        self.coeff3.0 = self
+            .coeff1
+            .0
+            .algebraic_add(self.reson.algebraic_mul(self.coeff4.0))
+            .algebraic_sub(self.coeff5.0);
+        self.coeff3.1 = self
+            .coeff1
+            .1
+            .algebraic_add(self.reson.algebraic_mul(self.coeff4.1))
+            .algebraic_sub(self.coeff5.1);
 
         self.coeff5 = self.coeff4;
         self.coeff4 = self.coeff3;
 
-        self.coeff3.mul(self.period_gain)
-    }
-}
-
-impl VQsDFTCoeffSet<4> {
-    fn calculate(&mut self, latest: f64, oldest: f64) -> Simd<f64, 4> {
-        let batch = simd_swizzle!(f64x4::splat(latest), self.reson, [0, 1, 2, 3, 4, 5, 6, 7])
-            .mul(simd_swizzle!(
-                self.fiddle,
-                self.coeff4,
-                [0, 1, 2, 3, 4, 5, 6, 7]
-            ))
-            .sub(simd_swizzle!(
-                f64x4::from_array([oldest, 0.0, oldest, 0.0]),
-                self.coeff5,
-                [0, 1, 2, 3, 4, 5, 6, 7]
-            ));
-
-        let comb = simd_swizzle!(batch, [0, 1, 2, 3]);
-
-        let twiddled = simd_swizzle!(comb, [0, 0, 2, 2, 1, 1, 3, 3])
-            .mul(simd_swizzle!(self.twiddle, [0, 1, 2, 3, 1, 0, 3, 2]));
-
-        self.coeff1 = simd_swizzle!(twiddled, [0, 1, 2, 3])
-            .add(
-                simd_swizzle!(twiddled, [4, 5, 6, 7])
-                    .mul(f64x4::from_array([-1.0, 1.0, -1.0, 1.0])),
-            )
-            .sub(self.coeff2);
-
-        self.coeff2 = comb;
-
-        self.coeff3 = self.coeff1.add(simd_swizzle!(batch, [4, 5, 6, 7]));
-
-        self.coeff5 = self.coeff4;
-        self.coeff4 = self.coeff3;
-
-        self.coeff3.mul(self.period_gain)
-    }
-}
-
-impl VQsDFTCoeffSet<6> {
-    fn calculate(&mut self, latest: f64, oldest: f64) -> Simd<f64, 6> {
-        let batch = simd_swizzle!(
-            Simd::<f64, 6>::splat(latest),
-            self.reson,
-            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        (
+            self.coeff3.0.algebraic_mul(self.period_gain),
+            self.coeff3.1.algebraic_mul(self.period_gain),
         )
-        .mul(simd_swizzle!(
-            self.fiddle,
-            self.coeff4,
-            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-        ))
-        .sub(simd_swizzle!(
-            Simd::<f64, 6>::from_array([oldest, 0.0, oldest, 0.0, oldest, 0.0]),
-            self.coeff5,
-            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-        ));
-
-        let comb = simd_swizzle!(batch, [0, 1, 2, 3, 4, 5]);
-
-        let twiddled = simd_swizzle!(comb, [0, 0, 2, 2, 4, 4, 1, 1, 3, 3, 5, 5]).mul(
-            simd_swizzle!(self.twiddle, [0, 1, 2, 3, 4, 5, 1, 0, 3, 2, 5, 4]),
-        );
-
-        self.coeff1 = simd_swizzle!(twiddled, [0, 1, 2, 3, 4, 5])
-            .add(
-                simd_swizzle!(twiddled, [6, 7, 8, 9, 10, 11]).mul(Simd::<f64, 6>::from_array([
-                    -1.0, 1.0, -1.0, 1.0, -1.0, 1.0,
-                ])),
-            )
-            .sub(self.coeff2);
-
-        self.coeff2 = comb;
-
-        self.coeff3 = self.coeff1.add(simd_swizzle!(batch, [6, 7, 8, 9, 10, 11]));
-
-        self.coeff5 = self.coeff4;
-        self.coeff4 = self.coeff3;
-
-        self.coeff3.mul(self.period_gain)
-    }
-}
-
-impl VQsDFTCoeffSet<10> {
-    fn calculate(&mut self, latest: f64, oldest: f64) -> Simd<f64, 10> {
-        let batch = simd_swizzle!(
-            Simd::<f64, 10>::splat(latest),
-            self.reson,
-            [
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
-            ]
-        )
-        .mul(simd_swizzle!(
-            self.fiddle,
-            self.coeff4,
-            [
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
-            ]
-        ))
-        .sub(simd_swizzle!(
-            Simd::<f64, 10>::from_array([
-                oldest, 0.0, oldest, 0.0, oldest, 0.0, oldest, 0.0, oldest, 0.0
-            ]),
-            self.coeff5,
-            [
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
-            ]
-        ));
-
-        let comb = simd_swizzle!(batch, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-
-        let twiddled = simd_swizzle!(
-            comb,
-            [0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 1, 1, 3, 3, 5, 5, 7, 7, 9, 9]
-        )
-        .mul(simd_swizzle!(
-            self.twiddle,
-            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0, 3, 2, 5, 4, 7, 6, 9, 8]
-        ));
-
-        self.coeff1 =
-            simd_swizzle!(twiddled, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
-                .add(
-                    simd_swizzle!(twiddled, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]).mul(
-                        Simd::<f64, 10>::from_array([
-                            -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0,
-                        ]),
-                    ),
-                )
-                .sub(self.coeff2);
-
-        self.coeff2 = comb;
-
-        self.coeff3 = self.coeff1.add(simd_swizzle!(
-            batch,
-            [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
-        ));
-
-        self.coeff5 = self.coeff4;
-        self.coeff4 = self.coeff3;
-
-        self.coeff3.mul(self.period_gain)
-    }
-}
-
-impl VQsDFTCoeffSet<14> {
-    fn calculate(&mut self, latest: f64, oldest: f64) -> Simd<f64, 14> {
-        let batch = simd_swizzle!(
-            Simd::<f64, 14>::splat(latest),
-            self.reson,
-            [
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27
-            ]
-        )
-        .mul(simd_swizzle!(
-            self.fiddle,
-            self.coeff4,
-            [
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27
-            ]
-        ))
-        .sub(simd_swizzle!(
-            Simd::<f64, 14>::from_array([
-                oldest, 0.0, oldest, 0.0, oldest, 0.0, oldest, 0.0, oldest, 0.0, oldest, 0.0,
-                oldest, 0.0
-            ]),
-            self.coeff5,
-            [
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27
-            ]
-        ));
-
-        let comb = simd_swizzle!(batch, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
-
-        let twiddled = simd_swizzle!(
-            comb,
-            [
-                0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 1, 1, 3, 3, 5, 5, 7, 7, 9, 9, 11, 11,
-                13, 13
-            ]
-        )
-        .mul(simd_swizzle!(
-            self.twiddle,
-            [
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10,
-                13, 12
-            ]
-        ));
-
-        self.coeff1 = simd_swizzle!(twiddled, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
-            .add(
-                simd_swizzle!(
-                    twiddled,
-                    [14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]
-                )
-                .mul(Simd::<f64, 14>::from_array([
-                    -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0,
-                ])),
-            )
-            .sub(self.coeff2);
-
-        self.coeff2 = comb;
-
-        self.coeff3 = self.coeff1.add(simd_swizzle!(
-            batch,
-            [14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]
-        ));
-
-        self.coeff5 = self.coeff4;
-        self.coeff4 = self.coeff3;
-
-        self.coeff3.mul(self.period_gain)
-    }
-}
-
-impl VQsDFTCoeffSet<18> {
-    fn calculate(&mut self, latest: f64, oldest: f64) -> Simd<f64, 18> {
-        let batch = simd_swizzle!(
-            Simd::<f64, 18>::splat(latest),
-            self.reson,
-            [
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35
-            ]
-        )
-        .mul(simd_swizzle!(
-            self.fiddle,
-            self.coeff4,
-            [
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35
-            ]
-        ))
-        .sub(simd_swizzle!(
-            Simd::<f64, 18>::from_array([
-                oldest, 0.0, oldest, 0.0, oldest, 0.0, oldest, 0.0, oldest, 0.0, oldest, 0.0,
-                oldest, 0.0, oldest, 0.0, oldest, 0.0
-            ]),
-            self.coeff5,
-            [
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35
-            ]
-        ));
-
-        let comb = simd_swizzle!(
-            batch,
-            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
-        );
-
-        let twiddled = simd_swizzle!(
-            comb,
-            [
-                0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 1, 1, 3, 3, 5, 5, 7,
-                7, 9, 9, 11, 11, 13, 13, 15, 15, 17, 17
-            ]
-        )
-        .mul(simd_swizzle!(
-            self.twiddle,
-            [
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 1, 0, 3, 2, 5, 4, 7,
-                6, 9, 8, 11, 10, 13, 12, 15, 14, 17, 16
-            ]
-        ));
-
-        self.coeff1 = simd_swizzle!(
-            twiddled,
-            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
-        )
-        .add(
-            simd_swizzle!(
-                twiddled,
-                [
-                    18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35
-                ]
-            )
-            .mul(Simd::<f64, 18>::from_array([
-                -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0,
-                1.0, -1.0, 1.0,
-            ])),
-        )
-        .sub(self.coeff2);
-
-        self.coeff2 = comb;
-
-        self.coeff3 = self.coeff1.add(simd_swizzle!(
-            batch,
-            [
-                18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35
-            ]
-        ));
-
-        self.coeff5 = self.coeff4;
-        self.coeff4 = self.coeff3;
-
-        self.coeff3.mul(self.period_gain)
     }
 }
 
@@ -493,29 +195,34 @@ impl VQsDFT {
                             let twid_1 = (2.0 * PI * k_1) / period;
                             let reson_1 = 2.0 * f64::cos(twid_1);
 
+                            let period_gain = 1.0 / period;
+
                             (
                                 period as isize,
-                                VQsDFTCoeffSet {
-                                    twiddle: f64x4::from_array([
-                                        f64::cos(twid_0),
-                                        f64::sin(twid_0),
-                                        f64::cos(twid_1),
-                                        f64::sin(twid_1),
-                                    ]),
-                                    fiddle: f64x4::from_array([
-                                        f64::cos(fid_0),
-                                        f64::sin(fid_0),
-                                        f64::cos(fid_1),
-                                        f64::sin(fid_1),
-                                    ]),
-                                    reson: f64x4::from_array([reson_0, reson_0, reson_1, reson_1]),
-                                    coeff1: f64x4::splat(0.0),
-                                    coeff2: f64x4::splat(0.0),
-                                    coeff3: f64x4::splat(0.0),
-                                    coeff4: f64x4::splat(0.0),
-                                    coeff5: f64x4::splat(0.0),
-                                    period_gain: f64x4::splat(1.0 / period),
-                                },
+                                [
+                                    VQsDFTCoeffSet {
+                                        twiddle: (f64::cos(twid_0), f64::sin(twid_0)),
+                                        fiddle: (f64::cos(fid_0), f64::sin(fid_0)),
+                                        reson: reson_0,
+                                        coeff1: (0.0, 0.0),
+                                        coeff2: (0.0, 0.0),
+                                        coeff3: (0.0, 0.0),
+                                        coeff4: (0.0, 0.0),
+                                        coeff5: (0.0, 0.0),
+                                        period_gain,
+                                    },
+                                    VQsDFTCoeffSet {
+                                        twiddle: (f64::cos(twid_1), f64::sin(twid_1)),
+                                        fiddle: (f64::cos(fid_1), f64::sin(fid_1)),
+                                        reson: reson_1,
+                                        coeff1: (0.0, 0.0),
+                                        coeff2: (0.0, 0.0),
+                                        coeff3: (0.0, 0.0),
+                                        coeff4: (0.0, 0.0),
+                                        coeff5: (0.0, 0.0),
+                                        period_gain,
+                                    },
+                                ],
                             )
                         })
                         .collect(),
@@ -539,15 +246,15 @@ impl VQsDFT {
                             (
                                 period as isize,
                                 VQsDFTCoeffSet {
-                                    twiddle: f64x2::from_array([f64::cos(twid), f64::sin(twid)]),
-                                    fiddle: f64x2::from_array([f64::cos(fid), f64::sin(fid)]),
-                                    reson: f64x2::splat(reson),
-                                    coeff1: f64x2::splat(0.0),
-                                    coeff2: f64x2::splat(0.0),
-                                    coeff3: f64x2::splat(0.0),
-                                    coeff4: f64x2::splat(0.0),
-                                    coeff5: f64x2::splat(0.0),
-                                    period_gain: f64x2::splat(1.0 / period),
+                                    twiddle: (f64::cos(twid), f64::sin(twid)),
+                                    fiddle: (f64::cos(fid), f64::sin(fid)),
+                                    reson,
+                                    coeff1: (0.0, 0.0),
+                                    coeff2: (0.0, 0.0),
+                                    coeff3: (0.0, 0.0),
+                                    coeff4: (0.0, 0.0),
+                                    coeff5: (0.0, 0.0),
+                                    period_gain: 1.0 / period,
                                 },
                             )
                         })
@@ -565,10 +272,9 @@ impl VQsDFT {
                             assert!(period >= 1.0 && period <= buffer_size_f64);
                             let q = (x.center * period) / sample_rate;
 
-                            let mut fiddle = Vec::with_capacity(items_per_band * 2);
-                            let mut twiddle = Vec::with_capacity(items_per_band * 2);
-                            let mut flipped_twiddle = Vec::with_capacity(items_per_band * 2);
-                            let mut reson_coeffs = Vec::with_capacity(items_per_band * 2);
+                            let mut fiddles = Vec::with_capacity(items_per_band);
+                            let mut twiddles = Vec::with_capacity(items_per_band);
+                            let mut reson_coeffs = Vec::with_capacity(items_per_band);
 
                             for i in min_idx..max_idx {
                                 let i = i as f64;
@@ -578,42 +284,38 @@ impl VQsDFT {
                                 let twid = (2.0 * PI * k) / period;
                                 let reson = 2.0 * f64::cos(twid);
 
-                                fiddle.extend([f64::cos(fid), f64::sin(fid)]);
-
-                                let twid_cos = f64::cos(twid);
-                                let twid_sin = f64::sin(twid);
-
-                                twiddle.extend([twid_cos, twid_sin]);
-                                flipped_twiddle.extend([twid_sin, twid_cos]);
-                                reson_coeffs.extend([reson, reson]);
+                                fiddles.push((f64::cos(fid), f64::sin(fid)));
+                                twiddles.push((f64::cos(twid), f64::sin(twid)));
+                                reson_coeffs.push(reson);
                             }
 
-                            let period_gains: Vec<f64> = gains
-                                .iter()
-                                .copied()
-                                .map(|g| g / period)
-                                .flat_map(|g| [g, g])
-                                .collect();
+                            let period_gains = gains.iter().copied().map(|g| g / period);
 
                             (
                                 period as isize,
-                                VQsDFTCoeffSet {
-                                    twiddle: Simd::<f64, 6>::from_array(
-                                        twiddle.try_into().unwrap(),
-                                    ),
-                                    fiddle: Simd::<f64, 6>::from_array(fiddle.try_into().unwrap()),
-                                    reson: Simd::<f64, 6>::from_array(
-                                        reson_coeffs.try_into().unwrap(),
-                                    ),
-                                    coeff1: Simd::<f64, 6>::splat(0.0),
-                                    coeff2: Simd::<f64, 6>::splat(0.0),
-                                    coeff3: Simd::<f64, 6>::splat(0.0),
-                                    coeff4: Simd::<f64, 6>::splat(0.0),
-                                    coeff5: Simd::<f64, 6>::splat(0.0),
-                                    period_gain: Simd::<f64, 6>::from_array(
-                                        period_gains.try_into().unwrap(),
-                                    ),
-                                },
+                                twiddles
+                                    .into_iter()
+                                    .zip(
+                                        fiddles
+                                            .into_iter()
+                                            .zip(reson_coeffs.into_iter().zip(period_gains)),
+                                    )
+                                    .map(|(twiddle, (fiddle, (reson, period_gain)))| {
+                                        VQsDFTCoeffSet {
+                                            twiddle,
+                                            fiddle,
+                                            reson,
+                                            coeff1: (0.0, 0.0),
+                                            coeff2: (0.0, 0.0),
+                                            coeff3: (0.0, 0.0),
+                                            coeff4: (0.0, 0.0),
+                                            coeff5: (0.0, 0.0),
+                                            period_gain,
+                                        }
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .try_into()
+                                    .unwrap_or_else(|_| panic!()),
                             )
                         })
                         .collect(),
@@ -630,10 +332,9 @@ impl VQsDFT {
                             assert!(period >= 1.0 && period <= buffer_size_f64);
                             let q = (x.center * period) / sample_rate;
 
-                            let mut fiddle = Vec::with_capacity(items_per_band * 2);
-                            let mut twiddle = Vec::with_capacity(items_per_band * 2);
-                            let mut flipped_twiddle = Vec::with_capacity(items_per_band * 2);
-                            let mut reson_coeffs = Vec::with_capacity(items_per_band * 2);
+                            let mut fiddles = Vec::with_capacity(items_per_band);
+                            let mut twiddles = Vec::with_capacity(items_per_band);
+                            let mut reson_coeffs = Vec::with_capacity(items_per_band);
 
                             for i in min_idx..max_idx {
                                 let i = i as f64;
@@ -643,42 +344,38 @@ impl VQsDFT {
                                 let twid = (2.0 * PI * k) / period;
                                 let reson = 2.0 * f64::cos(twid);
 
-                                fiddle.extend([f64::cos(fid), f64::sin(fid)]);
-
-                                let twid_cos = f64::cos(twid);
-                                let twid_sin = f64::sin(twid);
-
-                                twiddle.extend([twid_cos, twid_sin]);
-                                flipped_twiddle.extend([twid_sin, twid_cos]);
-                                reson_coeffs.extend([reson, reson]);
+                                fiddles.push((f64::cos(fid), f64::sin(fid)));
+                                twiddles.push((f64::cos(twid), f64::sin(twid)));
+                                reson_coeffs.push(reson);
                             }
 
-                            let period_gains: Vec<f64> = gains
-                                .iter()
-                                .copied()
-                                .map(|g| g / period)
-                                .flat_map(|g| [g, g])
-                                .collect();
+                            let period_gains = gains.iter().copied().map(|g| g / period);
 
                             (
                                 period as isize,
-                                VQsDFTCoeffSet {
-                                    twiddle: Simd::<f64, 10>::from_array(
-                                        twiddle.try_into().unwrap(),
-                                    ),
-                                    fiddle: Simd::<f64, 10>::from_array(fiddle.try_into().unwrap()),
-                                    reson: Simd::<f64, 10>::from_array(
-                                        reson_coeffs.try_into().unwrap(),
-                                    ),
-                                    coeff1: Simd::<f64, 10>::splat(0.0),
-                                    coeff2: Simd::<f64, 10>::splat(0.0),
-                                    coeff3: Simd::<f64, 10>::splat(0.0),
-                                    coeff4: Simd::<f64, 10>::splat(0.0),
-                                    coeff5: Simd::<f64, 10>::splat(0.0),
-                                    period_gain: Simd::<f64, 10>::from_array(
-                                        period_gains.try_into().unwrap(),
-                                    ),
-                                },
+                                twiddles
+                                    .into_iter()
+                                    .zip(
+                                        fiddles
+                                            .into_iter()
+                                            .zip(reson_coeffs.into_iter().zip(period_gains)),
+                                    )
+                                    .map(|(twiddle, (fiddle, (reson, period_gain)))| {
+                                        VQsDFTCoeffSet {
+                                            twiddle,
+                                            fiddle,
+                                            reson,
+                                            coeff1: (0.0, 0.0),
+                                            coeff2: (0.0, 0.0),
+                                            coeff3: (0.0, 0.0),
+                                            coeff4: (0.0, 0.0),
+                                            coeff5: (0.0, 0.0),
+                                            period_gain,
+                                        }
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .try_into()
+                                    .unwrap_or_else(|_| panic!()),
                             )
                         })
                         .collect(),
@@ -695,10 +392,9 @@ impl VQsDFT {
                             assert!(period >= 1.0 && period <= buffer_size_f64);
                             let q = (x.center * period) / sample_rate;
 
-                            let mut fiddle = Vec::with_capacity(items_per_band * 2);
-                            let mut twiddle = Vec::with_capacity(items_per_band * 2);
-                            let mut flipped_twiddle = Vec::with_capacity(items_per_band * 2);
-                            let mut reson_coeffs = Vec::with_capacity(items_per_band * 2);
+                            let mut fiddles = Vec::with_capacity(items_per_band);
+                            let mut twiddles = Vec::with_capacity(items_per_band);
+                            let mut reson_coeffs = Vec::with_capacity(items_per_band);
 
                             for i in min_idx..max_idx {
                                 let i = i as f64;
@@ -708,42 +404,38 @@ impl VQsDFT {
                                 let twid = (2.0 * PI * k) / period;
                                 let reson = 2.0 * f64::cos(twid);
 
-                                fiddle.extend([f64::cos(fid), f64::sin(fid)]);
-
-                                let twid_cos = f64::cos(twid);
-                                let twid_sin = f64::sin(twid);
-
-                                twiddle.extend([twid_cos, twid_sin]);
-                                flipped_twiddle.extend([twid_sin, twid_cos]);
-                                reson_coeffs.extend([reson, reson]);
+                                fiddles.push((f64::cos(fid), f64::sin(fid)));
+                                twiddles.push((f64::cos(twid), f64::sin(twid)));
+                                reson_coeffs.push(reson);
                             }
 
-                            let period_gains: Vec<f64> = gains
-                                .iter()
-                                .copied()
-                                .map(|g| g / period)
-                                .flat_map(|g| [g, g])
-                                .collect();
+                            let period_gains = gains.iter().copied().map(|g| g / period);
 
                             (
                                 period as isize,
-                                VQsDFTCoeffSet {
-                                    twiddle: Simd::<f64, 14>::from_array(
-                                        twiddle.try_into().unwrap(),
-                                    ),
-                                    fiddle: Simd::<f64, 14>::from_array(fiddle.try_into().unwrap()),
-                                    reson: Simd::<f64, 14>::from_array(
-                                        reson_coeffs.try_into().unwrap(),
-                                    ),
-                                    coeff1: Simd::<f64, 14>::splat(0.0),
-                                    coeff2: Simd::<f64, 14>::splat(0.0),
-                                    coeff3: Simd::<f64, 14>::splat(0.0),
-                                    coeff4: Simd::<f64, 14>::splat(0.0),
-                                    coeff5: Simd::<f64, 14>::splat(0.0),
-                                    period_gain: Simd::<f64, 14>::from_array(
-                                        period_gains.try_into().unwrap(),
-                                    ),
-                                },
+                                twiddles
+                                    .into_iter()
+                                    .zip(
+                                        fiddles
+                                            .into_iter()
+                                            .zip(reson_coeffs.into_iter().zip(period_gains)),
+                                    )
+                                    .map(|(twiddle, (fiddle, (reson, period_gain)))| {
+                                        VQsDFTCoeffSet {
+                                            twiddle,
+                                            fiddle,
+                                            reson,
+                                            coeff1: (0.0, 0.0),
+                                            coeff2: (0.0, 0.0),
+                                            coeff3: (0.0, 0.0),
+                                            coeff4: (0.0, 0.0),
+                                            coeff5: (0.0, 0.0),
+                                            period_gain,
+                                        }
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .try_into()
+                                    .unwrap_or_else(|_| panic!()),
                             )
                         })
                         .collect(),
@@ -760,10 +452,9 @@ impl VQsDFT {
                             assert!(period >= 1.0 && period <= buffer_size_f64);
                             let q = (x.center * period) / sample_rate;
 
-                            let mut fiddle = Vec::with_capacity(items_per_band * 2);
-                            let mut twiddle = Vec::with_capacity(items_per_band * 2);
-                            let mut flipped_twiddle = Vec::with_capacity(items_per_band * 2);
-                            let mut reson_coeffs = Vec::with_capacity(items_per_band * 2);
+                            let mut fiddles = Vec::with_capacity(items_per_band);
+                            let mut twiddles = Vec::with_capacity(items_per_band);
+                            let mut reson_coeffs = Vec::with_capacity(items_per_band);
 
                             for i in min_idx..max_idx {
                                 let i = i as f64;
@@ -773,42 +464,38 @@ impl VQsDFT {
                                 let twid = (2.0 * PI * k) / period;
                                 let reson = 2.0 * f64::cos(twid);
 
-                                fiddle.extend([f64::cos(fid), f64::sin(fid)]);
-
-                                let twid_cos = f64::cos(twid);
-                                let twid_sin = f64::sin(twid);
-
-                                twiddle.extend([twid_cos, twid_sin]);
-                                flipped_twiddle.extend([twid_sin, twid_cos]);
-                                reson_coeffs.extend([reson, reson]);
+                                fiddles.push((f64::cos(fid), f64::sin(fid)));
+                                twiddles.push((f64::cos(twid), f64::sin(twid)));
+                                reson_coeffs.push(reson);
                             }
 
-                            let period_gains: Vec<f64> = gains
-                                .iter()
-                                .copied()
-                                .map(|g| g / period)
-                                .flat_map(|g| [g, g])
-                                .collect();
+                            let period_gains = gains.iter().copied().map(|g| g / period);
 
                             (
                                 period as isize,
-                                VQsDFTCoeffSet {
-                                    twiddle: Simd::<f64, 18>::from_array(
-                                        twiddle.try_into().unwrap(),
-                                    ),
-                                    fiddle: Simd::<f64, 18>::from_array(fiddle.try_into().unwrap()),
-                                    reson: Simd::<f64, 18>::from_array(
-                                        reson_coeffs.try_into().unwrap(),
-                                    ),
-                                    coeff1: Simd::<f64, 18>::splat(0.0),
-                                    coeff2: Simd::<f64, 18>::splat(0.0),
-                                    coeff3: Simd::<f64, 18>::splat(0.0),
-                                    coeff4: Simd::<f64, 18>::splat(0.0),
-                                    coeff5: Simd::<f64, 18>::splat(0.0),
-                                    period_gain: Simd::<f64, 18>::from_array(
-                                        period_gains.try_into().unwrap(),
-                                    ),
-                                },
+                                twiddles
+                                    .into_iter()
+                                    .zip(
+                                        fiddles
+                                            .into_iter()
+                                            .zip(reson_coeffs.into_iter().zip(period_gains)),
+                                    )
+                                    .map(|(twiddle, (fiddle, (reson, period_gain)))| {
+                                        VQsDFTCoeffSet {
+                                            twiddle,
+                                            fiddle,
+                                            reson,
+                                            coeff1: (0.0, 0.0),
+                                            coeff2: (0.0, 0.0),
+                                            coeff3: (0.0, 0.0),
+                                            coeff4: (0.0, 0.0),
+                                            coeff5: (0.0, 0.0),
+                                            period_gain,
+                                        }
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .try_into()
+                                    .unwrap_or_else(|_| panic!()),
                             )
                         })
                         .collect(),
@@ -837,8 +524,8 @@ impl VQsDFT {
                                 let twid = (2.0 * PI * k) / period;
                                 let reson = 2.0 * f64::cos(twid);
 
-                                fiddles.push(f64x2::from_array([f64::cos(fid), f64::sin(fid)]));
-                                twiddles.push(f64x2::from_array([f64::cos(twid), f64::sin(twid)]));
+                                fiddles.push((f64::cos(fid), f64::sin(fid)));
+                                twiddles.push((f64::cos(twid), f64::sin(twid)));
                                 reson_coeffs.push(reson);
                             }
 
@@ -857,13 +544,13 @@ impl VQsDFT {
                                         VQsDFTCoeffSet {
                                             twiddle,
                                             fiddle,
-                                            reson: f64x2::splat(reson),
-                                            coeff1: f64x2::splat(0.0),
-                                            coeff2: f64x2::splat(0.0),
-                                            coeff3: f64x2::splat(0.0),
-                                            coeff4: f64x2::splat(0.0),
-                                            coeff5: f64x2::splat(0.0),
-                                            period_gain: f64x2::splat(period_gain),
+                                            reson,
+                                            coeff1: (0.0, 0.0),
+                                            coeff2: (0.0, 0.0),
+                                            coeff3: (0.0, 0.0),
+                                            coeff4: (0.0, 0.0),
+                                            coeff5: (0.0, 0.0),
+                                            period_gain,
                                         }
                                     })
                                     .collect(),
@@ -886,28 +573,38 @@ impl VQsDFT {
                 });
             }
             VQsDFTCoeffWrapper::NC(coeffs) => {
-                coeffs.iter_mut().for_each(|(_, coeff)| {
-                    coeff.reset();
+                coeffs.iter_mut().for_each(|(_, coeffs)| {
+                    coeffs.iter_mut().for_each(|coeff| {
+                        coeff.reset();
+                    });
                 });
             }
             VQsDFTCoeffWrapper::Window2Term(coeffs) => {
-                coeffs.iter_mut().for_each(|(_, coeff)| {
-                    coeff.reset();
+                coeffs.iter_mut().for_each(|(_, coeffs)| {
+                    coeffs.iter_mut().for_each(|coeff| {
+                        coeff.reset();
+                    });
                 });
             }
             VQsDFTCoeffWrapper::Window3Term(coeffs) => {
-                coeffs.iter_mut().for_each(|(_, coeff)| {
-                    coeff.reset();
+                coeffs.iter_mut().for_each(|(_, coeffs)| {
+                    coeffs.iter_mut().for_each(|coeff| {
+                        coeff.reset();
+                    });
                 });
             }
             VQsDFTCoeffWrapper::Window4Term(coeffs) => {
-                coeffs.iter_mut().for_each(|(_, coeff)| {
-                    coeff.reset();
+                coeffs.iter_mut().for_each(|(_, coeffs)| {
+                    coeffs.iter_mut().for_each(|coeff| {
+                        coeff.reset();
+                    });
                 });
             }
             VQsDFTCoeffWrapper::Window5Term(coeffs) => {
-                coeffs.iter_mut().for_each(|(_, coeff)| {
-                    coeff.reset();
+                coeffs.iter_mut().for_each(|(_, coeffs)| {
+                    coeffs.iter_mut().for_each(|coeff| {
+                        coeff.reset();
+                    });
                 });
             }
             VQsDFTCoeffWrapper::ArbitraryWindow(coeffs) => {
@@ -927,8 +624,12 @@ impl VQsDFT {
 
         let sample_count = samples.len().max(1) as f64;
 
+        let spectrum_chunks = unsafe { self.spectrum_data.as_chunks_unchecked_mut::<64>() };
+
         match &mut self.coeffs {
             VQsDFTCoeffWrapper::NC(coeffs) => {
+                let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
+
                 for sample in samples {
                     self.buffer_index =
                         (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
@@ -936,31 +637,42 @@ impl VQsDFT {
                     *latest = sample;
                     let latest = sample;
 
-                    for ((period, coeffs), spectrum_data) in
-                        coeffs.iter_mut().zip(self.spectrum_data.iter_mut())
+                    for (coeff_chunk, spectrum_chunk) in
+                        coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
                     {
-                        let period = *period;
+                        for ((period, coeffs), spectrum_data) in
+                            coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
+                        {
+                            let period = *period;
 
-                        let oldest = unsafe {
-                            *self.buffer.get_unchecked(
-                                (((self.buffer_index as isize - period) % buffer_len_int)
-                                    + buffer_len_int) as usize
-                                    % buffer_len,
-                            )
-                        };
+                            let oldest = unsafe {
+                                *self.buffer.get_unchecked(
+                                    (((self.buffer_index as isize - period) % buffer_len_int)
+                                        + buffer_len_int)
+                                        as usize
+                                        % buffer_len,
+                                )
+                            };
 
-                        let result = coeffs.calculate(latest, oldest);
+                            let left_result = coeffs[0].calculate(latest, oldest);
+                            let right_result = coeffs[1].calculate(latest, oldest);
 
-                        *spectrum_data += simd_swizzle!(result, [0, 1])
-                            .mul(simd_swizzle!(result, [2, 3]))
-                            .reduce_sum()
-                            .neg()
-                            .max(0.0)
-                            .sqrt();
+                            *spectrum_data = spectrum_data.algebraic_add(
+                                left_result
+                                    .0
+                                    .algebraic_mul(right_result.0)
+                                    .algebraic_add(left_result.1.algebraic_mul(right_result.1))
+                                    .algebraic_mul(-1.0)
+                                    .max(0.0)
+                                    .sqrt(),
+                            );
+                        }
                     }
                 }
             }
             VQsDFTCoeffWrapper::Rectangular(coeffs) => {
+                let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
+
                 for sample in samples {
                     self.buffer_index =
                         (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
@@ -968,26 +680,39 @@ impl VQsDFT {
                     *latest = sample;
                     let latest = sample;
 
-                    for ((period, coeffs), spectrum_data) in
-                        coeffs.iter_mut().zip(self.spectrum_data.iter_mut())
+                    for (coeff_chunk, spectrum_chunk) in
+                        coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
                     {
-                        let period = *period;
+                        for ((period, coeffs), spectrum_data) in
+                            coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
+                        {
+                            let period = *period;
 
-                        let oldest = unsafe {
-                            *self.buffer.get_unchecked(
-                                (((self.buffer_index as isize - period) % buffer_len_int)
-                                    + buffer_len_int) as usize
-                                    % buffer_len,
-                            )
-                        };
+                            let oldest = unsafe {
+                                *self.buffer.get_unchecked(
+                                    (((self.buffer_index as isize - period) % buffer_len_int)
+                                        + buffer_len_int)
+                                        as usize
+                                        % buffer_len,
+                                )
+                            };
 
-                        let result = coeffs.calculate(latest, oldest);
+                            let result = coeffs.calculate(latest, oldest);
 
-                        *spectrum_data += result.mul(result).reduce_sum().sqrt()
+                            *spectrum_data = spectrum_data.algebraic_add(
+                                result
+                                    .0
+                                    .algebraic_mul(result.0)
+                                    .algebraic_add(result.1.algebraic_mul(result.1))
+                                    .sqrt(),
+                            );
+                        }
                     }
                 }
             }
             VQsDFTCoeffWrapper::Window2Term(coeffs) => {
+                let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
+
                 for sample in samples {
                     self.buffer_index =
                         (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
@@ -995,30 +720,45 @@ impl VQsDFT {
                     *latest = sample;
                     let latest = sample;
 
-                    for ((period, coeffs), spectrum_data) in
-                        coeffs.iter_mut().zip(self.spectrum_data.iter_mut())
+                    for (coeff_chunk, spectrum_chunk) in
+                        coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
                     {
-                        let period = *period;
+                        for ((period, coeffs), spectrum_data) in
+                            coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
+                        {
+                            let period = *period;
 
-                        let oldest = unsafe {
-                            *self.buffer.get_unchecked(
-                                (((self.buffer_index as isize - period) % buffer_len_int)
-                                    + buffer_len_int) as usize
-                                    % buffer_len,
-                            )
-                        };
+                            let oldest = unsafe {
+                                *self.buffer.get_unchecked(
+                                    (((self.buffer_index as isize - period) % buffer_len_int)
+                                        + buffer_len_int)
+                                        as usize
+                                        % buffer_len,
+                                )
+                            };
 
-                        let result = coeffs.calculate(latest, oldest);
+                            let mut sum: (f64, f64) = (0.0, 0.0);
 
-                        let sum = simd_swizzle!(result, [0, 1])
-                            .add(simd_swizzle!(result, [2, 3]))
-                            .add(simd_swizzle!(result, [4, 5]));
+                            for coeff in coeffs {
+                                let result = coeff.calculate(latest, oldest);
 
-                        *spectrum_data += sum.mul(sum).reduce_sum().sqrt();
+                                sum.0 = sum.0.algebraic_add(result.0);
+                                sum.1 = sum.1.algebraic_add(result.1);
+                            }
+
+                            *spectrum_data = spectrum_data.algebraic_add(
+                                sum.0
+                                    .algebraic_mul(sum.0)
+                                    .algebraic_add(sum.1.algebraic_mul(sum.1))
+                                    .sqrt(),
+                            );
+                        }
                     }
                 }
             }
             VQsDFTCoeffWrapper::Window3Term(coeffs) => {
+                let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
+
                 for sample in samples {
                     self.buffer_index =
                         (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
@@ -1026,33 +766,45 @@ impl VQsDFT {
                     *latest = sample;
                     let latest = sample;
 
-                    for ((period, coeffs), spectrum_data) in
-                        coeffs.iter_mut().zip(self.spectrum_data.iter_mut())
+                    for (coeff_chunk, spectrum_chunk) in
+                        coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
                     {
-                        let period = *period;
+                        for ((period, coeffs), spectrum_data) in
+                            coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
+                        {
+                            let period = *period;
 
-                        let oldest = unsafe {
-                            *self.buffer.get_unchecked(
-                                (((self.buffer_index as isize - period) % buffer_len_int)
-                                    + buffer_len_int) as usize
-                                    % buffer_len,
-                            )
-                        };
+                            let oldest = unsafe {
+                                *self.buffer.get_unchecked(
+                                    (((self.buffer_index as isize - period) % buffer_len_int)
+                                        + buffer_len_int)
+                                        as usize
+                                        % buffer_len,
+                                )
+                            };
 
-                        let result = coeffs.calculate(latest, oldest);
+                            let mut sum: (f64, f64) = (0.0, 0.0);
 
-                        let sum4 = simd_swizzle!(result, [0, 1, 2, 3])
-                            .add(simd_swizzle!(result, [4, 5, 6, 7]));
+                            for coeff in coeffs {
+                                let result = coeff.calculate(latest, oldest);
 
-                        let sum = simd_swizzle!(sum4, [0, 1])
-                            .add(simd_swizzle!(sum4, [2, 3]))
-                            .add(simd_swizzle!(result, [8, 9]));
+                                sum.0 = sum.0.algebraic_add(result.0);
+                                sum.1 = sum.1.algebraic_add(result.1);
+                            }
 
-                        *spectrum_data += sum.mul(sum).reduce_sum().sqrt();
+                            *spectrum_data = spectrum_data.algebraic_add(
+                                sum.0
+                                    .algebraic_mul(sum.0)
+                                    .algebraic_add(sum.1.algebraic_mul(sum.1))
+                                    .sqrt(),
+                            );
+                        }
                     }
                 }
             }
             VQsDFTCoeffWrapper::Window4Term(coeffs) => {
+                let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
+
                 for sample in samples {
                     self.buffer_index =
                         (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
@@ -1060,34 +812,45 @@ impl VQsDFT {
                     *latest = sample;
                     let latest = sample;
 
-                    for ((period, coeffs), spectrum_data) in
-                        coeffs.iter_mut().zip(self.spectrum_data.iter_mut())
+                    for (coeff_chunk, spectrum_chunk) in
+                        coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
                     {
-                        let period = *period;
+                        for ((period, coeffs), spectrum_data) in
+                            coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
+                        {
+                            let period = *period;
 
-                        let oldest = unsafe {
-                            *self.buffer.get_unchecked(
-                                (((self.buffer_index as isize - period) % buffer_len_int)
-                                    + buffer_len_int) as usize
-                                    % buffer_len,
-                            )
-                        };
+                            let oldest = unsafe {
+                                *self.buffer.get_unchecked(
+                                    (((self.buffer_index as isize - period) % buffer_len_int)
+                                        + buffer_len_int)
+                                        as usize
+                                        % buffer_len,
+                                )
+                            };
 
-                        let result = coeffs.calculate(latest, oldest);
+                            let mut sum: (f64, f64) = (0.0, 0.0);
 
-                        let sum4 = simd_swizzle!(result, [0, 1, 2, 3])
-                            .add(simd_swizzle!(result, [4, 5, 6, 7]))
-                            .add(simd_swizzle!(result, [8, 9, 10, 11]));
+                            for coeff in coeffs {
+                                let result = coeff.calculate(latest, oldest);
 
-                        let sum = simd_swizzle!(sum4, [0, 1])
-                            .add(simd_swizzle!(sum4, [2, 3]))
-                            .add(simd_swizzle!(result, [12, 13]));
+                                sum.0 = sum.0.algebraic_add(result.0);
+                                sum.1 = sum.1.algebraic_add(result.1);
+                            }
 
-                        *spectrum_data += sum.mul(sum).reduce_sum().sqrt();
+                            *spectrum_data = spectrum_data.algebraic_add(
+                                sum.0
+                                    .algebraic_mul(sum.0)
+                                    .algebraic_add(sum.1.algebraic_mul(sum.1))
+                                    .sqrt(),
+                            );
+                        }
                     }
                 }
             }
             VQsDFTCoeffWrapper::Window5Term(coeffs) => {
+                let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
+
                 for sample in samples {
                     self.buffer_index =
                         (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
@@ -1095,36 +858,45 @@ impl VQsDFT {
                     *latest = sample;
                     let latest = sample;
 
-                    for ((period, coeffs), spectrum_data) in
-                        coeffs.iter_mut().zip(self.spectrum_data.iter_mut())
+                    for (coeff_chunk, spectrum_chunk) in
+                        coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
                     {
-                        let period = *period;
+                        for ((period, coeffs), spectrum_data) in
+                            coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
+                        {
+                            let period = *period;
 
-                        let oldest = unsafe {
-                            *self.buffer.get_unchecked(
-                                (((self.buffer_index as isize - period) % buffer_len_int)
-                                    + buffer_len_int) as usize
-                                    % buffer_len,
-                            )
-                        };
+                            let oldest = unsafe {
+                                *self.buffer.get_unchecked(
+                                    (((self.buffer_index as isize - period) % buffer_len_int)
+                                        + buffer_len_int)
+                                        as usize
+                                        % buffer_len,
+                                )
+                            };
 
-                        let result = coeffs.calculate(latest, oldest);
+                            let mut sum: (f64, f64) = (0.0, 0.0);
 
-                        let sum8 = simd_swizzle!(result, [0, 1, 2, 3, 4, 5, 6, 7])
-                            .add(simd_swizzle!(result, [8, 9, 10, 11, 12, 13, 14, 15]));
+                            for coeff in coeffs {
+                                let result = coeff.calculate(latest, oldest);
 
-                        let sum4 = simd_swizzle!(sum8, [0, 1, 2, 3])
-                            .add(simd_swizzle!(sum8, [4, 5, 6, 7]));
+                                sum.0 = sum.0.algebraic_add(result.0);
+                                sum.1 = sum.1.algebraic_add(result.1);
+                            }
 
-                        let sum = simd_swizzle!(sum4, [0, 1])
-                            .add(simd_swizzle!(sum4, [2, 3]))
-                            .add(simd_swizzle!(result, [16, 17]));
-
-                        *spectrum_data += sum.mul(sum).reduce_sum().sqrt();
+                            *spectrum_data = spectrum_data.algebraic_add(
+                                sum.0
+                                    .algebraic_mul(sum.0)
+                                    .algebraic_add(sum.1.algebraic_mul(sum.1))
+                                    .sqrt(),
+                            );
+                        }
                     }
                 }
             }
             VQsDFTCoeffWrapper::ArbitraryWindow(coeffs) => {
+                let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
+
                 for sample in samples {
                     self.buffer_index =
                         (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
@@ -1132,36 +904,49 @@ impl VQsDFT {
                     *latest = sample;
                     let latest = sample;
 
-                    for ((period, coeffs), spectrum_data) in
-                        coeffs.iter_mut().zip(self.spectrum_data.iter_mut())
+                    for (coeff_chunk, spectrum_chunk) in
+                        coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
                     {
-                        let period = *period;
+                        for ((period, coeffs), spectrum_data) in
+                            coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
+                        {
+                            let period = *period;
 
-                        let oldest = unsafe {
-                            *self.buffer.get_unchecked(
-                                (((self.buffer_index as isize - period) % buffer_len_int)
-                                    + buffer_len_int) as usize
-                                    % buffer_len,
-                            )
-                        };
-                        let mut sum = f64x2::splat(0.0);
+                            let oldest = unsafe {
+                                *self.buffer.get_unchecked(
+                                    (((self.buffer_index as isize - period) % buffer_len_int)
+                                        + buffer_len_int)
+                                        as usize
+                                        % buffer_len,
+                                )
+                            };
 
-                        for coeff in coeffs.iter_mut() {
-                            sum.add_assign(coeff.calculate(latest, oldest));
+                            let mut sum: (f64, f64) = (0.0, 0.0);
+
+                            for coeff in coeffs {
+                                let result = coeff.calculate(latest, oldest);
+
+                                sum.0 = sum.0.algebraic_add(result.0);
+                                sum.1 = sum.1.algebraic_add(result.1);
+                            }
+
+                            *spectrum_data = spectrum_data.algebraic_add(
+                                sum.0
+                                    .algebraic_mul(sum.0)
+                                    .algebraic_add(sum.1.algebraic_mul(sum.1))
+                                    .sqrt(),
+                            );
                         }
-                        *spectrum_data += sum.mul(sum).reduce_sum().sqrt()
                     }
                 }
             }
         }
 
-        unsafe { self.spectrum_data.as_chunks_unchecked_mut::<64>() }
-            .iter_mut()
-            .for_each(|chunk| {
-                *chunk = f64x64::from_array(*chunk)
-                    .div(f64x64::splat(sample_count))
-                    .to_array();
+        spectrum_chunks.iter_mut().for_each(|chunk| {
+            chunk.iter_mut().for_each(|s| {
+                *s = s.algebraic_div(sample_count);
             });
+        });
 
         &self.spectrum_data
     }
