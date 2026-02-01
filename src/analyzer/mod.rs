@@ -8,7 +8,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-mod gammachirp;
+mod gammatone;
 mod masker;
 mod vqsdft;
 
