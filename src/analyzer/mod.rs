@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     f64::consts::{PI, SQRT_2},
+    ops::Neg,
     simd::{f64x64, num::SimdFloat},
     sync::Arc,
     time::Duration,
@@ -794,17 +795,14 @@ impl Masker {
             ((lower + 1).min(i), upper.saturating_sub(1))
         });
 
-        const SIMULTANEOUS: f64 = 27.0;
-
         Self {
             coeffs: frequency_set
                 .into_iter()
                 .zip(bark_set.iter().copied().zip(range_indices))
                 .map(|(frequency, (bark, range))| MaskerCoeff {
                     bark,
-                    masking_offset_amplitude: dbfs_to_amplitude(
-                        (-6.025 - (0.275 * bark)) - SIMULTANEOUS,
-                    ),
+                    masking_offset_amplitude: dbfs_to_amplitude(-6.025 - (0.275 * bark))
+                        / (band_count as f64 / 41.65407847),
                     /*tonal_masking_threshold: -6.025 - (0.275 * bark),
                     nontonal_masking_threshold: -2.025 - (0.175 * bark),*/
                     masking_coeff_1: 22.0 + (230.0 / frequency).min(10.0),
@@ -855,14 +853,28 @@ impl Masker {
                 let t = unsafe { masking_threshold.get_unchecked_mut(i) };
                 let b = unsafe { self.bark_set.get_unchecked(i) };
 
-                *t += dbfs_to_amplitude(-LOWER_SPREAD * (coeff.bark - b)) * adjusted_amplitude;
+                *t = t.algebraic_add(
+                    dbfs_to_amplitude(
+                        LOWER_SPREAD
+                            .neg()
+                            .algebraic_mul(coeff.bark.algebraic_sub(*b)),
+                    )
+                    .algebraic_mul(adjusted_amplitude),
+                );
             });
 
             (i..=coeff.range.1).for_each(|i| {
                 let t = unsafe { masking_threshold.get_unchecked_mut(i) };
                 let b = unsafe { self.bark_set.get_unchecked(i) };
 
-                *t += dbfs_to_amplitude(-upper_spread * (b - coeff.bark)) * adjusted_amplitude;
+                *t = t.algebraic_add(
+                    dbfs_to_amplitude(
+                        upper_spread
+                            .neg()
+                            .algebraic_mul(b.algebraic_sub(coeff.bark)),
+                    )
+                    .algebraic_mul(adjusted_amplitude),
+                );
             });
         }
     }
