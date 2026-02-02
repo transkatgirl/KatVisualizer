@@ -161,63 +161,7 @@ impl Masker {
     }
 }
 
-#[derive(Clone)]
-pub(super) struct SpectralMasker {
-    ranges: Vec<(usize, usize)>,
-}
-
-impl SpectralMasker {
-    pub(super) fn new(frequency_bands: &[FrequencyBand]) -> Self {
-        assert!(frequency_bands.len().is_multiple_of(64));
-
-        let band_count = frequency_bands.len();
-
-        Self {
-            ranges: frequency_bands
-                .iter()
-                .enumerate()
-                .map(|(i, f)| {
-                    let lower = (0..i.saturating_sub(1))
-                        .rev()
-                        .find(|i| frequency_bands[*i].high < f.low)
-                        .unwrap_or(0);
-                    let upper = (i..band_count)
-                        .find(|i| frequency_bands[*i].low > f.high)
-                        .unwrap_or(band_count - 1);
-
-                    assert!(upper - lower > 0);
-
-                    (lower, upper)
-                })
-                .collect(),
-        }
-    }
-    pub(super) fn calculate_masking_threshold(
-        &self,
-        spectrum: &[f64],
-        masking_threshold: &mut [f64],
-    ) {
-        assert_eq!(masking_threshold.len(), self.ranges.len());
-
-        let threshold_chunks = unsafe { masking_threshold.as_chunks_unchecked_mut::<64>() };
-        let range_chunks = unsafe { self.ranges.as_chunks_unchecked::<64>() };
-
-        for (threshold_chunk, range_chunk) in threshold_chunks.iter_mut().zip(range_chunks.iter()) {
-            for (threshold, range) in threshold_chunk.iter_mut().zip(range_chunk.iter()) {
-                *threshold = unsafe {
-                    spectrum
-                        .get_unchecked(range.0..=range.1)
-                        .iter()
-                        .copied()
-                        .min_by(f64::total_cmp)
-                        .unwrap_unchecked()
-                };
-            }
-        }
-    }
-}
-
-pub(super) fn bulk_multiply(data: &mut [f64], multiplier: f64) {
+/*pub(super) fn bulk_multiply(data: &mut [f64], multiplier: f64) {
     assert!(data.len().is_multiple_of(64));
 
     unsafe { data.as_chunks_unchecked_mut::<64>() }
@@ -228,3 +172,4 @@ pub(super) fn bulk_multiply(data: &mut [f64], multiplier: f64) {
             }
         });
 }
+*/
