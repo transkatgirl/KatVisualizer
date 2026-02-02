@@ -34,12 +34,13 @@ fn masking_threshold_offset(center_bark: f64, flatness: f64) -> f64 {
 
 const MAX_MASKING_DYNAMIC_RANGE: f64 = 100.0;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct MaskerCoeff {
     bark: f64,
     masking_offset_amplitude: f64,
     /*tonal_masking_threshold: f64,
     nontonal_masking_threshold: f64,*/
+    lower_lookup: Vec<f64>,
     masking_coeff_1: f64,
     range: (usize, usize),
 }
@@ -81,8 +82,10 @@ impl Masker {
                 })
                 .unwrap_or(band_count - 1);
 
-            ((lower + 1).min(i), upper.saturating_sub(1))
+            ((lower + 1).min(i), i, upper.saturating_sub(1))
         });
+
+        const LOWER_SPREAD: f64 = -27.0;
 
         Self {
             coeffs: frequency_set
@@ -94,8 +97,15 @@ impl Masker {
                         / (band_count as f64 / 41.65407847),
                     /*tonal_masking_threshold: -6.025 - (0.275 * bark),
                     nontonal_masking_threshold: -2.025 - (0.175 * bark),*/
+                    lower_lookup: (range.0..range.1)
+                        .map(|i| {
+                            dbfs_to_amplitude(
+                                LOWER_SPREAD.algebraic_mul(bark.algebraic_sub(bark_set[i])),
+                            )
+                        })
+                        .collect(),
                     masking_coeff_1: 22.0 + (230.0 / frequency).min(10.0),
-                    range,
+                    range: (range.0, range.2),
                 })
                 .collect(),
             bark_set,
@@ -118,15 +128,13 @@ impl Masker {
             0.0
         };
 
-        for (i, (component, coeff)) in spectrum.zip(self.coeffs.iter().copied()).enumerate() {
+        for (i, (component, coeff)) in spectrum.zip(self.coeffs.iter()).enumerate() {
             let amplitude = component;
             let amplitude_db = amplitude_to_dbfs(component);
 
             if amplitude == 0.0 {
                 continue;
             }
-
-            const LOWER_SPREAD: f64 = -27.0;
 
             let upper_spread =
                 -(coeff.masking_coeff_1 - 0.2 * (amplitude_db + amplitude_correction_offset));
@@ -140,17 +148,14 @@ impl Masker {
 
             (coeff.range.0..i).for_each(|i| {
                 let t = unsafe { masking_threshold.get_unchecked_mut(i) };
-                let b = unsafe { self.bark_set.get_unchecked(i) };
+                let x = unsafe { *coeff.lower_lookup.get_unchecked(i - coeff.range.0) };
 
-                *t = t.algebraic_add(
-                    dbfs_to_amplitude(LOWER_SPREAD.algebraic_mul(coeff.bark.algebraic_sub(*b)))
-                        .algebraic_mul(adjusted_amplitude),
-                );
+                *t = t.algebraic_add(x.algebraic_mul(adjusted_amplitude));
             });
 
             (i..=coeff.range.1).for_each(|i| {
                 let t = unsafe { masking_threshold.get_unchecked_mut(i) };
-                let b = unsafe { self.bark_set.get_unchecked(i) };
+                let b = unsafe { *self.bark_set.get_unchecked(i) };
 
                 *t = t.algebraic_add(
                     dbfs_to_amplitude(upper_spread.algebraic_mul(b.algebraic_sub(coeff.bark)))
