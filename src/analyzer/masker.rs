@@ -146,22 +146,30 @@ impl Masker {
 
             let adjusted_amplitude = coeff.masking_offset_amplitude * amplitude;
 
-            (coeff.range.0..i).for_each(|i| {
-                let t = unsafe { masking_threshold.get_unchecked_mut(i) };
-                let x = unsafe { *coeff.lower_lookup.get_unchecked(i - coeff.range.0) };
+            unsafe { masking_threshold.get_unchecked_mut(coeff.range.0..i) }
+                .iter_mut()
+                .zip(
+                    unsafe { coeff.lower_lookup.get_unchecked(0..(i - coeff.range.0)) }
+                        .iter()
+                        .copied(),
+                )
+                .for_each(|(t, x)| {
+                    *t = t.algebraic_add(x.algebraic_mul(adjusted_amplitude));
+                });
 
-                *t = t.algebraic_add(x.algebraic_mul(adjusted_amplitude));
-            });
-
-            (i..=coeff.range.1).for_each(|i| {
-                let t = unsafe { masking_threshold.get_unchecked_mut(i) };
-                let b = unsafe { *self.bark_set.get_unchecked(i) };
-
-                *t = t.algebraic_add(
-                    dbfs_to_amplitude(upper_spread.algebraic_mul(b.algebraic_sub(coeff.bark)))
-                        .algebraic_mul(adjusted_amplitude),
-                );
-            });
+            unsafe { masking_threshold.get_unchecked_mut(i..=coeff.range.1) }
+                .iter_mut()
+                .zip(
+                    unsafe { self.bark_set.get_unchecked(i..=coeff.range.1) }
+                        .iter()
+                        .copied(),
+                )
+                .for_each(|(t, b)| {
+                    *t = t.algebraic_add(
+                        dbfs_to_amplitude(upper_spread.algebraic_mul(b.algebraic_sub(coeff.bark)))
+                            .algebraic_mul(adjusted_amplitude),
+                    );
+                });
         }
     }
 }
