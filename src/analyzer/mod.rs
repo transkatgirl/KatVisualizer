@@ -160,6 +160,7 @@ impl BetterAnalyzer {
         &mut self,
         samples: impl ExactSizeIterator<Item = f64>,
         listening_volume: Option<f64>,
+        approximate_masking: bool,
     ) {
         self.transform.analyze(samples);
 
@@ -175,7 +176,7 @@ impl BetterAnalyzer {
                 listening_volume,
                 //0.0,
                 &mut self.masking,
-                false,
+                approximate_masking,
             );
 
             unsafe { self.transform.spectrum_data.as_chunks_unchecked_mut::<64>() }

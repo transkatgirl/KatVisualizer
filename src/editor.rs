@@ -1512,6 +1512,18 @@ pub fn create(
                                 return;
                             }
 
+                            if analysis_settings.masking {
+                                if ui
+                                    .checkbox(&mut analysis_settings.approximate_masking, "Approximate spreading function")
+                                    .on_hover_text("Calculating the simultaneous masking threshold makes use of a spreading function, which can be computationally intensive to compute in real time.\nIf this is enabled, the spreading function is approximated, reducing CPU usage at the expense of outputting less psychoacoustically accurate results.\nIf this is disabled, the spreading function is computed normally, resulting in more psychoacoustically accurate results at the expense of additional CPU usage.")
+                                    .changed()
+                                {
+                                    update(&analysis_settings);
+                                    egui_ctx.request_discard("Changed setting");
+                                    return;
+                                }
+                            }
+
                             /*if analysis_settings.masking {
                                 if ui
                                     .checkbox(
