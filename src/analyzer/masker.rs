@@ -29,7 +29,7 @@ fn masking_threshold_offset(center_bark: f64, flatness: f64) -> f64 {
 
 // ----- Below algorithm is based on the following: -----
 // https://link.springer.com/chapter/10.1007/978-3-319-07974-5_2 chapter 2.4
-// https://www.mp3-tech.org/programmer/docs/di042001.pdf
+// http://www.mp3-tech.org/programmer/docs/di042001.pdf
 // https://dn790006.ca.archive.org/0/items/05shlacpsychacousticsmodelsws201718gs/05_shl_AC_Psychacoustics_Models_WS-2017-18_gs.pdf
 
 const MAX_MASKING_DYNAMIC_RANGE: f64 = 100.0;
@@ -41,6 +41,7 @@ struct MaskerCoeff {
     /*tonal_masking_threshold: f64,
     nontonal_masking_threshold: f64,*/
     lower_lookup: Vec<f64>,
+    upper_lookup: Vec<f64>,
     masking_coeff_1: f64,
     range: (usize, usize),
 }
@@ -86,26 +87,31 @@ impl Masker {
         });
 
         const LOWER_SPREAD: f64 = -27.0;
+        const AMPLITUDE_GUESS: f64 = -32.39315062; // amplitude_to_dbfs(-21.4 * f64::log10(1 + 0.00437 * 20000))
 
         Self {
             coeffs: frequency_set
                 .into_iter()
                 .zip(bark_set.iter().copied().zip(range_indices))
-                .map(|(frequency, (bark, range))| MaskerCoeff {
-                    bark,
-                    masking_offset_amplitude: dbfs_to_amplitude(-6.025 - (0.275 * bark))
-                        / (band_count as f64 / 41.65407847),
-                    /*tonal_masking_threshold: -6.025 - (0.275 * bark),
-                    nontonal_masking_threshold: -2.025 - (0.175 * bark),*/
-                    lower_lookup: (range.0..range.1)
-                        .map(|i| {
-                            dbfs_to_amplitude(
-                                LOWER_SPREAD.algebraic_mul(bark.algebraic_sub(bark_set[i])),
-                            )
-                        })
-                        .collect(),
-                    masking_coeff_1: 22.0 + (230.0 / frequency).min(10.0),
-                    range: (range.0, range.2),
+                .map(|(frequency, (bark, range))| {
+                    let masking_coeff_1 = 22.0 + (230.0 / frequency).min(10.0);
+                    let upper_spread = -(masking_coeff_1 - 0.2 * AMPLITUDE_GUESS);
+
+                    MaskerCoeff {
+                        bark,
+                        masking_offset_amplitude: dbfs_to_amplitude(-6.025 - (0.275 * bark))
+                            / (band_count as f64 / 41.65407847),
+                        /*tonal_masking_threshold: -6.025 - (0.275 * bark),
+                        nontonal_masking_threshold: -2.025 - (0.175 * bark),*/
+                        lower_lookup: (range.0..range.1)
+                            .map(|i| dbfs_to_amplitude(LOWER_SPREAD * (bark - bark_set[i])))
+                            .collect(),
+                        upper_lookup: (range.1..=range.2)
+                            .map(|i| dbfs_to_amplitude(upper_spread * (bark_set[i] - bark)))
+                            .collect(),
+                        masking_coeff_1,
+                        range: (range.0, range.2),
+                    }
                 })
                 .collect(),
             bark_set,
@@ -117,59 +123,96 @@ impl Masker {
         listening_volume: Option<f64>,
         //flatness: f64,
         masking_threshold: &mut [f64],
+        approximate: bool,
     ) {
         assert_eq!(masking_threshold.len(), self.bark_set.len());
 
         masking_threshold.fill(0.0);
 
-        let amplitude_correction_offset = if let Some(listening_volume) = listening_volume {
-            listening_volume - 90.0 // Assume the spreading function was calculated for -0dBFS = 90dBSPL
-        } else {
-            0.0
-        };
+        if approximate {
+            for (i, (component, coeff)) in spectrum.zip(self.coeffs.iter()).enumerate() {
+                let amplitude = component;
 
-        for (i, (component, coeff)) in spectrum.zip(self.coeffs.iter()).enumerate() {
-            let amplitude = component;
-            let amplitude_db = amplitude_to_dbfs(component);
+                if amplitude == 0.0 {
+                    continue;
+                }
 
-            if amplitude == 0.0 {
-                continue;
+                let adjusted_amplitude = coeff.masking_offset_amplitude * amplitude;
+
+                unsafe { masking_threshold.get_unchecked_mut(coeff.range.0..i) }
+                    .iter_mut()
+                    .zip(
+                        unsafe { coeff.lower_lookup.get_unchecked(0..(i - coeff.range.0)) }
+                            .iter()
+                            .copied(),
+                    )
+                    .for_each(|(t, x)| {
+                        *t = t.algebraic_add(x.algebraic_mul(adjusted_amplitude));
+                    });
+
+                unsafe { masking_threshold.get_unchecked_mut(i..=coeff.range.1) }
+                    .iter_mut()
+                    .zip(
+                        unsafe { coeff.upper_lookup.get_unchecked(0..=(coeff.range.1 - i)) }
+                            .iter()
+                            .copied(),
+                    )
+                    .for_each(|(t, x)| {
+                        *t = t.algebraic_add(x.algebraic_mul(adjusted_amplitude));
+                    });
             }
+        } else {
+            let amplitude_correction_offset = if let Some(listening_volume) = listening_volume {
+                listening_volume - 90.0 // Assume the spreading function was calculated for -0dBFS = 90dBSPL
+            } else {
+                0.0
+            };
 
-            let upper_spread =
-                -(coeff.masking_coeff_1 - 0.2 * (amplitude_db + amplitude_correction_offset));
+            for (i, (component, coeff)) in spectrum.zip(self.coeffs.iter()).enumerate() {
+                let amplitude = component;
+                let amplitude_db = amplitude_to_dbfs(component);
 
-            /*let threshold_offset = masking_threshold_offset(bark, flatness);
-            let offset = coeff.tonal_masking_threshold - simultaneous;
+                if amplitude == 0.0 {
+                    continue;
+                }
 
-            let adjusted_amplitude = dbfs_to_amplitude(offset) * amplitude;*/
+                let upper_spread =
+                    -(coeff.masking_coeff_1 - 0.2 * (amplitude_db + amplitude_correction_offset));
 
-            let adjusted_amplitude = coeff.masking_offset_amplitude * amplitude;
+                /*let threshold_offset = masking_threshold_offset(bark, flatness);
+                let offset = coeff.tonal_masking_threshold - simultaneous;
 
-            unsafe { masking_threshold.get_unchecked_mut(coeff.range.0..i) }
-                .iter_mut()
-                .zip(
-                    unsafe { coeff.lower_lookup.get_unchecked(0..(i - coeff.range.0)) }
-                        .iter()
-                        .copied(),
-                )
-                .for_each(|(t, x)| {
-                    *t = t.algebraic_add(x.algebraic_mul(adjusted_amplitude));
-                });
+                let adjusted_amplitude = dbfs_to_amplitude(offset) * amplitude;*/
 
-            unsafe { masking_threshold.get_unchecked_mut(i..=coeff.range.1) }
-                .iter_mut()
-                .zip(
-                    unsafe { self.bark_set.get_unchecked(i..=coeff.range.1) }
-                        .iter()
-                        .copied(),
-                )
-                .for_each(|(t, b)| {
-                    *t = t.algebraic_add(
-                        dbfs_to_amplitude(upper_spread.algebraic_mul(b.algebraic_sub(coeff.bark)))
+                let adjusted_amplitude = coeff.masking_offset_amplitude * amplitude;
+
+                unsafe { masking_threshold.get_unchecked_mut(coeff.range.0..i) }
+                    .iter_mut()
+                    .zip(
+                        unsafe { coeff.lower_lookup.get_unchecked(0..(i - coeff.range.0)) }
+                            .iter()
+                            .copied(),
+                    )
+                    .for_each(|(t, x)| {
+                        *t = t.algebraic_add(x.algebraic_mul(adjusted_amplitude));
+                    });
+
+                unsafe { masking_threshold.get_unchecked_mut(i..=coeff.range.1) }
+                    .iter_mut()
+                    .zip(
+                        unsafe { self.bark_set.get_unchecked(i..=coeff.range.1) }
+                            .iter()
+                            .copied(),
+                    )
+                    .for_each(|(t, b)| {
+                        *t = t.algebraic_add(
+                            dbfs_to_amplitude(
+                                upper_spread.algebraic_mul(b.algebraic_sub(coeff.bark)),
+                            )
                             .algebraic_mul(adjusted_amplitude),
-                    );
-                });
+                        );
+                    });
+            }
         }
     }
 }

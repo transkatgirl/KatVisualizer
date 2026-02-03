@@ -175,6 +175,7 @@ impl BetterAnalyzer {
                 listening_volume,
                 //0.0,
                 &mut self.masking,
+                false,
             );
 
             unsafe { self.transform.spectrum_data.as_chunks_unchecked_mut::<64>() }
