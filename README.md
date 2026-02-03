@@ -55,9 +55,9 @@ If you'd like to start improving the spectrogram's readability further, the sett
 - Analysis Options -> Frequency range (ideal value depends on what you're trying to analyze)
 - Analysis Options -> Resolution (increasing it may hurt performance)
 - Analysis Options -> Update rate (increasing it may hurt performance)
+- Analysis Options -> Approximate spreading function (disabling it will hurt performance)
 
 If you experience performance issues out of the box, the settings with the largest impact are:
-- Analysis Options -> Approximate spreading function (disabling will slightly hurt psychoacoustic accuracy)
 - Analysis Options -> Update rate (decreasing it may hurt readability)
 - Analysis Options -> Resolution (decreasing it may hurt readability)
 - Analysis Options -> Perform simultaneous masking (disabling may hurt readability)

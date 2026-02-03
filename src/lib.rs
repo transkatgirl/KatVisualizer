@@ -360,7 +360,7 @@ impl Default for AnalysisChainConfig {
             listening_volume: 90.0,
             normalize_amplitude: true,
             masking: true,
-            approximate_masking: false,
+            approximate_masking: true,
             internal_buffering: true,
             update_rate_hz: 2048.0,
             resolution: 1024,
