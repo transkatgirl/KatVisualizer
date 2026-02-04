@@ -643,6 +643,7 @@ struct RenderSettings {
     bargraph_height: f32,
     spectrogram_duration: Duration,
     bargraph_averaging: Duration,
+    spectrogram_nearest_neighbor: bool,
     show_performance: bool,
     show_format: bool,
     show_hover: bool,
@@ -671,6 +672,7 @@ impl Default for RenderSettings {
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f64(0.67),
             bargraph_averaging: Duration::from_secs_f64(1.0 / 60.0),
+            spectrogram_nearest_neighbor: false,
             show_performance: true,
             show_format: false,
             show_hover: true,
@@ -993,11 +995,20 @@ pub fn create(
                     spectrogram_texture,
                     ImageDelta {
                         image: ImageData::Color(Arc::new(spectrogram_image)),
-                        options: TextureOptions {
-                            magnification: egui::TextureFilter::Linear,
-                            minification: egui::TextureFilter::Linear,
-                            wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                            mipmap_mode: None,
+                        options: if settings.spectrogram_nearest_neighbor {
+                            TextureOptions {
+                                magnification: egui::TextureFilter::Nearest,
+                                minification: egui::TextureFilter::Nearest,
+                                wrap_mode: egui::TextureWrapMode::ClampToEdge,
+                                mipmap_mode: None,
+                            }
+                        } else {
+                            TextureOptions {
+                                magnification: egui::TextureFilter::Linear,
+                                minification: egui::TextureFilter::Linear,
+                                wrap_mode: egui::TextureWrapMode::ClampToEdge,
+                                mipmap_mode: None,
+                            }
                         },
                         pos: None,
                     },
@@ -1502,6 +1513,8 @@ pub fn create(
                             egui::Slider::new(&mut render_settings.bargraph_height, 0.0..=1.0)
                                 .text("Bargraph height"),
                         );
+
+                        ui.checkbox(&mut render_settings.spectrogram_nearest_neighbor, "Use nearest-neighbor scaling for spectrogram").changed();
 
                         ui.checkbox(&mut render_settings.show_hover, "Show hover information");
 
