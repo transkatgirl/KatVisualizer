@@ -51,7 +51,7 @@ struct MaskerCoeff {
 pub(super) struct Masker {
     coeffs: Vec<MaskerCoeff>,
     bark_set: Vec<f32>,
-    wide: bool,
+    average_width: usize,
 }
 
 impl Masker {
@@ -126,7 +126,7 @@ impl Masker {
         Self {
             coeffs,
             bark_set,
-            wide: average_width >= 48,
+            average_width,
         }
     }
     pub(super) fn calculate_masking_threshold(
@@ -137,13 +137,22 @@ impl Masker {
         masking_threshold: &mut [f32],
         approximate: bool,
     ) {
-        if self.wide {
-            self.calculate_masking_threshold_inner::<16>(
-                spectrum,
-                listening_volume,
-                masking_threshold,
-                approximate,
-            );
+        if self.average_width >= 128 {
+            if self.average_width >= 512 {
+                self.calculate_masking_threshold_inner::<32>(
+                    spectrum,
+                    listening_volume,
+                    masking_threshold,
+                    approximate,
+                );
+            } else {
+                self.calculate_masking_threshold_inner::<16>(
+                    spectrum,
+                    listening_volume,
+                    masking_threshold,
+                    approximate,
+                );
+            }
         } else {
             self.calculate_masking_threshold_inner::<8>(
                 spectrum,
