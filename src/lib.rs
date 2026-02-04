@@ -341,6 +341,7 @@ pub(crate) struct AnalysisChainConfig {
     masking: bool,
     approximate_masking: bool,
     internal_buffering: bool,
+    strict_synchronization: bool,
     update_rate_hz: f64,
     latency_offset: Duration,
 
@@ -374,8 +375,9 @@ impl Default for AnalysisChainConfig {
             masking: true,
             approximate_masking: false,
             internal_buffering: true,
+            strict_synchronization: false,
             update_rate_hz: 2048.0,
-            resolution: 1024,
+            resolution: 1216,
             latency_offset: Duration::ZERO,
 
             output_osc: false,
@@ -413,6 +415,7 @@ pub(crate) struct AnalysisChain {
     right_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
     gain: f32,
     internal_buffering: bool,
+    strict_synchronization: bool,
     output_osc: bool,
     osc_socket_address: String,
     osc_resource_address_frequencies: Arc<String>,
@@ -473,6 +476,7 @@ impl AnalysisChain {
         Self {
             sample_rate,
             internal_buffering: config.internal_buffering,
+            strict_synchronization: config.strict_synchronization,
             output_osc: config.output_osc,
             osc_socket_address: config.osc_socket_address.clone(),
             osc_resource_address_frequencies: Arc::new(
@@ -521,79 +525,90 @@ impl AnalysisChain {
         let mut finished = Instant::now();
 
         if self.internal_buffering {
-            self.chunker
-                .process_overlap_add(buffer, 1, |channel_idx, buffer| {
-                    if channel_idx == 1 && self.single_input {
-                        return;
-                    }
+            let mut callback = |channel_idx, buffer: &[f32]| {
+                if channel_idx == 1 && self.single_input {
+                    return;
+                }
 
-                    if self.single_input {
-                        let mut lock = self.left_analyzer.lock();
-                        let (ref _buffer, ref mut analyzer) = *lock;
+                if self.single_input {
+                    let mut lock = self.left_analyzer.lock();
+                    let (ref _buffer, ref mut analyzer) = *lock;
+
+                    analyzer.analyze(
+                        buffer.iter().copied(),
+                        self.listening_volume,
+                        self.approximate_masking,
+                    );
+                } else {
+                    let analyzer = if channel_idx == 0 {
+                        self.left_analyzer.clone()
+                    } else {
+                        self.right_analyzer.clone()
+                    };
+                    let listening_volume = self.listening_volume;
+                    let approximate_masking = self.approximate_masking;
+
+                    analyzer.lock().0.copy_from_slice(buffer);
+
+                    self.analyzer_pool.execute(move || {
+                        let mut lock = analyzer.lock();
+                        let (ref mut buffer, ref mut analyzer) = *lock;
 
                         analyzer.analyze(
                             buffer.iter().copied(),
-                            self.listening_volume,
-                            self.approximate_masking,
+                            listening_volume,
+                            approximate_masking,
                         );
-                    } else {
-                        let analyzer = if channel_idx == 0 {
-                            self.left_analyzer.clone()
-                        } else {
-                            self.right_analyzer.clone()
-                        };
-                        let listening_volume = self.listening_volume;
-                        let approximate_masking = self.approximate_masking;
+                    });
+                }
 
-                        analyzer.lock().0.copy_from_slice(buffer);
+                if channel_idx == 1 || (channel_idx == 0 && self.single_input) {
+                    let (ref mut spectrogram, ref mut metrics) = *output.lock();
 
-                        self.analyzer_pool.execute(move || {
-                            let mut lock = analyzer.lock();
-                            let (ref mut buffer, ref mut analyzer) = *lock;
+                    self.analyzer_pool.join();
+                    let left_lock = self.left_analyzer.lock();
+                    let right_lock = self.right_analyzer.lock();
+                    let left_analyzer = &left_lock.1;
+                    let right_analyzer = &right_lock.1;
 
-                            analyzer.analyze(
-                                buffer.iter().copied(),
-                                listening_volume,
-                                approximate_masking,
+                    spectrogram.update_fn(|analysis_output| {
+                        if self.single_input {
+                            analysis_output.update_mono(
+                                left_analyzer,
+                                self.gain,
+                                self.listening_volume,
+                                self.chunk_duration,
                             );
-                        });
-                    }
+                        } else {
+                            analysis_output.update_stereo(
+                                left_analyzer,
+                                right_analyzer,
+                                self.gain,
+                                self.listening_volume,
+                                self.chunk_duration,
+                            );
+                        }
+                    });
 
-                    if channel_idx == 1 || (channel_idx == 0 && self.single_input) {
-                        let (ref mut spectrogram, ref mut metrics) = *output.lock();
+                    let now = Instant::now();
+                    metrics.processing = now.duration_since(finished);
+                    metrics.finished = now;
 
-                        self.analyzer_pool.join();
-                        let left_lock = self.left_analyzer.lock();
-                        let right_lock = self.right_analyzer.lock();
-                        let left_analyzer = &left_lock.1;
-                        let right_analyzer = &right_lock.1;
+                    finished = now;
+                }
+            };
 
-                        spectrogram.update_fn(|analysis_output| {
-                            if self.single_input {
-                                analysis_output.update_mono(
-                                    left_analyzer,
-                                    self.gain,
-                                    self.listening_volume,
-                                    self.chunk_duration,
-                                );
-                            } else {
-                                analysis_output.update_stereo(
-                                    left_analyzer,
-                                    right_analyzer,
-                                    self.gain,
-                                    self.listening_volume,
-                                    self.chunk_duration,
-                                );
-                            }
-                        });
-
-                        let now = Instant::now();
-                        metrics.processing = now.duration_since(finished);
-                        metrics.finished = now;
-
-                        finished = now;
-                    }
-                });
+            if self.strict_synchronization {
+                self.chunker
+                    .process_overlap_add(buffer, 1, |channel_idx, buffer| {
+                        callback(channel_idx, buffer);
+                    });
+            } else {
+                self.chunker
+                    .process_analyze_only(buffer, 1, |channel_idx, buffer| {
+                        callback(channel_idx, buffer);
+                    });
+            }
         } else {
             if self.single_input {
                 let mut lock = self.left_analyzer.lock();
@@ -962,6 +977,7 @@ impl AnalysisChain {
             masking: self.masking,
             approximate_masking: self.approximate_masking,
             internal_buffering: self.internal_buffering,
+            strict_synchronization: self.strict_synchronization,
             output_osc: self.output_osc,
             osc_socket_address: self.osc_socket_address.to_string(),
             osc_resource_address_frequencies: self.osc_resource_address_frequencies.to_string(),
@@ -1080,6 +1096,7 @@ impl AnalysisChain {
         }
 
         self.internal_buffering = config.internal_buffering;
+        self.strict_synchronization = config.strict_synchronization;
         self.update_rate = config.update_rate_hz;
     }
 }
