@@ -246,53 +246,69 @@ fn draw_secondary_bargraph(
 
     let band_width = width / analysis.len() as f32;
 
-    for (i, volume) in analysis.iter().copied().enumerate() {
-        let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+    let mut buffer = [Rect::ZERO; 64];
 
-        let start_x = bounds.min.x + i as f32 * band_width;
+    for (ci, chunk) in unsafe { analysis.as_chunks_unchecked::<64>() }
+        .iter()
+        .enumerate()
+    {
+        let offset = ci * 64;
 
-        let rect = Rect {
-            min: Pos2 {
-                x: start_x,
-                y: bounds.max.y - intensity * height,
-            },
-            max: Pos2 {
-                x: start_x + band_width,
-                y: bounds.max.y,
-            },
-        };
+        for (ii, (volume, output)) in chunk.iter().copied().zip(buffer.iter_mut()).enumerate() {
+            let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
 
-        mesh.indices.extend_from_slice(&[
-            vertices,
-            vertices + 1,
-            vertices + 2,
-            vertices + 2,
-            vertices + 1,
-            vertices + 3,
-        ]);
-        mesh.vertices.extend_from_slice(&[
-            Vertex {
-                pos: rect.left_top(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.right_top(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.left_bottom(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.right_bottom(),
-                uv: WHITE_UV,
-                color,
-            },
-        ]);
-        vertices += 4;
+            let start_x = bounds
+                .min
+                .x
+                .algebraic_add(((offset + ii) as f32).algebraic_mul(band_width));
+
+            let rect = Rect {
+                min: Pos2 {
+                    x: start_x,
+                    y: bounds.max.y.algebraic_sub(intensity.algebraic_mul(height)),
+                },
+                max: Pos2 {
+                    x: start_x.algebraic_add(band_width),
+                    y: bounds.max.y,
+                },
+            };
+
+            *output = rect;
+        }
+
+        for rect in buffer {
+            mesh.indices.extend_from_slice(&[
+                vertices,
+                vertices + 1,
+                vertices + 2,
+                vertices + 2,
+                vertices + 1,
+                vertices + 3,
+            ]);
+            mesh.vertices.extend_from_slice(&[
+                Vertex {
+                    pos: rect.left_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.left_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+            ]);
+            vertices += 4;
+        }
     }
 }
 
@@ -310,53 +326,70 @@ fn draw_secondary_bargraph_from_pairs(
 
     let band_width = width / analysis.len() as f32;
 
-    for (i, (_, volume)) in analysis.iter().copied().enumerate() {
-        let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+    let mut buffer = [Rect::ZERO; 64];
 
-        let start_x = bounds.min.x + i as f32 * band_width;
+    for (ci, chunk) in unsafe { analysis.as_chunks_unchecked::<64>() }
+        .iter()
+        .enumerate()
+    {
+        let offset = ci * 64;
 
-        let rect = Rect {
-            min: Pos2 {
-                x: start_x,
-                y: bounds.max.y - intensity * height,
-            },
-            max: Pos2 {
-                x: start_x + band_width,
-                y: bounds.max.y,
-            },
-        };
+        for (ii, ((_, volume), output)) in chunk.iter().copied().zip(buffer.iter_mut()).enumerate()
+        {
+            let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
 
-        mesh.indices.extend_from_slice(&[
-            vertices,
-            vertices + 1,
-            vertices + 2,
-            vertices + 2,
-            vertices + 1,
-            vertices + 3,
-        ]);
-        mesh.vertices.extend_from_slice(&[
-            Vertex {
-                pos: rect.left_top(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.right_top(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.left_bottom(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.right_bottom(),
-                uv: WHITE_UV,
-                color,
-            },
-        ]);
-        vertices += 4;
+            let start_x = bounds
+                .min
+                .x
+                .algebraic_add(((offset + ii) as f32).algebraic_mul(band_width));
+
+            let rect = Rect {
+                min: Pos2 {
+                    x: start_x,
+                    y: bounds.max.y.algebraic_sub(intensity.algebraic_mul(height)),
+                },
+                max: Pos2 {
+                    x: start_x.algebraic_add(band_width),
+                    y: bounds.max.y,
+                },
+            };
+
+            *output = rect;
+        }
+
+        for rect in buffer {
+            mesh.indices.extend_from_slice(&[
+                vertices,
+                vertices + 1,
+                vertices + 2,
+                vertices + 2,
+                vertices + 1,
+                vertices + 3,
+            ]);
+            mesh.vertices.extend_from_slice(&[
+                Vertex {
+                    pos: rect.left_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.left_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+            ]);
+            vertices += 4;
+        }
     }
 }
 
