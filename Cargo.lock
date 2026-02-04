@@ -1535,7 +1535,7 @@ dependencies = [
 
 [[package]]
 name = "katvisualizer"
-version = "0.12.16"
+version = "0.12.17"
 dependencies = [
  "color",
  "keepawake",

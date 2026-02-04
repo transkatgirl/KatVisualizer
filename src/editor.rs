@@ -659,7 +659,7 @@ impl Default for RenderSettings {
             maximum_lightness: 0.82,
             maximum_chroma: 0.09,
             automatic_gain: true,
-            lookup_size: 6,
+            lookup_size: 4,
             agc_duration: Duration::from_secs_f64(1.0),
             agc_above_masking: 40.0,
             agc_below_masking: 0.0,
