@@ -119,14 +119,7 @@ fn draw_bargraph(
                 }
             }
 
-            draw_bargraph_from_iter(
-                mesh,
-                buffer.0.into_iter(),
-                target_len,
-                bounds,
-                color_table,
-                (max_db, min_db),
-            );
+            draw_bargraph_from_iter(mesh, &buffer.0, bounds, color_table, (max_db, min_db));
 
             if let Some(masking_color) = masking_color {
                 assert_eq!(front.masking.len(), buffer.1.len());
@@ -155,37 +148,20 @@ fn draw_bargraph(
                     }
                 }
 
-                draw_secondary_bargraph_from_iter(
-                    mesh,
-                    buffer.1.into_iter(),
-                    target_len,
-                    bounds,
-                    masking_color,
-                    None,
-                    (max_db, min_db),
-                );
+                draw_secondary_bargraph(mesh, &buffer.1, bounds, masking_color, (max_db, min_db));
             }
 
             return;
         }
     }
 
-    draw_bargraph_from_iter(
-        mesh,
-        front.data.iter().copied().map(|d| (d.0, d.1)),
-        front.data.len(),
-        bounds,
-        color_table,
-        (max_db, min_db),
-    );
+    draw_bargraph_from_iter(mesh, &front.data, bounds, color_table, (max_db, min_db));
     if let Some(masking_color) = masking_color {
-        draw_secondary_bargraph_from_iter(
+        draw_secondary_bargraph_from_pairs(
             mesh,
-            front.masking.iter().map(|(_, m)| *m),
-            front.masking.len(),
+            &front.masking,
             bounds,
             masking_color,
-            None,
             (max_db, min_db),
         );
     }
@@ -193,8 +169,7 @@ fn draw_bargraph(
 
 fn draw_bargraph_from_iter(
     mesh: &mut Mesh,
-    analysis: impl Iterator<Item = (f32, f32)>,
-    analysis_len: usize,
+    analysis: &[(f32, f32)],
     bounds: Rect,
     color_table: &ColorTable,
     (max_db, min_db): (f32, f32),
@@ -204,9 +179,9 @@ fn draw_bargraph_from_iter(
 
     let mut vertices = mesh.vertices.len() as u32;
 
-    let band_width = width / analysis_len as f32;
+    let band_width = width / analysis.len() as f32;
 
-    for (i, (pan, volume)) in analysis.enumerate() {
+    for (i, (pan, volume)) in analysis.iter().copied().enumerate() {
         let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
 
         let start_x = bounds.min.x + i as f32 * band_width;
@@ -257,13 +232,11 @@ fn draw_bargraph_from_iter(
     }
 }
 
-fn draw_secondary_bargraph_from_iter(
+fn draw_secondary_bargraph(
     mesh: &mut Mesh,
-    analysis: impl Iterator<Item = f32>,
-    analysis_len: usize,
+    analysis: &[f32],
     bounds: Rect,
     color: Color32,
-    thickness: Option<f32>,
     (max_db, min_db): (f32, f32),
 ) {
     let width = bounds.max.x - bounds.min.x;
@@ -271,106 +244,119 @@ fn draw_secondary_bargraph_from_iter(
 
     let mut vertices = mesh.vertices.len() as u32;
 
-    let band_width = width / analysis_len as f32;
+    let band_width = width / analysis.len() as f32;
 
-    if let Some(thickness) = thickness {
-        for (i, volume) in analysis.enumerate() {
-            let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+    for (i, volume) in analysis.iter().copied().enumerate() {
+        let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
 
-            let start_x = bounds.min.x + i as f32 * band_width;
+        let start_x = bounds.min.x + i as f32 * band_width;
 
-            let rect = Rect {
-                min: Pos2 {
-                    x: start_x,
-                    y: bounds.max.y - intensity * height,
-                },
-                max: Pos2 {
-                    x: start_x + band_width,
-                    y: (bounds.max.y - (intensity - thickness) * height).min(bounds.max.y),
-                },
-            };
+        let rect = Rect {
+            min: Pos2 {
+                x: start_x,
+                y: bounds.max.y - intensity * height,
+            },
+            max: Pos2 {
+                x: start_x + band_width,
+                y: bounds.max.y,
+            },
+        };
 
-            mesh.indices.extend_from_slice(&[
-                vertices,
-                vertices + 1,
-                vertices + 2,
-                vertices + 2,
-                vertices + 1,
-                vertices + 3,
-            ]);
-            mesh.vertices.extend_from_slice(&[
-                Vertex {
-                    pos: rect.left_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.left_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-            ]);
-            vertices += 4;
-        }
-    } else {
-        for (i, volume) in analysis.enumerate() {
-            let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+        mesh.indices.extend_from_slice(&[
+            vertices,
+            vertices + 1,
+            vertices + 2,
+            vertices + 2,
+            vertices + 1,
+            vertices + 3,
+        ]);
+        mesh.vertices.extend_from_slice(&[
+            Vertex {
+                pos: rect.left_top(),
+                uv: WHITE_UV,
+                color,
+            },
+            Vertex {
+                pos: rect.right_top(),
+                uv: WHITE_UV,
+                color,
+            },
+            Vertex {
+                pos: rect.left_bottom(),
+                uv: WHITE_UV,
+                color,
+            },
+            Vertex {
+                pos: rect.right_bottom(),
+                uv: WHITE_UV,
+                color,
+            },
+        ]);
+        vertices += 4;
+    }
+}
 
-            let start_x = bounds.min.x + i as f32 * band_width;
+fn draw_secondary_bargraph_from_pairs(
+    mesh: &mut Mesh,
+    analysis: &[(f32, f32)],
+    bounds: Rect,
+    color: Color32,
+    (max_db, min_db): (f32, f32),
+) {
+    let width = bounds.max.x - bounds.min.x;
+    let height = bounds.max.y - bounds.min.y;
 
-            let rect = Rect {
-                min: Pos2 {
-                    x: start_x,
-                    y: bounds.max.y - intensity * height,
-                },
-                max: Pos2 {
-                    x: start_x + band_width,
-                    y: bounds.max.y,
-                },
-            };
+    let mut vertices = mesh.vertices.len() as u32;
 
-            mesh.indices.extend_from_slice(&[
-                vertices,
-                vertices + 1,
-                vertices + 2,
-                vertices + 2,
-                vertices + 1,
-                vertices + 3,
-            ]);
-            mesh.vertices.extend_from_slice(&[
-                Vertex {
-                    pos: rect.left_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.left_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-            ]);
-            vertices += 4;
-        }
+    let band_width = width / analysis.len() as f32;
+
+    for (i, (_, volume)) in analysis.iter().copied().enumerate() {
+        let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+
+        let start_x = bounds.min.x + i as f32 * band_width;
+
+        let rect = Rect {
+            min: Pos2 {
+                x: start_x,
+                y: bounds.max.y - intensity * height,
+            },
+            max: Pos2 {
+                x: start_x + band_width,
+                y: bounds.max.y,
+            },
+        };
+
+        mesh.indices.extend_from_slice(&[
+            vertices,
+            vertices + 1,
+            vertices + 2,
+            vertices + 2,
+            vertices + 1,
+            vertices + 3,
+        ]);
+        mesh.vertices.extend_from_slice(&[
+            Vertex {
+                pos: rect.left_top(),
+                uv: WHITE_UV,
+                color,
+            },
+            Vertex {
+                pos: rect.right_top(),
+                uv: WHITE_UV,
+                color,
+            },
+            Vertex {
+                pos: rect.left_bottom(),
+                uv: WHITE_UV,
+                color,
+            },
+            Vertex {
+                pos: rect.right_bottom(),
+                uv: WHITE_UV,
+                color,
+            },
+        ]);
+        vertices += 4;
     }
 }
 
@@ -388,6 +374,8 @@ fn draw_spectrogram_image(
     let image_height = image.height();
 
     assert!(image_width.is_multiple_of(64));
+
+    let mut buffer = [0; 64];
 
     if clamp_using_smr {
         let masking_ranges: Vec<f32> =
@@ -432,8 +420,6 @@ fn draw_spectrogram_image(
                             ),
                     )
             {
-                let mut buffer = [0; 64];
-
                 for ((pan, volume), (((_, masking), range), output)) in
                     analysis_chunk.iter().copied().zip(
                         masking_chunk
@@ -474,8 +460,6 @@ fn draw_spectrogram_image(
                             .as_chunks_unchecked_mut::<64>()
                     })
             {
-                let mut buffer = [0; 64];
-
                 for ((pan, volume), output) in analysis_chunk.iter().copied().zip(buffer.iter_mut())
                 {
                     let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0);
