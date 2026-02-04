@@ -51,6 +51,7 @@ struct MaskerCoeff {
 pub(super) struct Masker {
     coeffs: Vec<MaskerCoeff>,
     bark_set: Vec<f32>,
+    wide: bool,
 }
 
 impl Masker {
@@ -90,8 +91,8 @@ impl Masker {
         const LOWER_SPREAD: f32 = -27.0;
         const AMPLITUDE_GUESS: f32 = -32.39315062; // amplitude_to_dbfs(-21.4 * f64::log10(1 + 0.00437 * 20000))
 
-        Self {
-            coeffs: frequency_set
+        let coeffs: Vec<MaskerCoeff> =
+            frequency_set
                 .into_iter()
                 .zip(bark_set.iter().copied().zip(range_indices))
                 .map(|(frequency, (bark, range))| {
@@ -114,11 +115,45 @@ impl Masker {
                         range: (range.0, range.2),
                     }
                 })
-                .collect(),
+                .collect();
+
+        let average_width = coeffs
+            .iter()
+            .map(|c| (c.range.1 - c.range.0) as f32 / coeffs.len() as f32)
+            .sum::<f32>()
+            .round() as usize;
+
+        Self {
+            coeffs,
             bark_set,
+            wide: average_width >= 48,
         }
     }
     pub(super) fn calculate_masking_threshold(
+        &self,
+        spectrum: impl Iterator<Item = f32>,
+        listening_volume: Option<f32>,
+        //flatness: f32,
+        masking_threshold: &mut [f32],
+        approximate: bool,
+    ) {
+        if self.wide {
+            self.calculate_masking_threshold_inner::<16>(
+                spectrum,
+                listening_volume,
+                masking_threshold,
+                approximate,
+            );
+        } else {
+            self.calculate_masking_threshold_inner::<8>(
+                spectrum,
+                listening_volume,
+                masking_threshold,
+                approximate,
+            );
+        }
+    }
+    fn calculate_masking_threshold_inner<const N: usize>(
         &self,
         spectrum: impl Iterator<Item = f32>,
         listening_volume: Option<f32>,
@@ -144,13 +179,13 @@ impl Masker {
                     let (masking_chunks, masking_rem) = unsafe {
                         masking_threshold.get_unchecked_mut(coeff.range.0..=coeff.range.1)
                     }
-                    .as_chunks_mut::<16>();
+                    .as_chunks_mut::<N>();
                     let (lookup_chunks, lookup_rem) = unsafe {
                         coeff
                             .lookup
                             .get_unchecked(0..=(coeff.range.1 - coeff.range.0))
                     }
-                    .as_chunks::<16>();
+                    .as_chunks::<N>();
 
                     assert_eq!(masking_chunks.len(), lookup_chunks.len());
                     assert_eq!(masking_rem.len(), lookup_rem.len());
@@ -196,10 +231,10 @@ impl Masker {
                 {
                     let (masking_chunks, masking_rem) =
                         unsafe { masking_threshold.get_unchecked_mut(coeff.range.0..i) }
-                            .as_chunks_mut::<16>();
+                            .as_chunks_mut::<N>();
                     let (lookup_chunks, lookup_rem) =
                         unsafe { coeff.lookup.get_unchecked(0..(i - coeff.range.0)) }
-                            .as_chunks::<16>();
+                            .as_chunks::<N>();
 
                     assert_eq!(masking_chunks.len(), lookup_chunks.len());
                     assert_eq!(masking_rem.len(), lookup_rem.len());
