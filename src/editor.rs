@@ -1740,7 +1740,7 @@ pub fn create(
                                     &mut analysis_settings.strict_synchronization,
                                     "Use strict synchronization",
                                 )
-                                .on_hover_text("When using internal buffering, synchronization can be done in a relaxed manner, where audio analysis can desynchronize slightly with audio output, or in a strict manner, where samples must be analyzed before can be outputted.\nIf this is enabled, audio synchronization is performed in a strict manner, which may actually result in *worse* synchronization in some cases (allowing analysis to run slightly ahead of output can help compensate for delays caused by the renderer).\nIf this is disabled, audio synchronization is performed in a relaxed manner.")
+                                .on_hover_text("When using internal buffering, synchronization can be done in a relaxed manner, where audio analysis can run slightly ahead of audio output, or in a strict manner, where samples must be analyzed before they can be outputted.\nIf this is enabled, audio synchronization is performed in a strict manner (which may actually result in *worse* visualization synchronization, as allowing analysis to run slightly ahead of output can help compensate for delays caused by the renderer).\nIf this is disabled, audio synchronization is performed in a relaxed manner.")
                                 .changed()
                             {
                                 update(&analysis_settings);
