@@ -349,7 +349,7 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-const FORMAT_VERSION: &str = "v0.12.15";
+const FORMAT_VERSION: &str = "v0.12.16";
 
 impl TryFrom<OscPacket> for VisualizerData {
     type Error = &'static str;
