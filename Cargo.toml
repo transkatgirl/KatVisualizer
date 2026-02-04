@@ -46,6 +46,7 @@ realfft = { version = "3.5.0", features = [
 	"sse",
 	"wasm_simd",
 ] }
+keepawake = "0.6.0"
 
 [profile.dev]
 opt-level = 3

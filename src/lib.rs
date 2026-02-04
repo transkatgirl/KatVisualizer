@@ -6,6 +6,7 @@
 #[cfg(not(debug_assertions))]
 use mimalloc::MiMalloc;
 
+use keepawake::KeepAwake;
 use nih_plug::{
     midi::control_change::{ALL_NOTES_OFF, POLY_MODE_ON},
     prelude::*,
@@ -56,6 +57,7 @@ pub struct MyPlugin {
     midi_output: [f32; 128],
     analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
     state_info: Arc<RwLock<Option<PluginStateInfo>>>,
+    keepawake: Option<KeepAwake>,
 }
 
 #[derive(Params)]
@@ -86,6 +88,7 @@ impl Default for MyPlugin {
             midi_output: [0.0; 128],
             analysis_frequencies: Arc::new(RwLock::new(Vec::with_capacity(MAX_FREQUENCY_BINS))),
             state_info: Arc::new(RwLock::new(None)),
+            keepawake: None,
         }
     }
 }
@@ -225,6 +228,15 @@ impl Plugin for MyPlugin {
             buffer_config: *buffer_config,
         });
 
+        self.keepawake = keepawake::Builder::default()
+            .app_name("KatVisualizer")
+            .app_reverse_domain("com.transkatgirl.katvisualizer")
+            .reason("Video playback")
+            .display(true)
+            .idle(true)
+            .create()
+            .ok();
+
         true
     }
 
@@ -363,7 +375,7 @@ impl Default for AnalysisChainConfig {
             approximate_masking: false,
             internal_buffering: true,
             update_rate_hz: 2048.0,
-            resolution: 1024,
+            resolution: 1216,
             latency_offset: Duration::ZERO,
 
             output_osc: false,
