@@ -522,7 +522,7 @@ impl AnalysisChain {
 
         if self.internal_buffering {
             self.chunker
-                .process_analyze_only(buffer, 1, |channel_idx, buffer| {
+                .process_overlap_add(buffer, 1, |channel_idx, buffer| {
                     if channel_idx == 1 && self.single_input {
                         return;
                     }
