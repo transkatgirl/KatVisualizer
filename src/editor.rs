@@ -61,7 +61,7 @@ fn calculate_volume_min_max(
 fn draw_bargraph(
     mesh: &mut Mesh,
     spectrogram: &BetterSpectrogram,
-    buffer: (Vec<(f32, f32)>, Vec<(f32, f32)>),
+    mut buffer: (Vec<(f32, f32)>, Vec<f32>),
     bounds: Rect,
     color_table: &ColorTable,
     masking_color: Option<Color32>,
@@ -70,10 +70,9 @@ fn draw_bargraph(
 ) {
     let front = &spectrogram.data.front().unwrap();
 
-    //assert_eq!(front.data.len(), buffer.0.len());
-    //assert_eq!(buffer.0.len(), buffer.1.len());
-
     if !averaging.is_zero() {
+        assert_eq!(front.data.len(), buffer.0.len());
+
         let target_len = front.data.len();
         let target_duration = front.duration;
 
@@ -93,26 +92,36 @@ fn draw_bargraph(
         if max_index > 1 {
             let count = max_index as f32 + 1.0;
 
-            let iterator = (0..target_len).map(move |i| {
-                let sum = spectrogram
-                    .data
-                    .iter()
-                    .take(max_index + 1)
-                    .map(|row| unsafe { *row.data.get_unchecked(i) })
-                    .fold((0.0, 0.0), |acc, d| {
-                        if d.1.is_finite() {
-                            (acc.0 + d.0, acc.1 + d.1)
-                        } else {
-                            (acc.0, acc.1 + min_db)
-                        }
-                    });
+            for i in 0..=max_index {
+                for (spectrogram_chunk, output_chunk) in unsafe {
+                    spectrogram
+                        .data
+                        .get(i)
+                        .unwrap_unchecked()
+                        .data
+                        .as_chunks_unchecked::<64>()
+                }
+                .iter()
+                .zip(unsafe { buffer.0.as_chunks_unchecked_mut::<64>() })
+                {
+                    for (data, output) in spectrogram_chunk.iter().zip(output_chunk) {
+                        *output = (
+                            output.0.algebraic_add(data.0),
+                            output.1.algebraic_add(data.1),
+                        )
+                    }
+                }
+            }
 
-                (sum.0 / count, sum.1 / count)
-            });
+            for chunk in unsafe { buffer.0.as_chunks_unchecked_mut::<64>() } {
+                for item in chunk {
+                    *item = (item.0.algebraic_div(count), item.1.algebraic_div(count));
+                }
+            }
 
             draw_bargraph_from_iter(
                 mesh,
-                iterator,
+                buffer.0.into_iter(),
                 target_len,
                 bounds,
                 color_table,
@@ -120,20 +129,36 @@ fn draw_bargraph(
             );
 
             if let Some(masking_color) = masking_color {
-                let masking_iterator = (0..target_len).map(move |i| {
-                    let sum = spectrogram
-                        .data
-                        .iter()
-                        .take(max_index + 1)
-                        .map(|row| unsafe { *row.masking.get_unchecked(i) })
-                        .fold(0.0, |acc, d| acc + d.1);
+                assert_eq!(front.masking.len(), buffer.1.len());
 
-                    sum / count
-                });
+                for i in 0..=max_index {
+                    for (spectrogram_chunk, output_chunk) in unsafe {
+                        spectrogram
+                            .data
+                            .get(i)
+                            .unwrap_unchecked()
+                            .masking
+                            .as_chunks_unchecked::<64>()
+                    }
+                    .iter()
+                    .zip(unsafe { buffer.1.as_chunks_unchecked_mut::<64>() })
+                    {
+                        for (data, output) in spectrogram_chunk.iter().zip(output_chunk) {
+                            *output = output.algebraic_add(data.1);
+                        }
+                    }
+                }
+
+                for chunk in unsafe { buffer.1.as_chunks_unchecked_mut::<64>() } {
+                    for item in chunk {
+                        *item = item.algebraic_div(count);
+                    }
+                }
+
                 draw_secondary_bargraph_from_iter(
                     mesh,
-                    masking_iterator,
-                    front.masking.len(),
+                    buffer.1.into_iter(),
+                    target_len,
                     bounds,
                     masking_color,
                     None,
@@ -365,11 +390,17 @@ fn draw_spectrogram_image(
     assert!(image_width.is_multiple_of(64));
 
     if clamp_using_smr {
-        let masking_ranges: Vec<f32> = frequencies
-            .iter()
-            .copied()
-            .map(|(_, center, _)| 27.0 - (6.025 - (0.275 * FrequencyScale::Bark.scale(center))))
-            .collect();
+        let masking_ranges: Vec<f32> =
+            unsafe { frequencies.as_chunks_unchecked::<64>() }
+                .iter()
+                .flat_map(|chunk| {
+                    chunk.iter().copied().map(|(_, center, _)| {
+                        27.0_f32.algebraic_sub(6.025_f32.algebraic_sub(
+                            0.275_f32.algebraic_mul(FrequencyScale::Bark.scale(center)),
+                        ))
+                    })
+                })
+                .collect();
 
         assert!(masking_ranges.len().is_multiple_of(64));
 
@@ -412,8 +443,9 @@ fn draw_spectrogram_image(
                             .zip(buffer.iter_mut()),
                     )
                 {
-                    let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0)
-                        .min(map_value_f32(volume - masking, 0.0, range, 0.0, 1.0));
+                    let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).min(
+                        map_value_f32(volume.algebraic_sub(masking), 0.0, range, 0.0, 1.0),
+                    );
 
                     *output = color_table.calculate_index(pan, intensity);
                 }
@@ -792,7 +824,7 @@ pub fn create(
                 let mut spectrogram_image_pixels =
                     vec![Color32::TRANSPARENT; MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES];
                 let mut bargraph_buffer_1 = vec![(0.0, 0.0); MAX_FREQUENCY_BINS];
-                let mut bargraph_buffer_2 = vec![(0.0, 0.0); MAX_FREQUENCY_BINS];
+                let mut bargraph_buffer_2 = vec![0.0; MAX_FREQUENCY_BINS];
 
                 let painter = ui.painter();
                 let max_x = painter.clip_rect().max.x;
