@@ -96,7 +96,7 @@ impl VQsDFT {
     pub(super) fn new(
         freq_bands: &[FrequencyBand],
         window: Window,
-        sample_rate: f64,
+        sample_rate: f32,
         use_nc: bool,
         strict_nc: bool,
     ) -> Self {
@@ -173,18 +173,18 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let q = x.center / (x.high - x.low).abs();
+                            let q = x.center as f64 / (x.high - x.low).abs() as f64;
                             let period = if strict_nc {
-                                (((x.center * 2.0) / (x.center * (1.0 / q))).round()
-                                    * (sample_rate / (x.center * 2.0)))
+                                (((x.center as f64 * 2.0) / (x.center as f64 * (1.0 / q))).round()
+                                    * (sample_rate as f64 / (x.center as f64 * 2.0)))
                                     .round()
                                     .max(1.0)
                             } else {
-                                ((sample_rate / x.center) * q).ceil()
+                                ((sample_rate as f64 / x.center as f64) * q).ceil()
                             };
 
                             assert!(period >= 1.0 && period <= buffer_size_f64);
-                            let q = (x.center * period) / sample_rate;
+                            let q = (x.center as f64 * period) / sample_rate as f64;
 
                             let k_0 = q - 0.5;
                             let k_1 = q + 0.5;
@@ -232,12 +232,12 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let q = x.center / (x.high - x.low).abs();
-                            let period = (sample_rate / x.center) * q;
+                            let q = x.center as f64 / (x.high - x.low).abs() as f64;
+                            let period = (sample_rate as f64 / x.center as f64) * q;
 
                             let period = period.ceil();
                             assert!(period >= 1.0 && period <= buffer_size_f64);
-                            let q = (x.center * period) / sample_rate;
+                            let q = (x.center as f64 * period) / sample_rate as f64;
 
                             let fid = -2.0 * PI * q;
                             let twid = (2.0 * PI * q) / period;
@@ -265,12 +265,12 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let q = x.center / (x.high - x.low).abs();
-                            let period = (sample_rate / x.center) * q;
+                            let q = x.center as f64 / (x.high - x.low).abs() as f64;
+                            let period = (sample_rate as f64 / x.center as f64) * q;
 
                             let period = period.ceil();
                             assert!(period >= 1.0 && period <= buffer_size_f64);
-                            let q = (x.center * period) / sample_rate;
+                            let q = (x.center as f64 * period) / sample_rate as f64;
 
                             let mut fiddles = Vec::with_capacity(items_per_band);
                             let mut twiddles = Vec::with_capacity(items_per_band);
@@ -325,12 +325,12 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let q = x.center / (x.high - x.low).abs();
-                            let period = (sample_rate / x.center) * q;
+                            let q = x.center as f64 / (x.high - x.low).abs() as f64;
+                            let period = (sample_rate as f64 / x.center as f64) * q;
 
                             let period = period.ceil();
                             assert!(period >= 1.0 && period <= buffer_size_f64);
-                            let q = (x.center * period) / sample_rate;
+                            let q = (x.center as f64 * period) / sample_rate as f64;
 
                             let mut fiddles = Vec::with_capacity(items_per_band);
                             let mut twiddles = Vec::with_capacity(items_per_band);
@@ -385,12 +385,12 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let q = x.center / (x.high - x.low).abs();
-                            let period = (sample_rate / x.center) * q;
+                            let q = x.center as f64 / (x.high - x.low).abs() as f64;
+                            let period = (sample_rate as f64 / x.center as f64) * q;
 
                             let period = period.ceil();
                             assert!(period >= 1.0 && period <= buffer_size_f64);
-                            let q = (x.center * period) / sample_rate;
+                            let q = (x.center as f64 * period) / sample_rate as f64;
 
                             let mut fiddles = Vec::with_capacity(items_per_band);
                             let mut twiddles = Vec::with_capacity(items_per_band);
@@ -445,12 +445,12 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let q = x.center / (x.high - x.low).abs();
-                            let period = (sample_rate / x.center) * q;
+                            let q = x.center as f64 / (x.high - x.low).abs() as f64;
+                            let period = (sample_rate as f64 / x.center as f64) * q;
 
                             let period = period.ceil();
                             assert!(period >= 1.0 && period <= buffer_size_f64);
-                            let q = (x.center * period) / sample_rate;
+                            let q = (x.center as f64 * period) / sample_rate as f64;
 
                             let mut fiddles = Vec::with_capacity(items_per_band);
                             let mut twiddles = Vec::with_capacity(items_per_band);
@@ -505,12 +505,12 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let q = x.center / (x.high - x.low).abs();
-                            let period = (sample_rate / x.center) * q;
+                            let q = x.center as f64 / (x.high - x.low).abs() as f64;
+                            let period = (sample_rate as f64 / x.center as f64) * q;
 
                             let period = period.ceil();
                             assert!(period >= 1.0 && period <= buffer_size_f64);
-                            let q = (x.center * period) / sample_rate;
+                            let q = (x.center as f64 * period) / sample_rate as f64;
 
                             let mut fiddles = Vec::with_capacity(items_per_band);
                             let mut twiddles = Vec::with_capacity(items_per_band);

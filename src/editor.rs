@@ -360,9 +360,7 @@ fn draw_spectrogram_image(
         let masking_ranges: Vec<f32> = frequencies
             .iter()
             .copied()
-            .map(|(_, center, _)| {
-                27.0 - (6.025 - (0.275 * FrequencyScale::Bark.scale(center as f64) as f32))
-            })
+            .map(|(_, center, _)| 27.0 - (6.025 - (0.275 * FrequencyScale::Bark.scale(center))))
             .collect();
 
         for (y, analysis) in spectrogram.data.iter().enumerate() {
@@ -542,10 +540,10 @@ impl Default for RenderSettings {
             agc_duration: Duration::from_secs_f64(1.0),
             agc_above_masking: 40.0,
             agc_below_masking: 0.0,
-            agc_minimum: 3.0 - AnalysisChainConfig::default().listening_volume as f32,
-            agc_maximum: 100.0 - AnalysisChainConfig::default().listening_volume as f32,
-            min_db: 20.0 - AnalysisChainConfig::default().listening_volume as f32,
-            max_db: 80.0 - AnalysisChainConfig::default().listening_volume as f32,
+            agc_minimum: 3.0 - AnalysisChainConfig::default().listening_volume,
+            agc_maximum: 100.0 - AnalysisChainConfig::default().listening_volume,
+            min_db: 20.0 - AnalysisChainConfig::default().listening_volume,
+            max_db: 80.0 - AnalysisChainConfig::default().listening_volume,
             clamp_using_smr: false,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f64(0.67),
@@ -896,7 +894,7 @@ pub fn create(
                     let amplitude_text = if analysis_settings.normalize_amplitude {
                         format!(
                             "{:.0} phon",
-                            under.amplitude as f64 + analysis_settings.listening_volume
+                            under.amplitude + analysis_settings.listening_volume
                         )
                     } else {
                         format!("{:+.0}dBFS", under.amplitude)
@@ -1250,9 +1248,9 @@ pub fn create(
                         } else {
                             if analysis_settings.normalize_amplitude {
                                 let mut min_phon =
-                                    (render_settings.min_db as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
+                                    (render_settings.min_db + analysis_settings.listening_volume).clamp(0.0, 100.0);
                                 let mut max_phon =
-                                    (render_settings.max_db as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
+                                    (render_settings.max_db + analysis_settings.listening_volume).clamp(0.0, 100.0);
 
                                 if ui.add(
                                     egui::Slider::new(&mut max_phon, 0.0..=100.0)
@@ -1262,7 +1260,7 @@ pub fn create(
                                         .text("Maximum amplitude"),
                                 ).changed() {
                                     render_settings.max_db =
-                                        (max_phon - analysis_settings.listening_volume) as f32;
+                                        max_phon - analysis_settings.listening_volume;
                                 }
 
                                 if ui.add(
@@ -1273,7 +1271,7 @@ pub fn create(
                                         .text("Minimum amplitude"),
                                 ).changed() {
                                     render_settings.min_db =
-                                        (min_phon - analysis_settings.listening_volume) as f32;
+                                        min_phon - analysis_settings.listening_volume;
                                 }
                             } else {
                                 ui.add(
@@ -1355,14 +1353,14 @@ pub fn create(
                         if ui.button("Reset Render Options").clicked() {
                             *render_settings = RenderSettings::default();
                             render_settings.max_db =
-                                    (80.0 - analysis_settings.listening_volume) as f32;
+                                    80.0 - analysis_settings.listening_volume;
                             render_settings.min_db =
-                                    (20.0 - analysis_settings.listening_volume) as f32;
+                                    20.0 - analysis_settings.listening_volume;
                             if analysis_settings.normalize_amplitude {
                                 render_settings.agc_minimum =
-                                    (3.0 - analysis_settings.listening_volume) as f32;
+                                    3.0 - analysis_settings.listening_volume;
                                 render_settings.agc_maximum =
-                                    (100.0 - analysis_settings.listening_volume) as f32;
+                                    100.0 - analysis_settings.listening_volume;
                             } else {
                                 render_settings.agc_minimum =
                                     f32::NEG_INFINITY;
@@ -1410,7 +1408,7 @@ pub fn create(
                                     .fixed_decimals(0)
                                     .text("Analysis gain"),
                             )
-                            .on_hover_text("This setting adjusts the amplitude of the incoming signal before it is processed (but does not affect the plugin's output channels; audio is always passed through unmodified).\n\nAll internal audio processing is done using 64-bit floating point, so this can be adjusted freely without concern for clipping.")
+                            .on_hover_text("This setting adjusts the amplitude of the incoming signal before it is processed (but does not affect the plugin's output channels; audio is always passed through unmodified).\n\nAll internal audio processing is done using 32-bit floating point, so this can be adjusted freely without concern for clipping.")
                             .changed()
                         {
                             update(&analysis_settings);
@@ -1449,9 +1447,9 @@ pub fn create(
                                 update(&analysis_settings);
                                 if analysis_settings.normalize_amplitude {
                                     render_settings.agc_minimum =
-                                        (3.0 - analysis_settings.listening_volume) as f32;
+                                        3.0 - analysis_settings.listening_volume;
                                     render_settings.agc_maximum =
-                                        (100.0 - analysis_settings.listening_volume) as f32;
+                                        100.0 - analysis_settings.listening_volume;
                                 } else {
                                     render_settings.agc_minimum =
                                         f32::NEG_INFINITY;
@@ -1464,11 +1462,11 @@ pub fn create(
 
                         if analysis_settings.normalize_amplitude {
                             let old_tone_threshold_phon =
-                                (analysis_settings.midi_tone_amplitude_threshold as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
+                                (analysis_settings.midi_tone_amplitude_threshold + analysis_settings.listening_volume).clamp(0.0, 100.0);
                             let old_min_phon =
-                                (render_settings.min_db as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
+                                (render_settings.min_db + analysis_settings.listening_volume).clamp(0.0, 100.0);
                             let old_max_phon =
-                                (render_settings.max_db as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
+                                (render_settings.max_db + analysis_settings.listening_volume).clamp(0.0, 100.0);
 
                             if ui
                                 .add(
@@ -1484,15 +1482,15 @@ pub fn create(
                             {
                                 update_and_clear(&analysis_settings);
                                 analysis_settings.midi_tone_amplitude_threshold =
-                                    (old_tone_threshold_phon - analysis_settings.listening_volume) as f32;
+                                    old_tone_threshold_phon - analysis_settings.listening_volume;
                                 render_settings.min_db =
-                                    (old_min_phon - analysis_settings.listening_volume) as f32;
+                                    old_min_phon - analysis_settings.listening_volume;
                                 render_settings.max_db =
-                                    (old_max_phon - analysis_settings.listening_volume) as f32;
+                                    old_max_phon - analysis_settings.listening_volume;
                                 render_settings.agc_minimum =
-                                    (3.0 - analysis_settings.listening_volume) as f32;
+                                    3.0 - analysis_settings.listening_volume;
                                 render_settings.agc_maximum =
-                                    (100.0 - analysis_settings.listening_volume) as f32;
+                                    100.0 - analysis_settings.listening_volume;
                                 egui_ctx.request_discard("Changed setting");
                                 return;
                             };
@@ -1910,7 +1908,7 @@ pub fn create(
 
                                 if analysis_settings.normalize_amplitude {
                                     let mut tone_threshold_phon =
-                                        (analysis_settings.midi_tone_amplitude_threshold as f64 + analysis_settings.listening_volume).clamp(0.0, 100.0);
+                                        (analysis_settings.midi_tone_amplitude_threshold + analysis_settings.listening_volume).clamp(0.0, 100.0);
 
                                     if ui
                                         .add(
@@ -1924,7 +1922,7 @@ pub fn create(
                                         .changed()
                                     {
                                         analysis_settings.midi_tone_amplitude_threshold =
-                                            (tone_threshold_phon - analysis_settings.listening_volume) as f32;
+                                            tone_threshold_phon - analysis_settings.listening_volume;
                                         update(&analysis_settings);
                                         egui_ctx.request_discard("Changed setting");
                                         return;
@@ -1986,13 +1984,13 @@ pub fn create(
                         if ui.button("Reset Analysis Options").clicked() {
                             *analysis_settings = AnalysisChainConfig::default();
                             render_settings.max_db =
-                                (80.0 - analysis_settings.listening_volume) as f32;
+                                80.0 - analysis_settings.listening_volume;
                             render_settings.min_db =
-                                (20.0 - analysis_settings.listening_volume) as f32;
+                                20.0 - analysis_settings.listening_volume;
                             render_settings.agc_minimum =
-                                (3.0 - analysis_settings.listening_volume) as f32;
+                                3.0 - analysis_settings.listening_volume;
                             render_settings.agc_maximum =
-                                (100.0 - analysis_settings.listening_volume) as f32;
+                                100.0 - analysis_settings.listening_volume;
                             update_and_clear(&analysis_settings);
                         }
                     });

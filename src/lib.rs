@@ -323,8 +323,8 @@ impl Plugin for MyPlugin {
 
 #[derive(Clone)]
 pub(crate) struct AnalysisChainConfig {
-    gain: f64,
-    listening_volume: f64,
+    gain: f32,
+    listening_volume: f32,
     normalize_amplitude: bool,
     masking: bool,
     approximate_masking: bool,
@@ -343,13 +343,13 @@ pub(crate) struct AnalysisChainConfig {
     midi_pressure_max_amplitude: f32,
 
     resolution: usize,
-    start_frequency: f64,
-    end_frequency: f64,
+    start_frequency: f32,
+    end_frequency: f32,
     erb_frequency_scale: bool,
     erb_time_resolution: bool,
-    erb_bandwidth_divisor: f64,
-    time_resolution_clamp: (f64, f64),
-    q_time_resolution: f64,
+    erb_bandwidth_divisor: f32,
+    time_resolution_clamp: (f32, f32),
+    q_time_resolution: f32,
     nc_method: bool,
 }
 
@@ -360,7 +360,7 @@ impl Default for AnalysisChainConfig {
             listening_volume: 90.0,
             normalize_amplitude: true,
             masking: true,
-            approximate_masking: true,
+            approximate_masking: false,
             internal_buffering: true,
             update_rate_hz: 2048.0,
             resolution: 1024,
@@ -399,7 +399,7 @@ pub(crate) struct AnalysisChain {
     chunker: StftHelper<0>,
     left_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
     right_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
-    gain: f64,
+    gain: f32,
     internal_buffering: bool,
     output_osc: bool,
     osc_socket_address: String,
@@ -411,7 +411,7 @@ pub(crate) struct AnalysisChain {
     midi_pressure_min_amplitude: f32,
     midi_pressure_max_amplitude: f32,
     update_rate: f64,
-    listening_volume: Option<f64>,
+    listening_volume: Option<f32>,
     masking: bool,
     approximate_masking: bool,
     pub(crate) latency_samples: u32,
@@ -455,12 +455,7 @@ impl AnalysisChain {
         {
             let mut frequencies = frequency_list_container.write();
             frequencies.clear();
-            frequencies.extend(
-                analyzer
-                    .frequencies()
-                    .iter()
-                    .map(|(a, b, c)| (*a as f32, *b as f32, *c as f32)),
-            );
+            frequencies.extend(analyzer.frequencies().iter().map(|(a, b, c)| (*a, *b, *c)));
         }
 
         Self {
@@ -525,7 +520,7 @@ impl AnalysisChain {
                         let (ref _buffer, ref mut analyzer) = *lock;
 
                         analyzer.analyze(
-                            buffer.iter().map(|s| *s as f64),
+                            buffer.iter().copied(),
                             self.listening_volume,
                             self.approximate_masking,
                         );
@@ -545,7 +540,7 @@ impl AnalysisChain {
                             let (ref mut buffer, ref mut analyzer) = *lock;
 
                             analyzer.analyze(
-                                buffer.iter().map(|s| *s as f64),
+                                buffer.iter().copied(),
                                 listening_volume,
                                 approximate_masking,
                             );
@@ -593,7 +588,7 @@ impl AnalysisChain {
                 let (ref _buffer, ref mut analyzer) = *lock;
 
                 analyzer.analyze(
-                    buffer.as_slice()[0].iter().map(|s| *s as f64),
+                    buffer.as_slice()[0].iter().copied(),
                     self.listening_volume,
                     self.approximate_masking,
                 );
@@ -623,7 +618,7 @@ impl AnalysisChain {
                         let (ref mut buffer, ref mut analyzer) = *lock;
 
                         analyzer.analyze(
-                            buffer.iter().map(|s| *s as f64),
+                            buffer.iter().copied(),
                             listening_volume,
                             approximate_masking,
                         );
@@ -728,7 +723,7 @@ impl AnalysisChain {
             let osc_resource_address_stats = self.osc_resource_address_stats.clone();
             let osc_socket = self.osc_socket.clone();
             let osc_output = self.osc_output.clone();
-            let listening_volume = self.listening_volume.map(|l| l as f32);
+            let listening_volume = self.listening_volume;
 
             let osc_spectrum_metadata = if let Some(listening_volume) = listening_volume {
                 (
@@ -890,7 +885,7 @@ impl AnalysisChain {
             let left = left_analyzer.raw_analysis();
             let right = right_analyzer.raw_analysis();
 
-            let gain_amplitude = dbfs_to_amplitude(self.gain);
+            let gain_amplitude = dbfs_to_amplitude(self.gain as f64);
 
             for (index, ((_, volume), (_, center, _))) in spectrogram.data[0]
                 .data
@@ -1058,12 +1053,7 @@ impl AnalysisChain {
 
             let mut frequencies = self.frequencies.write();
             frequencies.clear();
-            frequencies.extend(
-                analyzer
-                    .frequencies()
-                    .iter()
-                    .map(|(a, b, c)| (*a as f32, *b as f32, *c as f32)),
-            );
+            frequencies.extend(analyzer.frequencies().iter().map(|(a, b, c)| (*a, *b, *c)));
 
             self.left_analyzer =
                 Arc::new(Mutex::new((vec![0.0; self.chunk_size], analyzer.clone())));
