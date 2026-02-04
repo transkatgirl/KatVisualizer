@@ -137,16 +137,25 @@ impl Masker {
         masking_threshold: &mut [f32],
         approximate: bool,
     ) {
-        if self.average_width >= 128 {
-            if self.average_width >= 512 {
-                self.calculate_masking_threshold_inner::<32>(
+        if approximate {
+            if self.average_width >= 128 {
+                /*if self.average_width >= 512 {
+                    self.calculate_masking_threshold_inner::<32>(
+                        spectrum,
+                        listening_volume,
+                        masking_threshold,
+                        approximate,
+                    );
+                } else {*/
+                self.calculate_masking_threshold_inner::<16>(
                     spectrum,
                     listening_volume,
                     masking_threshold,
                     approximate,
                 );
+                //}
             } else {
-                self.calculate_masking_threshold_inner::<16>(
+                self.calculate_masking_threshold_inner::<8>(
                     spectrum,
                     listening_volume,
                     masking_threshold,
@@ -154,12 +163,30 @@ impl Masker {
                 );
             }
         } else {
-            self.calculate_masking_threshold_inner::<8>(
-                spectrum,
-                listening_volume,
-                masking_threshold,
-                approximate,
-            );
+            if self.average_width >= 256 {
+                /*if self.average_width >= 1024 {
+                    self.calculate_masking_threshold_inner::<32>(
+                        spectrum,
+                        listening_volume,
+                        masking_threshold,
+                        approximate,
+                    );
+                } else {*/
+                self.calculate_masking_threshold_inner::<16>(
+                    spectrum,
+                    listening_volume,
+                    masking_threshold,
+                    approximate,
+                );
+                //}
+            } else {
+                self.calculate_masking_threshold_inner::<8>(
+                    spectrum,
+                    listening_volume,
+                    masking_threshold,
+                    approximate,
+                );
+            }
         }
     }
     fn calculate_masking_threshold_inner<const N: usize>(
