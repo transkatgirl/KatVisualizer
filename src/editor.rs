@@ -119,7 +119,7 @@ fn draw_bargraph(
                 }
             }
 
-            draw_bargraph_from_iter(mesh, &buffer.0, bounds, color_table, (max_db, min_db));
+            draw_bargraph_from(mesh, &buffer.0, bounds, color_table, (max_db, min_db));
 
             if let Some(masking_color) = masking_color {
                 assert_eq!(front.masking.len(), buffer.1.len());
@@ -155,7 +155,7 @@ fn draw_bargraph(
         }
     }
 
-    draw_bargraph_from_iter(mesh, &front.data, bounds, color_table, (max_db, min_db));
+    draw_bargraph_from(mesh, &front.data, bounds, color_table, (max_db, min_db));
     if let Some(masking_color) = masking_color {
         draw_secondary_bargraph_from_pairs(
             mesh,
@@ -167,7 +167,7 @@ fn draw_bargraph(
     }
 }
 
-fn draw_bargraph_from_iter(
+fn draw_bargraph_from(
     mesh: &mut Mesh,
     analysis: &[(f32, f32)],
     bounds: Rect,
@@ -181,54 +181,78 @@ fn draw_bargraph_from_iter(
 
     let band_width = width / analysis.len() as f32;
 
-    for (i, (pan, volume)) in analysis.iter().copied().enumerate() {
-        let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+    let mut buffer = [(0, Rect::ZERO); 64];
 
-        let start_x = bounds.min.x + i as f32 * band_width;
+    for (ci, chunk) in unsafe { analysis.as_chunks_unchecked::<64>() }
+        .iter()
+        .enumerate()
+    {
+        let offset = ci * 64;
 
-        let rect = Rect {
-            min: Pos2 {
-                x: start_x,
-                y: bounds.max.y - intensity * height,
-            },
-            max: Pos2 {
-                x: start_x + band_width,
-                y: bounds.max.y,
-            },
-        };
-        let color = color_table.lookup(pan, intensity);
+        for (ii, ((pan, volume), output)) in
+            chunk.iter().copied().zip(buffer.iter_mut()).enumerate()
+        {
+            let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
 
-        mesh.indices.extend_from_slice(&[
-            vertices,
-            vertices + 1,
-            vertices + 2,
-            vertices + 2,
-            vertices + 1,
-            vertices + 3,
-        ]);
-        mesh.vertices.extend_from_slice(&[
-            Vertex {
-                pos: rect.left_top(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.right_top(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.left_bottom(),
-                uv: WHITE_UV,
-                color,
-            },
-            Vertex {
-                pos: rect.right_bottom(),
-                uv: WHITE_UV,
-                color,
-            },
-        ]);
-        vertices += 4;
+            let start_x = bounds
+                .min
+                .x
+                .algebraic_add(((offset + ii) as f32).algebraic_mul(band_width));
+
+            let rect = Rect {
+                min: Pos2 {
+                    x: start_x,
+                    y: bounds.max.y.algebraic_sub(intensity.algebraic_mul(height)),
+                },
+                max: Pos2 {
+                    x: start_x.algebraic_add(band_width),
+                    y: bounds.max.y,
+                },
+            };
+
+            let index = color_table.calculate_index(pan, intensity);
+
+            *output = (index, rect);
+        }
+
+        for _ in 0..64 {
+            mesh.indices.extend_from_slice(&[
+                vertices,
+                vertices + 1,
+                vertices + 2,
+                vertices + 2,
+                vertices + 1,
+                vertices + 3,
+            ]);
+            vertices += 4;
+        }
+
+        for (index, rect) in buffer {
+            let color = unsafe { color_table.get_unchecked(index) };
+
+            mesh.vertices.extend_from_slice(&[
+                Vertex {
+                    pos: rect.left_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.left_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+            ]);
+        }
     }
 }
 
@@ -276,7 +300,7 @@ fn draw_secondary_bargraph(
             *output = rect;
         }
 
-        for rect in buffer {
+        for _ in 0..64 {
             mesh.indices.extend_from_slice(&[
                 vertices,
                 vertices + 1,
@@ -285,6 +309,10 @@ fn draw_secondary_bargraph(
                 vertices + 1,
                 vertices + 3,
             ]);
+            vertices += 4;
+        }
+
+        for rect in buffer {
             mesh.vertices.extend_from_slice(&[
                 Vertex {
                     pos: rect.left_top(),
@@ -307,7 +335,6 @@ fn draw_secondary_bargraph(
                     color,
                 },
             ]);
-            vertices += 4;
         }
     }
 }
@@ -357,7 +384,7 @@ fn draw_secondary_bargraph_from_pairs(
             *output = rect;
         }
 
-        for rect in buffer {
+        for _ in 0..64 {
             mesh.indices.extend_from_slice(&[
                 vertices,
                 vertices + 1,
@@ -366,6 +393,10 @@ fn draw_secondary_bargraph_from_pairs(
                 vertices + 1,
                 vertices + 3,
             ]);
+            vertices += 4;
+        }
+
+        for rect in buffer {
             mesh.vertices.extend_from_slice(&[
                 Vertex {
                     pos: rect.left_top(),
@@ -388,7 +419,6 @@ fn draw_secondary_bargraph_from_pairs(
                     color,
                 },
             ]);
-            vertices += 4;
         }
     }
 }
@@ -716,7 +746,7 @@ impl ColorTable {
             }
         }
     }
-    fn lookup(&self, split: f32, intensity: f32) -> Color32 {
+    /*fn lookup(&self, split: f32, intensity: f32) -> Color32 {
         let location = (
             map_value_f32(split, -1.0, 1.0, 0.0, self.max.0)
                 .round()
@@ -735,7 +765,7 @@ impl ColorTable {
         //let color = self.table[(location.0 * self.size.1) + location.1];
 
         Color32::from_rgb(color.0, color.1, color.2)
-    }
+    }*/
     fn calculate_index(&self, split: f32, intensity: f32) -> usize {
         let location = (
             map_value_f32(split, -1.0, 1.0, 0.0, self.max.0)
