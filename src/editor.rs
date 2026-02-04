@@ -56,9 +56,12 @@ fn calculate_volume_min_max(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 fn draw_bargraph(
     mesh: &mut Mesh,
     spectrogram: &BetterSpectrogram,
+    buffer: (Vec<(f32, f32)>, Vec<(f32, f32)>),
     bounds: Rect,
     color_table: &ColorTable,
     masking_color: Option<Color32>,
@@ -66,6 +69,9 @@ fn draw_bargraph(
     averaging: Duration,
 ) {
     let front = &spectrogram.data.front().unwrap();
+
+    //assert_eq!(front.data.len(), buffer.0.len());
+    //assert_eq!(buffer.0.len(), buffer.1.len());
 
     if !averaging.is_zero() {
         let target_len = front.data.len();
@@ -545,6 +551,7 @@ struct RenderSettings {
     minimum_lightness: f32,
     maximum_lightness: f32,
     maximum_chroma: f32,
+    lookup_size: usize,
     automatic_gain: bool,
     agc_duration: Duration,
     agc_above_masking: f32,
@@ -573,6 +580,7 @@ impl Default for RenderSettings {
             maximum_lightness: 0.82,
             maximum_chroma: 0.09,
             automatic_gain: true,
+            lookup_size: 6,
             agc_duration: Duration::from_secs_f64(1.0),
             agc_above_masking: 40.0,
             agc_below_masking: 0.0,
@@ -599,18 +607,15 @@ struct ColorTable {
     max: (f32, f32),
 }
 
-const COLOR_TABLE_CHROMA_SIZE: usize = 512;
-const COLOR_TABLE_LIGHTNESS_SIZE: usize = 1024;
+const COLOR_TABLE_BASE_CHROMA_SIZE: usize = 64;
+const COLOR_TABLE_BASE_LIGHTNESS_SIZE: usize = 128;
 
 impl ColorTable {
-    fn new() -> Self {
+    fn new(chroma_size: usize, lightness_size: usize) -> Self {
         Self {
-            table: vec![(0, 0, 0); COLOR_TABLE_CHROMA_SIZE * COLOR_TABLE_LIGHTNESS_SIZE],
-            size: (COLOR_TABLE_CHROMA_SIZE, COLOR_TABLE_LIGHTNESS_SIZE),
-            max: (
-                (COLOR_TABLE_CHROMA_SIZE - 1) as f32,
-                (COLOR_TABLE_LIGHTNESS_SIZE - 1) as f32,
-            ),
+            table: vec![(0, 0, 0); chroma_size * lightness_size],
+            size: (chroma_size, lightness_size),
+            max: ((chroma_size - 1) as f32, (lightness_size - 1) as f32),
         }
     }
     fn build(
@@ -722,7 +727,10 @@ pub fn create(
 
     let shared_state = {
         let settings = RenderSettings::default();
-        let mut color_table = ColorTable::new();
+        let mut color_table = ColorTable::new(
+            COLOR_TABLE_BASE_CHROMA_SIZE * settings.lookup_size,
+            COLOR_TABLE_BASE_LIGHTNESS_SIZE * settings.lookup_size,
+        );
         color_table.build(
             settings.left_hue,
             settings.right_hue,
@@ -783,6 +791,8 @@ pub fn create(
 
                 let mut spectrogram_image_pixels =
                     vec![Color32::TRANSPARENT; MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES];
+                let mut bargraph_buffer_1 = vec![(0.0, 0.0); MAX_FREQUENCY_BINS];
+                let mut bargraph_buffer_2 = vec![(0.0, 0.0); MAX_FREQUENCY_BINS];
 
                 let painter = ui.painter();
                 let max_x = painter.clip_rect().max.x;
@@ -825,6 +835,8 @@ pub fn create(
                 .round() as usize;
 
                 spectrogram_image_pixels.truncate(spectrogram_width * spectrogram_height);
+                bargraph_buffer_1.truncate(spectrogram_width);
+                bargraph_buffer_2.truncate(spectrogram_width);
 
                 let mut spectrogram_image = ColorImage {
                     size: [spectrogram_width, spectrogram_height],
@@ -846,6 +858,7 @@ pub fn create(
                         draw_bargraph(
                             &mut bargraph_mesh,
                             &spectrogram,
+                            (bargraph_buffer_1, bargraph_buffer_2),
                             bargraph_bounds,
                             color_table,
                             Some(settings.masking_color),
@@ -856,6 +869,7 @@ pub fn create(
                         draw_bargraph(
                             &mut bargraph_mesh,
                             &spectrogram,
+                            (bargraph_buffer_1, bargraph_buffer_2),
                             bargraph_bounds,
                             color_table,
                             None,
@@ -1258,6 +1272,29 @@ pub fn create(
                             );
                         };
 
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut render_settings.lookup_size, 1..=8)
+                                    .logarithmic(true)
+                                    .clamping(egui::SliderClamping::Always)
+                                    .text("Color lookup table size multiplier"),
+                            )
+                            .changed()
+                        {
+                            let mut color_table = shared_state.color_table.write();
+
+                            *color_table = ColorTable::new(
+                                COLOR_TABLE_BASE_CHROMA_SIZE * render_settings.lookup_size,
+                                COLOR_TABLE_BASE_LIGHTNESS_SIZE * render_settings.lookup_size,
+                            );
+                            color_table.build(
+                                render_settings.left_hue,
+                                render_settings.right_hue,
+                                render_settings.minimum_lightness,
+                                render_settings.maximum_lightness,
+                                render_settings.maximum_chroma,
+                            );
+                        };
 
                         if analysis_settings.masking {
                             ui.checkbox(&mut render_settings.automatic_gain, "Automatic amplitude ranging");
