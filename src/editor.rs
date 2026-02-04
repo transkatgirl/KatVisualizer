@@ -356,12 +356,16 @@ fn draw_spectrogram_image(
     let image_width = image.width();
     let image_height = image.height();
 
+    assert!(image_width.is_multiple_of(64));
+
     if clamp_using_smr {
         let masking_ranges: Vec<f32> = frequencies
             .iter()
             .copied()
             .map(|(_, center, _)| 27.0 - (6.025 - (0.275 * FrequencyScale::Bark.scale(center))))
             .collect();
+
+        assert!(masking_ranges.len().is_multiple_of(64));
 
         for (y, analysis) in spectrogram.data.iter().enumerate() {
             if analysis.data.len() != image_width
@@ -371,27 +375,46 @@ fn draw_spectrogram_image(
                 break;
             }
 
-            for ((pan, volume), (((_, masking), range), pixel)) in
-                analysis.data.iter().copied().zip(
-                    analysis
-                        .masking
-                        .iter()
-                        .copied()
-                        .zip(masking_ranges.iter().copied())
-                        .zip(
-                            unsafe { image.pixels.get_unchecked_mut((image_width * y)..) }
-                                .iter_mut(),
-                        ),
-                )
+            for (analysis_chunk, (masking_chunk, (masking_range_chunk, pixel_chunk))) in
+                unsafe { analysis.data.as_chunks_unchecked::<64>() }
+                    .iter()
+                    .zip(
+                        unsafe { analysis.masking.as_chunks_unchecked::<64>() }
+                            .iter()
+                            .zip(
+                                unsafe { masking_ranges.as_chunks_unchecked::<64>() }
+                                    .iter()
+                                    .zip(unsafe {
+                                        image
+                                            .pixels
+                                            .get_unchecked_mut(
+                                                (image_width * y)..(image_width * (y + 1)),
+                                            )
+                                            .as_chunks_unchecked_mut::<64>()
+                                    }),
+                            ),
+                    )
             {
-                let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).min(map_value_f32(
-                    volume - masking,
-                    0.0,
-                    range,
-                    0.0,
-                    1.0,
-                ));
-                *pixel = color_table.lookup(pan, intensity);
+                let mut buffer = [0; 64];
+
+                for ((pan, volume), (((_, masking), range), output)) in
+                    analysis_chunk.iter().copied().zip(
+                        masking_chunk
+                            .iter()
+                            .copied()
+                            .zip(masking_range_chunk.iter().copied())
+                            .zip(buffer.iter_mut()),
+                    )
+                {
+                    let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0)
+                        .min(map_value_f32(volume - masking, 0.0, range, 0.0, 1.0));
+
+                    *output = color_table.calculate_index(pan, intensity);
+                }
+
+                for (index, pixel) in buffer.into_iter().zip(pixel_chunk) {
+                    *pixel = unsafe { color_table.get_unchecked(index) };
+                }
             }
         }
     } else {
@@ -403,14 +426,27 @@ fn draw_spectrogram_image(
                 break;
             }
 
-            for ((pan, volume), pixel) in analysis
-                .data
-                .iter()
-                .copied()
-                .zip(unsafe { image.pixels.get_unchecked_mut((image_width * y)..) }.iter_mut())
+            for (analysis_chunk, pixel_chunk) in
+                unsafe { analysis.data.as_chunks_unchecked::<64>() }
+                    .iter()
+                    .zip(unsafe {
+                        image
+                            .pixels
+                            .get_unchecked_mut((image_width * y)..(image_width * (y + 1)))
+                            .as_chunks_unchecked_mut::<64>()
+                    })
             {
-                let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0);
-                *pixel = color_table.lookup(pan, intensity);
+                let mut buffer = [0; 64];
+
+                for ((pan, volume), output) in analysis_chunk.iter().copied().zip(buffer.iter_mut())
+                {
+                    let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0);
+                    *output = color_table.calculate_index(pan, intensity);
+                }
+
+                for (index, pixel) in buffer.into_iter().zip(pixel_chunk) {
+                    *pixel = unsafe { color_table.get_unchecked(index) };
+                }
             }
         }
     }
@@ -644,6 +680,22 @@ impl ColorTable {
 
         //let color = self.table[(location.0 * self.size.1) + location.1];
 
+        Color32::from_rgb(color.0, color.1, color.2)
+    }
+    fn calculate_index(&self, split: f32, intensity: f32) -> usize {
+        let location = (
+            map_value_f32(split, -1.0, 1.0, 0.0, self.max.0)
+                .round()
+                .clamp(0.0, self.max.0) as usize,
+            map_value_f32(intensity, 0.0, 1.0, 0.0, self.max.1)
+                .round()
+                .clamp(0.0, self.max.1) as usize,
+        );
+
+        (location.0 * self.size.1) + location.1
+    }
+    unsafe fn get_unchecked(&self, index: usize) -> Color32 {
+        let color = unsafe { *self.table.get_unchecked(index) };
         Color32::from_rgb(color.0, color.1, color.2)
     }
 }
