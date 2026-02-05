@@ -842,7 +842,7 @@ pub fn create(
             },
             enable_vsync_on_x11: false,
             gl_config: GlConfig {
-                vsync: false,
+                vsync: true,
                 ..Default::default()
             },
         },
