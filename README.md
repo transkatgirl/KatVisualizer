@@ -60,6 +60,7 @@ If you experience performance issues out of the box, the settings with the large
 - Analysis Options -> Approximate spreading function (enabling it will hurt psychoacoustic accuracy)
 - Analysis Options -> Update rate (decreasing it may hurt readability)
 - Analysis Options -> Resolution (decreasing it may hurt readability)
+- Analysis Options -> Color lookup table size multiplier (decreasing it may hurt readability)
 - Analysis Options -> Perform simultaneous masking (disabling may hurt readability)
 - Render Options -> Spectrogram duration
 
@@ -104,7 +105,7 @@ If you're having performance or latency issues, enabling performance counters ca
 	- Affected by plugin buffer size (set by the host, or the `--period-size` flag in standalone mode)
 	- Affected by processing time
 - frame = Time between each frame.
-	- This is rarely the issue. Generally, the appearance of dropped frames is caused by high buffering time, not a variance in frame times.
+	<!-- - This is rarely the issue. Generally, the appearance of dropped frames is caused by high buffering time, not a variance in frame times. -->
 	- Affected by buffering time & rasterize time
 		- These only increase the frame time when they exceed what can be compensated for by the renderer.
 
