@@ -376,7 +376,7 @@ dependencies = [
 [[package]]
 name = "baseview"
 version = "0.1.0"
-source = "git+https://github.com/RustAudio/baseview.git?rev=237d323c729f3aa99476ba3efa50129c5e86cad3#237d323c729f3aa99476ba3efa50129c5e86cad3"
+source = "git+https://github.com/RustAudio/baseview.git?rev=579130ecb4f9f315ae52190af42f0ea46aeaa4a2#579130ecb4f9f315ae52190af42f0ea46aeaa4a2"
 dependencies = [
  "cocoa",
  "core-foundation",
@@ -393,7 +393,7 @@ dependencies = [
 [[package]]
 name = "baseview"
 version = "0.1.0"
-source = "git+https://github.com/RustAudio/baseview.git?rev=579130ecb4f9f315ae52190af42f0ea46aeaa4a2#579130ecb4f9f315ae52190af42f0ea46aeaa4a2"
+source = "git+https://github.com/transkatgirl/baseview.git?rev=783fa9a8017af7d627d727e85a3a77a9b013bf39#783fa9a8017af7d627d727e85a3a77a9b013bf39"
 dependencies = [
  "cocoa",
  "core-foundation",
@@ -1064,9 +1064,9 @@ dependencies = [
 [[package]]
 name = "egui-baseview"
 version = "0.7.0"
-source = "git+https://github.com/BillyDM/egui-baseview.git?rev=e8a43d4c4029f9380206a52777d10c0ddbbb1d66#e8a43d4c4029f9380206a52777d10c0ddbbb1d66"
+source = "git+https://github.com/transkatgirl/egui-baseview.git?rev=c45c3a5f71f0f377ea95df9cdfe1ae8a51e0d42b#c45c3a5f71f0f377ea95df9cdfe1ae8a51e0d42b"
 dependencies = [
- "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=237d323c729f3aa99476ba3efa50129c5e86cad3)",
+ "baseview 0.1.0 (git+https://github.com/transkatgirl/baseview.git?rev=783fa9a8017af7d627d727e85a3a77a9b013bf39)",
  "copypasta",
  "egui",
  "egui_glow",
@@ -1859,9 +1859,9 @@ dependencies = [
 [[package]]
 name = "nih_plug_egui"
 version = "0.1.0"
-source = "git+https://github.com/BillyDM/egui-baseview.git?rev=e8a43d4c4029f9380206a52777d10c0ddbbb1d66#e8a43d4c4029f9380206a52777d10c0ddbbb1d66"
+source = "git+https://github.com/transkatgirl/egui-baseview.git?rev=c45c3a5f71f0f377ea95df9cdfe1ae8a51e0d42b#c45c3a5f71f0f377ea95df9cdfe1ae8a51e0d42b"
 dependencies = [
- "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=237d323c729f3aa99476ba3efa50129c5e86cad3)",
+ "baseview 0.1.0 (git+https://github.com/transkatgirl/baseview.git?rev=783fa9a8017af7d627d727e85a3a77a9b013bf39)",
  "crossbeam",
  "egui-baseview",
  "nih_plug",

@@ -671,7 +671,7 @@ impl Default for RenderSettings {
             clamp_using_smr: false,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f64(0.67),
-            bargraph_averaging: Duration::from_secs_f64(1.0 / 60.0),
+            bargraph_averaging: Duration::from_secs_f64(BASELINE_TARGET_FRAME_SECS),
             spectrogram_nearest_neighbor: false,
             show_performance: true,
             show_format: false,
@@ -794,7 +794,8 @@ struct SharedState {
     spectrogram_texture: Arc<RwLock<Option<TextureId>>>,
 }
 
-const PERFORMANCE_METER_TARGET_FPS: f64 = 60.0;
+const BASELINE_TARGET_FPS: f64 = 60.0;
+const BASELINE_TARGET_FRAME_SECS: f64 = 1.0 / BASELINE_TARGET_FPS;
 
 pub fn create(
     params: Arc<PluginParams>,
@@ -841,6 +842,7 @@ pub fn create(
             },
             enable_vsync_on_x11: false,
             gl_config: GlConfig {
+                vsync: true,
                 ..Default::default()
             },
         },
@@ -1232,11 +1234,11 @@ pub fn create(
                             family: egui::FontFamily::Monospace,
                         },
                         if frame_elapsed
-                            >= Duration::from_secs_f64(1.0 / (PERFORMANCE_METER_TARGET_FPS * 0.5))
+                            >= Duration::from_secs_f64(1.0 / (BASELINE_TARGET_FPS * 0.5))
                         {
                             Color32::RED
                         } else if frame_elapsed
-                            >= Duration::from_secs_f64(1.0 / (PERFORMANCE_METER_TARGET_FPS * 0.9))
+                            >= Duration::from_secs_f64(1.0 / (BASELINE_TARGET_FPS * 0.9))
                         {
                             Color32::YELLOW
                         } else {
@@ -1259,12 +1261,12 @@ pub fn create(
                             family: egui::FontFamily::Monospace,
                         },
                         if rasterize_elapsed
-                            >= Duration::from_secs_f64(1.0 / (PERFORMANCE_METER_TARGET_FPS * 4.0))
+                            >= Duration::from_secs_f64(1.0 / (BASELINE_TARGET_FPS * 4.0))
                             || rasterize_proportion > 0.25
                         {
                             Color32::RED
                         } else if rasterize_elapsed
-                            >= Duration::from_secs_f64(1.0 / (PERFORMANCE_METER_TARGET_FPS * 8.0))
+                            >= Duration::from_secs_f64(1.0 / (BASELINE_TARGET_FPS * 8.0))
                             || rasterize_proportion > 0.125
                         {
                             Color32::YELLOW

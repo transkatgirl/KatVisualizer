@@ -28,7 +28,7 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149e
 	"assert_process_allocs",
 	"standalone",
 ] }
-nih_plug_egui = { git = "https://github.com/BillyDM/egui-baseview.git", rev = "e8a43d4c4029f9380206a52777d10c0ddbbb1d66" }
+nih_plug_egui = { git = "https://github.com/transkatgirl/egui-baseview.git", rev = "c45c3a5f71f0f377ea95df9cdfe1ae8a51e0d42b" }
 serde = { version = "1.0", features = [
 	"derive",
 ] }
