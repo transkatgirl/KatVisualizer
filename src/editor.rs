@@ -4,7 +4,7 @@
 use color::{ColorSpaceTag, DynamicColor, Flags, Rgba8, Srgb};
 use nih_plug::prelude::*;
 use nih_plug_egui::{
-    create_egui_editor,
+    EguiSettings, GlConfig, GraphicsConfig, create_egui_editor,
     egui::{
         self, Align2, Color32, ColorImage, FontId, ImageData, Mesh, Pos2, Rect, Shape, TextureId,
         TextureOptions, ThemePreference, Vec2,
@@ -834,7 +834,17 @@ pub fn create(
     create_egui_editor(
         egui_state.clone(),
         (),
-        move |egui_ctx, _| {
+        EguiSettings {
+            graphics_config: GraphicsConfig {
+                dithering: true,
+                shader_version: None,
+            },
+            enable_vsync_on_x11: false,
+            gl_config: GlConfig {
+                ..Default::default()
+            },
+        },
+        move |egui_ctx, _, _| {
             let manager = egui_ctx.tex_manager();
             let mut manager = manager.write();
             let mut spectrogram_texture = spectrogram_texture.write();
@@ -862,7 +872,7 @@ pub fn create(
 
             egui_ctx.set_theme(ThemePreference::Dark);
         },
-        move |egui_ctx, _setter, _| {
+        move |egui_ctx, _setter, _, _| {
             egui_ctx.request_repaint();
 
             egui::CentralPanel::default().show(egui_ctx, |ui| {

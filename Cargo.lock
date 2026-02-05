@@ -376,7 +376,7 @@ dependencies = [
 [[package]]
 name = "baseview"
 version = "0.1.0"
-source = "git+https://github.com/blepfx/baseview.git?rev=042f0c6cbc4a8befdd152f61128a2bd83d7bae12#042f0c6cbc4a8befdd152f61128a2bd83d7bae12"
+source = "git+https://github.com/RustAudio/baseview.git?rev=237d323c729f3aa99476ba3efa50129c5e86cad3#237d323c729f3aa99476ba3efa50129c5e86cad3"
 dependencies = [
  "cocoa",
  "core-foundation",
@@ -1064,14 +1064,14 @@ dependencies = [
 [[package]]
 name = "egui-baseview"
 version = "0.7.0"
-source = "git+https://github.com/BillyDM/egui-baseview.git?rev=b2a98e8ea670f0af41688902c6b94a0a39cafeec#b2a98e8ea670f0af41688902c6b94a0a39cafeec"
+source = "git+https://github.com/BillyDM/egui-baseview.git?rev=e8a43d4c4029f9380206a52777d10c0ddbbb1d66#e8a43d4c4029f9380206a52777d10c0ddbbb1d66"
 dependencies = [
- "baseview 0.1.0 (git+https://github.com/blepfx/baseview.git?rev=042f0c6cbc4a8befdd152f61128a2bd83d7bae12)",
+ "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=237d323c729f3aa99476ba3efa50129c5e86cad3)",
  "copypasta",
  "egui",
  "egui_glow",
  "keyboard-types",
- "log",
+ "nih_plug",
  "open",
  "raw-window-handle 0.5.2",
  "thiserror 2.0.18",
@@ -1812,7 +1812,7 @@ dependencies = [
 [[package]]
 name = "nih_plug"
 version = "0.0.0"
-source = "git+https://github.com/transkatgirl/nih-plug.git?rev=1f132feff0b03df8b5078ffaa1087201c9545d3f#1f132feff0b03df8b5078ffaa1087201c9545d3f"
+source = "git+https://github.com/robbert-vdh/nih-plug.git?rev=28b149ec4d62757d0b448809148a0c3ca6e09a95#28b149ec4d62757d0b448809148a0c3ca6e09a95"
 dependencies = [
  "anyhow",
  "anymap3",
@@ -1849,7 +1849,7 @@ dependencies = [
 [[package]]
 name = "nih_plug_derive"
 version = "0.1.0"
-source = "git+https://github.com/transkatgirl/nih-plug.git?rev=1f132feff0b03df8b5078ffaa1087201c9545d3f#1f132feff0b03df8b5078ffaa1087201c9545d3f"
+source = "git+https://github.com/robbert-vdh/nih-plug.git?rev=28b149ec4d62757d0b448809148a0c3ca6e09a95#28b149ec4d62757d0b448809148a0c3ca6e09a95"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1858,10 +1858,10 @@ dependencies = [
 
 [[package]]
 name = "nih_plug_egui"
-version = "0.0.0"
-source = "git+https://github.com/transkatgirl/nih-plug.git?rev=1f132feff0b03df8b5078ffaa1087201c9545d3f#1f132feff0b03df8b5078ffaa1087201c9545d3f"
+version = "0.1.0"
+source = "git+https://github.com/BillyDM/egui-baseview.git?rev=e8a43d4c4029f9380206a52777d10c0ddbbb1d66#e8a43d4c4029f9380206a52777d10c0ddbbb1d66"
 dependencies = [
- "baseview 0.1.0 (git+https://github.com/blepfx/baseview.git?rev=042f0c6cbc4a8befdd152f61128a2bd83d7bae12)",
+ "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=237d323c729f3aa99476ba3efa50129c5e86cad3)",
  "crossbeam",
  "egui-baseview",
  "nih_plug",
@@ -2939,9 +2939,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.46"
+version = "0.3.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9da98b7d9b7dad93488a84b8248efc35352b0b2657397d4167e7ad67e5d535e5"
+checksum = "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c"
 dependencies = [
  "deranged",
  "itoa",
@@ -2962,9 +2962,9 @@ checksum = "7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca"
 
 [[package]]
 name = "time-macros"
-version = "0.2.26"
+version = "0.2.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78cc610bac2dcee56805c99642447d4c5dbde4d01f752ffea0199aee1f601dc4"
+checksum = "2e70e4c5a0e0a8a4823ad65dfe1a6930e4f4d756dcd9dd7939022b5e8c501215"
 dependencies = [
  "num-conv",
  "time-core",
