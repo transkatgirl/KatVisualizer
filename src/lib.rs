@@ -375,7 +375,7 @@ impl Default for AnalysisChainConfig {
             masking: true,
             approximate_masking: false,
             internal_buffering: true,
-            strict_synchronization: false,
+            strict_synchronization: true,
             update_rate_hz: 2048.0,
             resolution: 1024,
             latency_offset: Duration::ZERO,
