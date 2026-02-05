@@ -1990,6 +1990,21 @@ pub fn create(
                             return;
                         }
 
+                        if analysis_settings.nc_method {
+                            if ui
+                                .checkbox(
+                                    &mut analysis_settings.strict_nc,
+                                    "Use optimal NC method",
+                                )
+                                .on_hover_text("If this is enabled, the \"optimal\" version of the NC method is used, improving filter bandwidth characteristics at the expense of introducing additional banding artifacts into the spectrogram.\nIf this is disabled, an alternate implementation of the NC method is used, which prioritizes the reduction of spectrogram artifacts.")
+                                .changed()
+                            {
+                                update(&analysis_settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            }
+                        }
+
                         ui.collapsing("External Outputs", |ui| {
                             ui.colored_label(
                                 Color32::YELLOW,

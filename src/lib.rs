@@ -364,6 +364,7 @@ pub(crate) struct AnalysisChainConfig {
     time_resolution_clamp: (f32, f32),
     q_time_resolution: f32,
     nc_method: bool,
+    strict_nc: bool,
 }
 
 impl Default for AnalysisChainConfig {
@@ -404,6 +405,7 @@ impl Default for AnalysisChainConfig {
             time_resolution_clamp: BetterAnalyzerConfiguration::default().time_resolution_clamp,
             q_time_resolution: BetterAnalyzerConfiguration::default().q_time_resolution,
             nc_method: BetterAnalyzerConfiguration::default().nc_method,
+            strict_nc: BetterAnalyzerConfiguration::default().strict_nc,
         }
     }
 }
@@ -460,6 +462,7 @@ impl AnalysisChain {
             time_resolution_clamp: config.time_resolution_clamp,
             q_time_resolution: config.q_time_resolution,
             nc_method: config.nc_method,
+            strict_nc: config.strict_nc,
             masking: config.masking,
         });
 
@@ -998,6 +1001,7 @@ impl AnalysisChain {
             time_resolution_clamp: analyzer_config.time_resolution_clamp,
             q_time_resolution: analyzer_config.q_time_resolution,
             nc_method: analyzer_config.nc_method,
+            strict_nc: analyzer_config.strict_nc,
         }
     }
     pub(crate) fn update_config(&mut self, config: &AnalysisChainConfig) {
@@ -1062,6 +1066,7 @@ impl AnalysisChain {
             || old_analyzer_config.erb_bandwidth_divisor != config.erb_bandwidth_divisor
             || old_analyzer_config.q_time_resolution != config.q_time_resolution
             || old_analyzer_config.nc_method != config.nc_method
+            || old_analyzer_config.strict_nc != config.strict_nc
             || old_analyzer_config.masking != config.masking
         {
             let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
@@ -1075,6 +1080,7 @@ impl AnalysisChain {
                 time_resolution_clamp: config.time_resolution_clamp,
                 q_time_resolution: config.q_time_resolution,
                 nc_method: config.nc_method,
+                strict_nc: config.strict_nc,
                 masking: config.masking,
             });
             drop(old_left_analyzer);

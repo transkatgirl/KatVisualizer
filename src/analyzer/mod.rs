@@ -28,6 +28,7 @@ pub struct BetterAnalyzerConfiguration {
     pub erb_bandwidth_divisor: f32,
     pub time_resolution_clamp: (f32, f32),
     pub nc_method: bool,
+    pub strict_nc: bool,
 
     pub masking: bool,
 }
@@ -46,6 +47,7 @@ impl Default for BetterAnalyzerConfiguration {
             erb_bandwidth_divisor: 2.0,
             time_resolution_clamp: (0.0, 37.0),
             nc_method: true,
+            strict_nc: false,
             masking: true,
         }
     }
@@ -121,7 +123,7 @@ impl BetterAnalyzer {
             Window::Hann,
             config.sample_rate,
             config.nc_method,
-            false,
+            config.strict_nc,
         );
 
         let masker = Masker::new(&frequency_bands);
