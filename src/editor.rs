@@ -1719,7 +1719,9 @@ pub(crate) fn render<F>(
                     return;
                 };
 
+                #[cfg(not(target_arch = "wasm32"))]
                 let mut latency_offset = analysis_settings.latency_offset.as_secs_f64() * 1000.0;
+                #[cfg(not(target_arch = "wasm32"))]
                 if ui
                     .add(
                         egui::Slider::new(&mut latency_offset, 0.0..=500.0)

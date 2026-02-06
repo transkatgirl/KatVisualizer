@@ -129,13 +129,12 @@ pub fn drain_buffers(callback: impl FnOnce(bool, f32, [&mut [f32]; 2])) {
     let (ref mut position, ref single_input, ref rate, ref mut left_samples, ref mut right_samples) =
         *lock;
 
+    let index = (*position).min(9599) as usize;
+
     callback(
         *single_input,
         *rate,
-        [
-            &mut left_samples[0..*position as usize],
-            &mut right_samples[0..*position as usize],
-        ],
+        [&mut left_samples[0..index], &mut right_samples[0..index]],
     );
 
     *position = 0;
