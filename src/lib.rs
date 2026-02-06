@@ -263,7 +263,7 @@ impl Plugin for MyPlugin {
                 self.latency_samples = analysis_chain.latency_samples;
             }
 
-            analysis_chain.analyze(buffer, &self.analysis_output);
+            analysis_chain.analyze(buffer.as_slice(), &self.analysis_output);
 
             drop(lock);
         }

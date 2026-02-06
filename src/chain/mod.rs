@@ -3,14 +3,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nih_plug::{buffer::Buffer, util::StftHelper};
 use parking_lot::{FairMutex, Mutex, RwLock};
 use threadpool::ThreadPool;
 
 use crate::{
     AnalysisMetrics,
     analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram},
+    chain::chunker::{StftHelper, StftInput},
 };
+
+mod chunker;
 
 #[derive(Clone)]
 pub(crate) struct AnalysisChainConfig {
@@ -155,9 +157,11 @@ impl AnalysisChain {
     }
     pub(crate) fn analyze(
         &mut self,
-        buffer: &mut Buffer,
+        buffer: &mut [&mut [f32]],
         output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
     ) {
+        assert!(buffer.num_channels() == 1 || buffer.num_channels() == 2);
+
         if self.internal_buffering {
             self.analyze_buffered(buffer, output);
         } else {
@@ -166,7 +170,7 @@ impl AnalysisChain {
     }
     fn analyze_buffered(
         &mut self,
-        buffer: &mut Buffer,
+        buffer: &mut [&mut [f32]],
         output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
     ) {
         let mut finished = Instant::now();
@@ -249,7 +253,7 @@ impl AnalysisChain {
     }
     fn analyze_unbuffered(
         &mut self,
-        buffer: &mut Buffer,
+        buffer: &mut [&mut [f32]],
         output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
     ) {
         let finished = Instant::now();
@@ -258,9 +262,9 @@ impl AnalysisChain {
             let mut lock = self.left_analyzer.lock();
             let (ref _buffer, ref mut analyzer) = *lock;
 
-            analyzer.analyze(buffer.as_slice()[0].iter().copied(), self.listening_volume);
+            analyzer.analyze(buffer[0].iter().copied(), self.listening_volume);
         } else {
-            for (channel_idx, buffer) in buffer.as_slice().iter().enumerate() {
+            for (channel_idx, buffer) in buffer.iter().enumerate() {
                 let analyzer = if channel_idx == 0 {
                     self.left_analyzer.clone()
                 } else {
@@ -289,7 +293,7 @@ impl AnalysisChain {
         }
 
         let chunk_duration =
-            Duration::from_secs_f64(buffer.samples() as f64 / self.sample_rate as f64);
+            Duration::from_secs_f64(buffer.num_samples() as f64 / self.sample_rate as f64);
 
         let (ref mut spectrogram, ref mut metrics) = *output.lock();
 

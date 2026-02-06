@@ -862,6 +862,7 @@ pub fn create(
                 &analysis_frequencies,
                 &audio_state,
                 &shared_state,
+                |_| {},
             );
         },
     )
@@ -896,16 +897,16 @@ fn build(egui_ctx: &Context, spectrogram_texture: &RwLock<Option<TextureId>>) {
     egui_ctx.set_theme(ThemePreference::Dark);
 }
 
-fn render(
+fn render<F>(
     egui_ctx: &Context,
     analysis_chain: &Mutex<Option<AnalysisChain>>,
     analysis_output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
     analysis_frequencies: &RwLock<Vec<(f32, f32, f32)>>,
     audio_state: &RwLock<Option<AudioState>>,
     shared_state: &SharedState,
-    //backend_specific_ui: F,
-) /*where
-F: FnOnce(&Ui),*/
+    callback: F,
+) where
+    F: FnOnce(&Context),
 {
     egui_ctx.request_repaint();
 
@@ -2053,6 +2054,7 @@ F: FnOnce(&Ui),*/
                 }
             });
         });
+    callback(egui_ctx);
 
     let now = Instant::now();
     let mut frame_timing = shared_state.frame_timing.lock();
