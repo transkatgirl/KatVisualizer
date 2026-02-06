@@ -681,7 +681,7 @@ impl Default for RenderSettings {
             #[cfg(not(target_arch = "wasm32"))]
             lookup_size: 4,
             #[cfg(target_arch = "wasm32")]
-            lookup_size: 2,
+            lookup_size: 1,
             agc_duration: Duration::from_secs_f32(1.0),
             agc_above_masking: 40.0,
             agc_below_masking: 0.0,

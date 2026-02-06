@@ -27,7 +27,7 @@ function init() {
 		}
 	});
 
-	const scriptNode = audioContext.createScriptProcessor(1024, 2, 2);
+	const scriptNode = audioContext.createScriptProcessor(512, 2, 2);
 	scriptNode.addEventListener("audioprocess", (audioProcessingEvent) => {
 		let inputBuffer = audioProcessingEvent.inputBuffer;
 		let outputBuffer = audioProcessingEvent.outputBuffer;
