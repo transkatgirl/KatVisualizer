@@ -39,6 +39,23 @@ RUSTFLAGS="-C target-cpu=native" cargo build --release --features $channel_confi
 
 Usage information for the standalone binary can be found by running it with the `--help` command (keep in mind that not all available CLI flags are relevant to this program). You will likely want to use the `--input-device`, `--output-device`, and `--period-size` CLI flags.
 
+#### Building for Web
+
+This program supports building as a WASM-based web application, similar to the standalone mode binary. However, not all of the application's features are supported when building for web, and performance will be significantly worse than a native binary.
+
+Compiling for web requires [trunk](https://github.com/trunk-rs/trunk) and [binaryen](https://github.com/WebAssembly/binaryen).
+
+In order to build this program as a web application, run the following commands:
+
+```bash
+trunk build --release -M
+wasm-opt -O4 -all dist/katvisualizer_wasm_bg.wasm -o dist/katvisualizer_wasm_bg.opt.wasm
+rm dist/katvisualizer_wasm_bg.wasm
+mv dist/katvisualizer_wasm_bg.opt.wasm dist/katvisualizer_wasm_bg.wasm
+```
+
+The web application uses an audio file as input (but can be [easily modified](./assets/main.js) to take in any stream of samples), and does not currently support compensating for output device latency.
+
 ## Usage
 
 The compiled plugin can be loaded into a DAW like any other metering plugin. It's recommended that you use a buffer size under 10ms long and avoid sample rates below 40kHz.
