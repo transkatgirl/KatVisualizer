@@ -788,7 +788,7 @@ impl ColorTable {
 
 struct SharedState {
     settings: RwLock<RenderSettings>,
-    last_frame: Mutex<Instant>,
+    frame_timing: Mutex<(Instant, Duration, Duration)>,
     color_table: RwLock<ColorTable>,
     cached_analysis_settings: Mutex<AnalysisChainConfig>,
     spectrogram_texture: Arc<RwLock<Option<TextureId>>>,
@@ -823,7 +823,7 @@ pub fn create(
 
         SharedState {
             settings: RwLock::new(settings),
-            last_frame: Mutex::new(Instant::now()),
+            frame_timing: Mutex::new((Instant::now(), Duration::ZERO, Duration::ZERO)),
             color_table: RwLock::new(color_table),
             cached_analysis_settings: Mutex::new(AnalysisChainConfig::default()),
             spectrogram_texture: Arc::new(RwLock::new(None)),
@@ -877,6 +877,8 @@ pub fn create(
         move |egui_ctx, _setter, _, _| {
             egui_ctx.request_repaint();
 
+            let start = Instant::now();
+
             egui::CentralPanel::default().show(egui_ctx, |ui| {
                 let mut bargraph_mesh = Mesh::default();
                 bargraph_mesh.reserve_triangles(MAX_FREQUENCY_BINS * 2 * 2);
@@ -911,8 +913,6 @@ pub fn create(
                     max: Pos2 { x: max_x, y: max_y },
                 };
 
-                let start = Instant::now();
-
                 let lock = analysis_output.lock();
                 let (ref spectrogram, metrics) = *lock;
 
@@ -940,7 +940,7 @@ pub fn create(
                     pixels: spectrogram_image_pixels,
                 };
 
-                let buffering_duration = start.duration_since(metrics.finished);
+                let buffering_duration = metrics.finished.elapsed();
                 let processing_duration = metrics.processing;
                 let chunk_duration = front.duration;
 
@@ -1156,11 +1156,11 @@ pub fn create(
                     }
                 }
 
-                let now = Instant::now();
-                let frame_elapsed = now.duration_since(*shared_state.last_frame.lock());
-
                 if settings.show_performance {
-                    let rasterize_elapsed = now.duration_since(start);
+                    let frame_timing = shared_state.frame_timing.lock();
+
+                    let frame_elapsed = frame_timing.1;
+                    let rasterize_elapsed = frame_timing.2;
 
                     let buffering_secs = buffering_duration.as_secs_f64();
                     let rasterize_secs = rasterize_elapsed.as_secs_f64();
@@ -1261,13 +1261,12 @@ pub fn create(
                             family: egui::FontFamily::Monospace,
                         },
                         if rasterize_elapsed
-                            >= Duration::from_secs_f64(1.0 / (BASELINE_TARGET_FPS * 4.0))
-                            || rasterize_proportion > 0.25
+                            >= Duration::from_secs_f64(BASELINE_TARGET_FRAME_SECS * 0.5)
                         {
                             Color32::RED
                         } else if rasterize_elapsed
-                            >= Duration::from_secs_f64(1.0 / (BASELINE_TARGET_FPS * 8.0))
-                            || rasterize_proportion > 0.125
+                            >= Duration::from_secs_f64(BASELINE_TARGET_FRAME_SECS * 0.25)
+                            || rasterize_proportion >= 0.5
                         {
                             Color32::YELLOW
                         } else {
@@ -2219,7 +2218,14 @@ pub fn create(
 
                 });
 
-            *shared_state.last_frame.lock() = Instant::now();
+            let now = Instant::now();
+            let mut frame_timing = shared_state.frame_timing.lock();
+
+            *frame_timing = (
+                now,
+                now.duration_since(frame_timing.0),
+                now.duration_since(start),
+            )
         },
     )
 }
