@@ -180,14 +180,13 @@ impl Plugin for MyPlugin {
         self.params.clone()
     }
 
-    fn editor(&mut self, async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         editor::create(
             self.params.clone(),
             self.analysis_chain.clone(),
             self.analysis_output.clone(),
             self.analysis_frequencies.clone(),
             self.state_info.clone(),
-            async_executor,
         )
     }
 

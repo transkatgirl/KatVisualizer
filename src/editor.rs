@@ -2,12 +2,13 @@
 #![allow(clippy::collapsible_else_if)]
 
 use color::{ColorSpaceTag, DynamicColor, Flags, Rgba8, Srgb};
-use nih_plug::prelude::*;
+use nih_plug::{editor::Editor, prelude::ProcessMode};
+//use nih_plug::prelude::*;
 use nih_plug_egui::{
     EguiSettings, GlConfig, GraphicsConfig, create_egui_editor,
     egui::{
-        self, Align2, Color32, ColorImage, FontId, ImageData, Mesh, Pos2, Rect, Shape, TextureId,
-        TextureOptions, ThemePreference, Vec2,
+        self, Align2, Color32, ColorImage, Context, FontId, ImageData, Mesh, Pos2, Rect, Shape,
+        TextureId, TextureOptions, ThemePreference, Vec2,
         epaint::{ImageDelta, Vertex, WHITE_UV},
     },
 };
@@ -19,7 +20,7 @@ use std::{
 
 use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS,
-    MAX_OSC_FREQUENCY_BINS, MyPlugin, PluginParams, PluginStateInfo, SPECTROGRAM_SLICES,
+    MAX_OSC_FREQUENCY_BINS, PluginParams, PluginStateInfo, SPECTROGRAM_SLICES,
     analyzer::{BetterSpectrogram, FrequencyScale, map_value_f32},
 };
 
@@ -795,6 +796,39 @@ struct SharedState {
     spectrogram_texture: Arc<RwLock<Option<TextureId>>>,
 }
 
+pub struct AudioState {
+    buffer_size_range: (u32, u32),
+    sample_rate: f32,
+    process_mode_title: String,
+    realtime: bool,
+    input_channels: u32,
+    output_channels: u32,
+}
+
+impl From<&PluginStateInfo> for AudioState {
+    fn from(value: &PluginStateInfo) -> Self {
+        Self {
+            buffer_size_range: (
+                value.buffer_config.min_buffer_size.unwrap_or(0),
+                value.buffer_config.max_buffer_size,
+            ),
+            sample_rate: value.buffer_config.sample_rate,
+            process_mode_title: format!("{:?}", value.buffer_config.process_mode),
+            realtime: value.buffer_config.process_mode == ProcessMode::Realtime,
+            input_channels: value
+                .audio_io_layout
+                .main_input_channels
+                .map(u32::from)
+                .unwrap_or(0),
+            output_channels: value
+                .audio_io_layout
+                .main_output_channels
+                .map(u32::from)
+                .unwrap_or(0),
+        }
+    }
+}
+
 const BASELINE_TARGET_FPS: f64 = 60.0;
 const BASELINE_TARGET_FRAME_SECS: f64 = 1.0 / BASELINE_TARGET_FPS;
 
@@ -804,7 +838,6 @@ pub fn create(
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
     analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
     plugin_state: Arc<RwLock<Option<PluginStateInfo>>>,
-    _async_executor: AsyncExecutor<MyPlugin>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
 
@@ -849,1413 +882,1425 @@ pub fn create(
             },
         },
         move |egui_ctx, _, _| {
-            let manager = egui_ctx.tex_manager();
-            let mut manager = manager.write();
-            let mut spectrogram_texture = spectrogram_texture.write();
+            build(egui_ctx, &spectrogram_texture);
+        },
+        move |egui_ctx, _setter, _, _| {
+            let audio_state = plugin_state.read().as_ref().map(|s| s.into());
 
-            if let Some(ref id) = *spectrogram_texture {
-                if manager.meta(*id).is_some() {
-                    manager.free(*id);
+            render(
+                egui_ctx,
+                &analysis_chain,
+                &analysis_output,
+                &analysis_frequencies,
+                audio_state,
+                &shared_state,
+            );
+        },
+    )
+}
+
+fn build(egui_ctx: &Context, spectrogram_texture: &RwLock<Option<TextureId>>) {
+    let manager = egui_ctx.tex_manager();
+    let mut manager = manager.write();
+    let mut spectrogram_texture = spectrogram_texture.write();
+
+    if let Some(ref id) = *spectrogram_texture {
+        if manager.meta(*id).is_some() {
+            manager.free(*id);
+        }
+    }
+
+    *spectrogram_texture = Some(manager.alloc(
+        "spectrogram".to_string(),
+        ImageData::Color(Arc::new(ColorImage::filled([1, 1], Color32::TRANSPARENT))),
+        TextureOptions {
+            magnification: egui::TextureFilter::Linear,
+            minification: egui::TextureFilter::Linear,
+            wrap_mode: egui::TextureWrapMode::ClampToEdge,
+            mipmap_mode: None,
+        },
+    ));
+
+    egui_ctx.tessellation_options_mut(|options| {
+        options.coarse_tessellation_culling = false;
+    });
+
+    egui_ctx.set_theme(ThemePreference::Dark);
+}
+
+fn render(
+    egui_ctx: &Context,
+    analysis_chain: &Mutex<Option<AnalysisChain>>,
+    analysis_output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
+    analysis_frequencies: &RwLock<Vec<(f32, f32, f32)>>,
+    audio_state: Option<AudioState>,
+    shared_state: &SharedState,
+    //backend_specific_ui: F,
+) /*where
+F: FnOnce(&Ui),*/
+{
+    egui_ctx.request_repaint();
+
+    let start = Instant::now();
+
+    egui::CentralPanel::default().show(egui_ctx, |ui| {
+        let last_size = *shared_state.last_size.lock();
+
+        let mut bargraph_mesh = Mesh::default();
+        bargraph_mesh.reserve_triangles(MAX_FREQUENCY_BINS * 2 * 2);
+        bargraph_mesh.reserve_vertices(MAX_FREQUENCY_BINS * 4 * 2);
+
+        let mut spectrogram_image_pixels = vec![Color32::TRANSPARENT; last_size.0 * last_size.1];
+        let mut bargraph_buffer_1 = vec![(0.0, 0.0); last_size.0];
+        let mut bargraph_buffer_2 = vec![0.0; last_size.0];
+
+        let painter = ui.painter();
+        let max_x = painter.clip_rect().max.x;
+        let max_y = painter.clip_rect().max.y;
+
+        let settings = *shared_state.settings.read();
+
+        let frequencies = analysis_frequencies.read();
+
+        let bargraph_bounds = Rect {
+            min: Pos2 { x: 0.0, y: 0.0 },
+            max: Pos2 {
+                x: max_x,
+                y: max_y * settings.bargraph_height,
+            },
+        };
+        let spectrogram_bounds = Rect {
+            min: Pos2 {
+                x: 0.0,
+                y: max_y * settings.bargraph_height,
+            },
+            max: Pos2 { x: max_x, y: max_y },
+        };
+
+        let lock = analysis_output.lock();
+        let (ref spectrogram, metrics) = *lock;
+
+        let spectrogram = spectrogram.clone();
+
+        drop(lock);
+
+        let front = spectrogram.data.front().unwrap();
+
+        let spectrogram_width = front.data.len();
+        let spectrogram_height = (settings.spectrogram_duration.as_secs_f64()
+            / front.duration.as_secs_f64())
+        .round() as usize;
+
+        *shared_state.last_size.lock() = (spectrogram_width, spectrogram_height);
+
+        if (last_size.0 * last_size.1) > (spectrogram_width * spectrogram_height) {
+            spectrogram_image_pixels.truncate(spectrogram_width * spectrogram_height);
+        } else if (last_size.0 * last_size.1) < (spectrogram_width * spectrogram_height) {
+            spectrogram_image_pixels
+                .resize(spectrogram_width * spectrogram_height, Color32::TRANSPARENT);
+        }
+
+        if last_size.0 > spectrogram_width {
+            bargraph_buffer_1.truncate(spectrogram_width);
+            bargraph_buffer_2.truncate(spectrogram_width);
+        } else if last_size.0 < spectrogram_width {
+            bargraph_buffer_1.resize(spectrogram_width, (0.0, 0.0));
+            bargraph_buffer_2.resize(spectrogram_width, 0.0);
+
+            let additional = spectrogram_width - last_size.0;
+            bargraph_mesh.reserve_triangles(additional * 2 * 2);
+            bargraph_mesh.reserve_vertices(additional * 4 * 2);
+        }
+
+        let mut spectrogram_image = ColorImage {
+            size: [spectrogram_width, spectrogram_height],
+            source_size: Vec2 {
+                x: spectrogram_width as f32,
+                y: spectrogram_height as f32,
+            },
+            pixels: spectrogram_image_pixels,
+        };
+
+        let buffering_duration = metrics.finished.elapsed();
+        let processing_duration = metrics.processing;
+        let chunk_duration = front.duration;
+
+        let (min_db, max_db) = calculate_volume_min_max(&settings, &spectrogram);
+
+        {
+            let color_table = &shared_state.color_table.read();
+
+            if settings.bargraph_height != 0.0 {
+                if settings.show_masking {
+                    draw_bargraph(
+                        &mut bargraph_mesh,
+                        &spectrogram,
+                        (bargraph_buffer_1, bargraph_buffer_2),
+                        bargraph_bounds,
+                        color_table,
+                        Some(settings.masking_color),
+                        (max_db, min_db),
+                        settings.bargraph_averaging,
+                    );
+                } else {
+                    draw_bargraph(
+                        &mut bargraph_mesh,
+                        &spectrogram,
+                        (bargraph_buffer_1, bargraph_buffer_2),
+                        bargraph_bounds,
+                        color_table,
+                        None,
+                        (max_db, min_db),
+                        settings.bargraph_averaging,
+                    );
                 }
             }
 
-            *spectrogram_texture = Some(manager.alloc(
-                "spectrogram".to_string(),
-                ImageData::Color(Arc::new(ColorImage::filled([1, 1], Color32::TRANSPARENT))),
-                TextureOptions {
-                    magnification: egui::TextureFilter::Linear,
-                    minification: egui::TextureFilter::Linear,
-                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                    mipmap_mode: None,
+            if settings.bargraph_height != 1.0 {
+                draw_spectrogram_image(
+                    &mut spectrogram_image,
+                    &spectrogram,
+                    &frequencies,
+                    color_table,
+                    (max_db, min_db),
+                    settings.clamp_using_smr,
+                );
+            }
+        }
+
+        let under_pointer = if settings.show_hover {
+            if let Some(pointer) = egui_ctx.pointer_latest_pos() {
+                get_under_cursor(
+                    pointer,
+                    &spectrogram,
+                    &frequencies,
+                    bargraph_bounds,
+                    spectrogram_bounds,
+                    (max_db, min_db),
+                    spectrogram_height,
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        drop(spectrogram);
+
+        {
+            let spectrogram_texture = shared_state.spectrogram_texture.read().unwrap();
+
+            egui_ctx.tex_manager().write().set(
+                spectrogram_texture,
+                ImageDelta {
+                    image: ImageData::Color(Arc::new(spectrogram_image)),
+                    options: if settings.spectrogram_nearest_neighbor {
+                        TextureOptions {
+                            magnification: egui::TextureFilter::Nearest,
+                            minification: egui::TextureFilter::Nearest,
+                            wrap_mode: egui::TextureWrapMode::ClampToEdge,
+                            mipmap_mode: None,
+                        }
+                    } else {
+                        TextureOptions {
+                            magnification: egui::TextureFilter::Linear,
+                            minification: egui::TextureFilter::Linear,
+                            wrap_mode: egui::TextureWrapMode::ClampToEdge,
+                            mipmap_mode: None,
+                        }
+                    },
+                    pos: None,
                 },
-            ));
+            );
 
-            egui_ctx.tessellation_options_mut(|options| {
-                options.coarse_tessellation_culling = false;
-            });
+            painter.extend([
+                Shape::Mesh(Arc::new(bargraph_mesh)),
+                Shape::Mesh(Arc::new(Mesh {
+                    indices: vec![0, 1, 2, 2, 1, 3],
+                    vertices: vec![
+                        Vertex {
+                            pos: spectrogram_bounds.left_top(),
+                            uv: Pos2 { x: 0.0, y: 0.0 },
+                            color: Color32::WHITE,
+                        },
+                        Vertex {
+                            pos: spectrogram_bounds.right_top(),
+                            uv: Pos2 { x: 1.0, y: 0.0 },
+                            color: Color32::WHITE,
+                        },
+                        Vertex {
+                            pos: spectrogram_bounds.left_bottom(),
+                            uv: Pos2 { x: 0.0, y: 1.0 },
+                            color: Color32::WHITE,
+                        },
+                        Vertex {
+                            pos: spectrogram_bounds.right_bottom(),
+                            uv: Pos2 { x: 1.0, y: 1.0 },
+                            color: Color32::WHITE,
+                        },
+                    ],
+                    texture_id: spectrogram_texture,
+                })),
+            ]);
+        }
 
-            egui_ctx.set_theme(ThemePreference::Dark);
-        },
-        move |egui_ctx, _setter, _, _| {
-            egui_ctx.request_repaint();
+        if let Some(under) = under_pointer {
+            let analysis_settings = shared_state.cached_analysis_settings.lock();
 
-            let start = Instant::now();
+            let amplitude_text = if analysis_settings.normalize_amplitude {
+                format!(
+                    "{:.0} phon",
+                    under.amplitude + analysis_settings.listening_volume
+                )
+            } else {
+                format!("{:+.0}dBFS", under.amplitude)
+            };
 
-            egui::CentralPanel::default().show(egui_ctx, |ui| {
-                let last_size = *shared_state.last_size.lock();
+            drop(analysis_settings);
 
-                let mut bargraph_mesh = Mesh::default();
-                bargraph_mesh.reserve_triangles(MAX_FREQUENCY_BINS * 2 * 2);
-                bargraph_mesh.reserve_vertices(MAX_FREQUENCY_BINS * 4 * 2);
+            let text = if let (Some(pan), Some(elapsed)) = (under.pan, under.time) {
+                format!(
+                    "{:.0}hz, -{:.3}s\n{}, {:+.2} pan",
+                    under.frequency.1,
+                    elapsed.as_secs_f64(),
+                    amplitude_text,
+                    pan
+                )
+            } else {
+                let resolution = (1.0 / (under.frequency.2 - under.frequency.0)) * 1000.0;
+                let averaging = settings.bargraph_averaging.as_secs_f64() * 1000.0;
 
-                let mut spectrogram_image_pixels =
-                    vec![Color32::TRANSPARENT; last_size.0 * last_size.1];
-                let mut bargraph_buffer_1 = vec![(0.0, 0.0); last_size.0];
-                let mut bargraph_buffer_2 = vec![0.0; last_size.0];
-
-                let painter = ui.painter();
-                let max_x = painter.clip_rect().max.x;
-                let max_y = painter.clip_rect().max.y;
-
-                let settings = *shared_state.settings.read();
-
-                let frequencies = analysis_frequencies.read();
-
-                let bargraph_bounds = Rect {
-                    min: Pos2 { x: 0.0, y: 0.0 },
-                    max: Pos2 {
-                        x: max_x,
-                        y: max_y * settings.bargraph_height,
-                    },
-                };
-                let spectrogram_bounds = Rect {
-                    min: Pos2 {
-                        x: 0.0,
-                        y: max_y * settings.bargraph_height,
-                    },
-                    max: Pos2 { x: max_x, y: max_y },
-                };
-
-                let lock = analysis_output.lock();
-                let (ref spectrogram, metrics) = *lock;
-
-                let spectrogram = spectrogram.clone();
-
-                drop(lock);
-
-                let front = spectrogram.data.front().unwrap();
-
-                let spectrogram_width = front.data.len();
-                let spectrogram_height = (settings.spectrogram_duration.as_secs_f64()
-                    / front.duration.as_secs_f64())
-                .round() as usize;
-
-                *shared_state.last_size.lock() = (spectrogram_width, spectrogram_height);
-
-                if (last_size.0 * last_size.1) > (spectrogram_width * spectrogram_height) {
-                    spectrogram_image_pixels.truncate(spectrogram_width * spectrogram_height);
-                } else if (last_size.0 * last_size.1) < (spectrogram_width * spectrogram_height) {
-                    spectrogram_image_pixels
-                        .resize(spectrogram_width * spectrogram_height, Color32::TRANSPARENT);
-                }
-
-                if last_size.0 > spectrogram_width {
-                    bargraph_buffer_1.truncate(spectrogram_width);
-                    bargraph_buffer_2.truncate(spectrogram_width);
-                } else if last_size.0 < spectrogram_width {
-                    bargraph_buffer_1.resize(spectrogram_width, (0.0, 0.0));
-                    bargraph_buffer_2.resize(spectrogram_width, 0.0);
-
-                    let additional = spectrogram_width - last_size.0;
-                    bargraph_mesh.reserve_triangles(additional * 2 * 2);
-                    bargraph_mesh.reserve_vertices(additional * 4 * 2);
-                }
-
-                let mut spectrogram_image = ColorImage {
-                    size: [spectrogram_width, spectrogram_height],
-                    source_size: Vec2 {
-                        x: spectrogram_width as f32,
-                        y: spectrogram_height as f32,
-                    },
-                    pixels: spectrogram_image_pixels,
-                };
-
-                let buffering_duration = metrics.finished.elapsed();
-                let processing_duration = metrics.processing;
-                let chunk_duration = front.duration;
-
-                let (min_db, max_db) = calculate_volume_min_max(&settings, &spectrogram);
-
-                {
-                    let color_table = &shared_state.color_table.read();
-
-                    if settings.bargraph_height != 0.0 {
-                        if settings.show_masking {
-                            draw_bargraph(
-                                &mut bargraph_mesh,
-                                &spectrogram,
-                                (bargraph_buffer_1, bargraph_buffer_2),
-                                bargraph_bounds,
-                                color_table,
-                                Some(settings.masking_color),
-                                (max_db, min_db),
-                                settings.bargraph_averaging,
-                            );
-                        } else {
-                            draw_bargraph(
-                                &mut bargraph_mesh,
-                                &spectrogram,
-                                (bargraph_buffer_1, bargraph_buffer_2),
-                                bargraph_bounds,
-                                color_table,
-                                None,
-                                (max_db, min_db),
-                                settings.bargraph_averaging,
-                            );
-                        }
-                    }
-
-                    if settings.bargraph_height != 1.0 {
-                        draw_spectrogram_image(
-                            &mut spectrogram_image,
-                            &spectrogram,
-                            &frequencies,
-                            color_table,
-                            (max_db, min_db),
-                            settings.clamp_using_smr,
-                        );
-                    }
-                }
-
-                let under_pointer = if settings.show_hover {
-                    if let Some(pointer) = egui_ctx.pointer_latest_pos() {
-                        get_under_cursor(
-                            pointer,
-                            &spectrogram,
-                            &frequencies,
-                            bargraph_bounds,
-                            spectrogram_bounds,
-                            (max_db, min_db),
-                            spectrogram_height,
-                        )
-                    } else {
-                        None
-                    }
+                if averaging > 0.0 {
+                    format!(
+                        "{:.0}hz, {}\n{:.0}ms res, {:.0} ms avg",
+                        under.frequency.1, amplitude_text, resolution, averaging
+                    )
                 } else {
-                    None
+                    format!(
+                        "{:.0}hz, {}\n{:.0}ms",
+                        under.frequency.1, amplitude_text, resolution
+                    )
+                }
+            };
+
+            painter.text(
+                Pos2 { x: 16.0, y: 16.0 },
+                Align2::LEFT_TOP,
+                text,
+                FontId {
+                    size: 12.0,
+                    family: egui::FontFamily::Monospace,
+                },
+                Color32::from_rgb(224, 224, 224),
+            );
+        }
+
+        if settings.show_format {
+            if let Some(ref audio_state) = audio_state {
+                let min_buffer_size_s =
+                    audio_state.buffer_size_range.0 as f32 / audio_state.sample_rate;
+                let max_buffer_size_s =
+                    audio_state.buffer_size_range.1 as f32 / audio_state.sample_rate;
+
+                let should_warn = audio_state.sample_rate < (frequencies.last().unwrap().2 * 2.0)
+                    || max_buffer_size_s > 0.010
+                    || !audio_state.realtime;
+
+                painter.text(
+                    Pos2 {
+                        x: max_x / 2.0,
+                        y: 16.0,
+                    },
+                    Align2::CENTER_CENTER,
+                    format!(
+                        "{} in -> {} out, {:.1}kHz, {:.0}ms to {:.0}ms buffer, mode {}",
+                        audio_state.input_channels,
+                        audio_state.output_channels,
+                        audio_state.sample_rate / 1000.0,
+                        min_buffer_size_s * 1000.0,
+                        max_buffer_size_s * 1000.0,
+                        audio_state.process_mode_title
+                    ),
+                    FontId {
+                        size: 12.0,
+                        family: egui::FontFamily::Monospace,
+                    },
+                    if should_warn {
+                        Color32::YELLOW
+                    } else {
+                        Color32::from_rgb(224, 224, 224)
+                    },
+                );
+            }
+        }
+
+        drop(frequencies);
+
+        if settings.show_performance {
+            let frame_timing = shared_state.frame_timing.lock();
+
+            let frame_elapsed = frame_timing.1;
+            let rasterize_elapsed = frame_timing.2;
+
+            drop(frame_timing);
+
+            let buffering_secs = buffering_duration.as_secs_f64();
+            let rasterize_secs = rasterize_elapsed.as_secs_f64();
+            let chunk_secs = chunk_duration.as_secs_f64();
+            let frame_secs = frame_elapsed.as_secs_f64();
+
+            /*let rasterize_processing_duration = rasterize_secs / (frame_secs / chunk_secs);
+            let adjusted_processing_duration =
+                processing_duration.as_secs_f64() + rasterize_processing_duration;*/
+            let buffer_processing_duration = buffering_secs / (frame_secs / chunk_secs);
+            let adjusted_processing_duration =
+                processing_duration.as_secs_f64() + buffer_processing_duration;
+            let rasterize_proportion = rasterize_secs / frame_secs;
+            let processing_proportion = adjusted_processing_duration / chunk_secs;
+            let buffering_proportion = buffering_secs / frame_secs;
+
+            if buffering_duration < Duration::from_millis(500) {
+                painter.text(
+                    Pos2 {
+                        x: max_x - 32.0,
+                        y: 48.0,
+                    },
+                    Align2::RIGHT_TOP,
+                    format!(
+                        "{:.0}% ({:.1}ms) processing",
+                        processing_proportion * 100.0,
+                        adjusted_processing_duration * 1000.0,
+                    ),
+                    FontId {
+                        size: 12.0,
+                        family: egui::FontFamily::Monospace,
+                    },
+                    if processing_proportion >= 0.95 {
+                        Color32::RED
+                    } else if processing_proportion >= 0.8 {
+                        Color32::YELLOW
+                    } else {
+                        Color32::from_rgb(224, 224, 224)
+                    },
+                );
+                painter.text(
+                    Pos2 {
+                        x: max_x - 32.0,
+                        y: 64.0,
+                    },
+                    Align2::RIGHT_TOP,
+                    format!("{:.1}ms buffering", buffering_secs * 1000.0),
+                    FontId {
+                        size: 12.0,
+                        family: egui::FontFamily::Monospace,
+                    },
+                    if buffering_proportion >= 1.0 {
+                        Color32::RED
+                    } else if buffering_proportion >= 0.5 {
+                        Color32::YELLOW
+                    } else {
+                        Color32::from_rgb(224, 224, 224)
+                    },
+                );
+            }
+
+            painter.text(
+                Pos2 {
+                    x: max_x - 32.0,
+                    y: 16.0,
+                },
+                Align2::RIGHT_TOP,
+                format!("{:2}ms frame", frame_elapsed.as_millis()),
+                FontId {
+                    size: 12.0,
+                    family: egui::FontFamily::Monospace,
+                },
+                if frame_elapsed >= Duration::from_secs_f64(1.0 / (BASELINE_TARGET_FPS * 0.5)) {
+                    Color32::RED
+                } else if frame_elapsed
+                    >= Duration::from_secs_f64(1.0 / (BASELINE_TARGET_FPS * 0.9))
+                {
+                    Color32::YELLOW
+                } else {
+                    Color32::from_rgb(224, 224, 224)
+                },
+            );
+            painter.text(
+                Pos2 {
+                    x: max_x - 32.0,
+                    y: 32.0,
+                },
+                Align2::RIGHT_TOP,
+                format!(
+                    "{:.0}% ({:.1}ms) rasterize",
+                    rasterize_proportion * 100.0,
+                    rasterize_elapsed.as_secs_f64() * 1000.0,
+                ),
+                FontId {
+                    size: 12.0,
+                    family: egui::FontFamily::Monospace,
+                },
+                if rasterize_elapsed >= Duration::from_secs_f64(BASELINE_TARGET_FRAME_SECS * 0.6) {
+                    Color32::RED
+                } else if rasterize_elapsed
+                    >= Duration::from_secs_f64(BASELINE_TARGET_FRAME_SECS * 0.3)
+                    || rasterize_proportion >= 0.6
+                {
+                    Color32::YELLOW
+                } else {
+                    Color32::from_rgb(224, 224, 224)
+                },
+            );
+        }
+    });
+    egui::Window::new("Settings")
+        .id(egui::Id::new("settings"))
+        .default_pos(Pos2 {
+            x: 16.0,
+            y: 56.0
+        })
+        .default_open(false)
+        .show(egui_ctx, |ui| {
+            let mut render_settings = shared_state.settings.write();
+            let mut analysis_settings = shared_state.cached_analysis_settings.lock();
+
+            ui.collapsing("Render Options", |ui| {
+                if ui
+                    .add(
+                        egui::Slider::new(&mut render_settings.left_hue, 0.0..=360.0)
+                            .suffix("°")
+                            .step_by(1.0)
+                            .fixed_decimals(0)
+                            .text("Left channel hue"),
+                    )
+                    .changed()
+                {
+                    shared_state.color_table.write().build(
+                        render_settings.left_hue,
+                        render_settings.right_hue,
+                        render_settings.minimum_lightness,
+                        render_settings.maximum_lightness,
+                        render_settings.maximum_chroma,
+                    );
                 };
 
-                drop(spectrogram);
-
+                if ui
+                    .add(
+                        egui::Slider::new(&mut render_settings.right_hue, 0.0..=360.0)
+                            .suffix("°")
+                            .step_by(1.0)
+                            .fixed_decimals(0)
+                            .text("Right channel hue"),
+                    )
+                    .changed()
                 {
-                    let spectrogram_texture = shared_state.spectrogram_texture.read().unwrap();
-
-                    egui_ctx.tex_manager().write().set(
-                        spectrogram_texture,
-                        ImageDelta {
-                            image: ImageData::Color(Arc::new(spectrogram_image)),
-                            options: if settings.spectrogram_nearest_neighbor {
-                                TextureOptions {
-                                    magnification: egui::TextureFilter::Nearest,
-                                    minification: egui::TextureFilter::Nearest,
-                                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                                    mipmap_mode: None,
-                                }
-                            } else {
-                                TextureOptions {
-                                    magnification: egui::TextureFilter::Linear,
-                                    minification: egui::TextureFilter::Linear,
-                                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                                    mipmap_mode: None,
-                                }
-                            },
-                            pos: None,
-                        },
+                    shared_state.color_table.write().build(
+                        render_settings.left_hue,
+                        render_settings.right_hue,
+                        render_settings.minimum_lightness,
+                        render_settings.maximum_lightness,
+                        render_settings.maximum_chroma,
                     );
+                };
 
-                    painter.extend([
-                        Shape::Mesh(Arc::new(bargraph_mesh)),
-                        Shape::Mesh(Arc::new(Mesh {
-                            indices: vec![0, 1, 2, 2, 1, 3],
-                            vertices: vec![
-                                Vertex {
-                                    pos: spectrogram_bounds.left_top(),
-                                    uv: Pos2 { x: 0.0, y: 0.0 },
-                                    color: Color32::WHITE,
-                                },
-                                Vertex {
-                                    pos: spectrogram_bounds.right_top(),
-                                    uv: Pos2 { x: 1.0, y: 0.0 },
-                                    color: Color32::WHITE,
-                                },
-                                Vertex {
-                                    pos: spectrogram_bounds.left_bottom(),
-                                    uv: Pos2 { x: 0.0, y: 1.0 },
-                                    color: Color32::WHITE,
-                                },
-                                Vertex {
-                                    pos: spectrogram_bounds.right_bottom(),
-                                    uv: Pos2 { x: 1.0, y: 1.0 },
-                                    color: Color32::WHITE,
-                                },
-                            ],
-                            texture_id: spectrogram_texture,
-                        })),
-                    ]);
+                if ui
+                    .add(
+                        egui::Slider::new(&mut render_settings.minimum_lightness, 0.0..=0.3)
+                            .text("Minimum OkLCH lightness value"),
+                    )
+                    .changed()
+                {
+                    shared_state.color_table.write().build(
+                        render_settings.left_hue,
+                        render_settings.right_hue,
+                        render_settings.minimum_lightness,
+                        render_settings.maximum_lightness,
+                        render_settings.maximum_chroma,
+                    );
+                };
+
+                if ui
+                    .add(
+                        egui::Slider::new(&mut render_settings.maximum_lightness, 0.5..=1.0)
+                            .text("Maximum OkLCH lightness value"),
+                    )
+                    .changed()
+                {
+                    shared_state.color_table.write().build(
+                        render_settings.left_hue,
+                        render_settings.right_hue,
+                        render_settings.minimum_lightness,
+                        render_settings.maximum_lightness,
+                        render_settings.maximum_chroma,
+                    );
+                };
+
+                if ui
+                    .add(
+                        egui::Slider::new(&mut render_settings.maximum_chroma, 0.0..=0.2)
+                            .text("Maximum OkLCH chroma value"),
+                    )
+                    .changed()
+                {
+                    shared_state.color_table.write().build(
+                        render_settings.left_hue,
+                        render_settings.right_hue,
+                        render_settings.minimum_lightness,
+                        render_settings.maximum_lightness,
+                        render_settings.maximum_chroma,
+                    );
+                };
+
+                if ui
+                    .add(
+                        egui::Slider::new(&mut render_settings.lookup_size, 1..=8)
+                            .logarithmic(true)
+                            .clamping(egui::SliderClamping::Always)
+                            .text("Color lookup table size multiplier"),
+                    )
+                    .changed()
+                {
+                    let mut color_table = shared_state.color_table.write();
+
+                    *color_table = ColorTable::new(
+                        COLOR_TABLE_BASE_CHROMA_SIZE * render_settings.lookup_size,
+                        COLOR_TABLE_BASE_LIGHTNESS_SIZE * render_settings.lookup_size,
+                    );
+                    color_table.build(
+                        render_settings.left_hue,
+                        render_settings.right_hue,
+                        render_settings.minimum_lightness,
+                        render_settings.maximum_lightness,
+                        render_settings.maximum_chroma,
+                    );
+                };
+
+                if analysis_settings.masking {
+                    ui.checkbox(&mut render_settings.automatic_gain, "Automatic amplitude ranging");
                 }
 
-                if let Some(under) = under_pointer {
-                    let analysis_settings = shared_state.cached_analysis_settings.lock();
-
-                    let amplitude_text = if analysis_settings.normalize_amplitude {
-                        format!(
-                            "{:.0} phon",
-                            under.amplitude + analysis_settings.listening_volume
+                if render_settings.automatic_gain && analysis_settings.masking {
+                    let mut agc_duration = render_settings.agc_duration.as_secs_f64();
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut agc_duration, 0.1..=8.0)
+                                .clamping(egui::SliderClamping::Never)
+                                .suffix("s")
+                                .text("Amplitude ranging duration"),
                         )
-                    } else {
-                        format!("{:+.0}dBFS", under.amplitude)
+                        .changed()
+                    {
+                        if agc_duration > 0.0 {
+                            render_settings.agc_duration =
+                                Duration::from_secs_f64(agc_duration);
+                        }
                     };
 
-                    drop(analysis_settings);
+                    ui.add(
+                        egui::Slider::new(&mut render_settings.agc_above_masking, 0.0..=100.0)
+                            .clamping(egui::SliderClamping::Never)
+                            .suffix("dB")
+                            .step_by(1.0)
+                            .fixed_decimals(0)
+                            .text("Range above masking mean"),
+                    );
 
-                    let text = if let (Some(pan), Some(elapsed)) = (under.pan, under.time) {
-                        format!(
-                            "{:.0}hz, -{:.3}s\n{}, {:+.2} pan",
-                            under.frequency.1,
-                            elapsed.as_secs_f64(),
-                            amplitude_text,
-                            pan
-                        )
+                    ui.add(
+                        egui::Slider::new(&mut render_settings.agc_below_masking, -50.0..=50.0)
+                            .clamping(egui::SliderClamping::Never)
+                            .suffix("dB")
+                            .step_by(1.0)
+                            .fixed_decimals(0)
+                            .text("Range below masking mean"),
+                    );
+                } else {
+                    if analysis_settings.normalize_amplitude {
+                        let mut min_phon =
+                            (render_settings.min_db + analysis_settings.listening_volume).clamp(0.0, 100.0);
+                        let mut max_phon =
+                            (render_settings.max_db + analysis_settings.listening_volume).clamp(0.0, 100.0);
+
+                        if ui.add(
+                            egui::Slider::new(&mut max_phon, 0.0..=100.0)
+                                .suffix(" phon")
+                                .step_by(1.0)
+                                .fixed_decimals(0)
+                                .text("Maximum amplitude"),
+                        ).changed() {
+                            render_settings.max_db =
+                                max_phon - analysis_settings.listening_volume;
+                        }
+
+                        if ui.add(
+                            egui::Slider::new(&mut min_phon, 0.0..=100.0)
+                                .suffix(" phon")
+                                .step_by(1.0)
+                                .fixed_decimals(0)
+                                .text("Minimum amplitude"),
+                        ).changed() {
+                            render_settings.min_db =
+                                min_phon - analysis_settings.listening_volume;
+                        }
                     } else {
-                        let resolution = (1.0 / (under.frequency.2 - under.frequency.0)) * 1000.0;
-                        let averaging = settings.bargraph_averaging.as_secs_f64() * 1000.0;
-
-                        if averaging > 0.0 {
-                            format!(
-                                "{:.0}hz, {}\n{:.0}ms res, {:.0} ms avg",
-                                under.frequency.1, amplitude_text, resolution, averaging
-                            )
-                        } else {
-                            format!(
-                                "{:.0}hz, {}\n{:.0}ms",
-                                under.frequency.1, amplitude_text, resolution
-                            )
-                        }
-                    };
-
-                    painter.text(
-                        Pos2 { x: 16.0, y: 16.0 },
-                        Align2::LEFT_TOP,
-                        text,
-                        FontId {
-                            size: 12.0,
-                            family: egui::FontFamily::Monospace,
-                        },
-                        Color32::from_rgb(224, 224, 224),
-                    );
-                }
-
-                if settings.show_format {
-                    if let Some(ref plugin_state) = *plugin_state.read() {
-                        let min_buffer_size_s =
-                            plugin_state.buffer_config.min_buffer_size.unwrap_or(0) as f64
-                                / plugin_state.buffer_config.sample_rate as f64;
-                        let max_buffer_size_s = plugin_state.buffer_config.max_buffer_size as f64
-                            / plugin_state.buffer_config.sample_rate as f64;
-
-                        let should_warn = plugin_state.buffer_config.sample_rate
-                            < (frequencies.last().unwrap().2 * 2.0)
-                            || max_buffer_size_s > 0.010
-                            || plugin_state.buffer_config.process_mode != ProcessMode::Realtime;
-
-                        painter.text(
-                            Pos2 {
-                                x: max_x / 2.0,
-                                y: 16.0,
-                            },
-                            Align2::CENTER_CENTER,
-                            format!(
-                                "{} in -> {} out, {:.1}kHz, {:.0}ms to {:.0}ms buffer, mode {:?}",
-                                plugin_state
-                                    .audio_io_layout
-                                    .main_input_channels
-                                    .map(u32::from)
-                                    .unwrap_or(0),
-                                plugin_state
-                                    .audio_io_layout
-                                    .main_output_channels
-                                    .map(u32::from)
-                                    .unwrap_or(0),
-                                plugin_state.buffer_config.sample_rate / 1000.0,
-                                min_buffer_size_s * 1000.0,
-                                max_buffer_size_s * 1000.0,
-                                plugin_state.buffer_config.process_mode
-                            ),
-                            FontId {
-                                size: 12.0,
-                                family: egui::FontFamily::Monospace,
-                            },
-                            if should_warn {
-                                Color32::YELLOW
-                            } else {
-                                Color32::from_rgb(224, 224, 224)
-                            },
+                        ui.add(
+                            egui::Slider::new(&mut render_settings.max_db, -100.0..=0.0)
+                                .clamping(egui::SliderClamping::Never)
+                                .suffix("dB")
+                                .step_by(1.0)
+                                .fixed_decimals(0)
+                                .text("Maximum amplitude"),
                         );
-                    }
-                }
-
-                drop(frequencies);
-
-                if settings.show_performance {
-                    let frame_timing = shared_state.frame_timing.lock();
-
-                    let frame_elapsed = frame_timing.1;
-                    let rasterize_elapsed = frame_timing.2;
-
-                    drop(frame_timing);
-
-                    let buffering_secs = buffering_duration.as_secs_f64();
-                    let rasterize_secs = rasterize_elapsed.as_secs_f64();
-                    let chunk_secs = chunk_duration.as_secs_f64();
-                    let frame_secs = frame_elapsed.as_secs_f64();
-
-                    /*let rasterize_processing_duration = rasterize_secs / (frame_secs / chunk_secs);
-                    let adjusted_processing_duration =
-                        processing_duration.as_secs_f64() + rasterize_processing_duration;*/
-                    let buffer_processing_duration = buffering_secs / (frame_secs / chunk_secs);
-                    let adjusted_processing_duration =
-                        processing_duration.as_secs_f64() + buffer_processing_duration;
-                    let rasterize_proportion = rasterize_secs / frame_secs;
-                    let processing_proportion = adjusted_processing_duration / chunk_secs;
-                    let buffering_proportion = buffering_secs / frame_secs;
-
-                    if buffering_duration < Duration::from_millis(500) {
-                        painter.text(
-                            Pos2 {
-                                x: max_x - 32.0,
-                                y: 48.0,
-                            },
-                            Align2::RIGHT_TOP,
-                            format!(
-                                "{:.0}% ({:.1}ms) processing",
-                                processing_proportion * 100.0,
-                                adjusted_processing_duration * 1000.0,
-                            ),
-                            FontId {
-                                size: 12.0,
-                                family: egui::FontFamily::Monospace,
-                            },
-                            if processing_proportion >= 0.95 {
-                                Color32::RED
-                            } else if processing_proportion >= 0.8 {
-                                Color32::YELLOW
-                            } else {
-                                Color32::from_rgb(224, 224, 224)
-                            },
-                        );
-                        painter.text(
-                            Pos2 {
-                                x: max_x - 32.0,
-                                y: 64.0,
-                            },
-                            Align2::RIGHT_TOP,
-                            format!("{:.1}ms buffering", buffering_secs * 1000.0),
-                            FontId {
-                                size: 12.0,
-                                family: egui::FontFamily::Monospace,
-                            },
-                            if buffering_proportion >= 1.0 {
-                                Color32::RED
-                            } else if buffering_proportion >= 0.5 {
-                                Color32::YELLOW
-                            } else {
-                                Color32::from_rgb(224, 224, 224)
-                            },
-                        );
-                    }
-
-                    painter.text(
-                        Pos2 {
-                            x: max_x - 32.0,
-                            y: 16.0,
-                        },
-                        Align2::RIGHT_TOP,
-                        format!("{:2}ms frame", frame_elapsed.as_millis()),
-                        FontId {
-                            size: 12.0,
-                            family: egui::FontFamily::Monospace,
-                        },
-                        if frame_elapsed
-                            >= Duration::from_secs_f64(1.0 / (BASELINE_TARGET_FPS * 0.5))
-                        {
-                            Color32::RED
-                        } else if frame_elapsed
-                            >= Duration::from_secs_f64(1.0 / (BASELINE_TARGET_FPS * 0.9))
-                        {
-                            Color32::YELLOW
-                        } else {
-                            Color32::from_rgb(224, 224, 224)
-                        },
-                    );
-                    painter.text(
-                        Pos2 {
-                            x: max_x - 32.0,
-                            y: 32.0,
-                        },
-                        Align2::RIGHT_TOP,
-                        format!(
-                            "{:.0}% ({:.1}ms) rasterize",
-                            rasterize_proportion * 100.0,
-                            rasterize_elapsed.as_secs_f64() * 1000.0,
-                        ),
-                        FontId {
-                            size: 12.0,
-                            family: egui::FontFamily::Monospace,
-                        },
-                        if rasterize_elapsed
-                            >= Duration::from_secs_f64(BASELINE_TARGET_FRAME_SECS * 0.6)
-                        {
-                            Color32::RED
-                        } else if rasterize_elapsed
-                            >= Duration::from_secs_f64(BASELINE_TARGET_FRAME_SECS * 0.3)
-                            || rasterize_proportion >= 0.6
-                        {
-                            Color32::YELLOW
-                        } else {
-                            Color32::from_rgb(224, 224, 224)
-                        },
-                    );
-                }
-            });
-            egui::Window::new("Settings")
-                .id(egui::Id::new("settings"))
-                .default_pos(Pos2 {
-                    x: 16.0,
-                    y: 56.0
-                })
-                .default_open(false)
-                .show(egui_ctx, |ui| {
-                    let mut render_settings = shared_state.settings.write();
-                    let mut analysis_settings = shared_state.cached_analysis_settings.lock();
-
-                    ui.collapsing("Render Options", |ui| {
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut render_settings.left_hue, 0.0..=360.0)
-                                    .suffix("°")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Left channel hue"),
-                            )
-                            .changed()
-                        {
-                            shared_state.color_table.write().build(
-                                render_settings.left_hue,
-                                render_settings.right_hue,
-                                render_settings.minimum_lightness,
-                                render_settings.maximum_lightness,
-                                render_settings.maximum_chroma,
-                            );
-                        };
-
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut render_settings.right_hue, 0.0..=360.0)
-                                    .suffix("°")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Right channel hue"),
-                            )
-                            .changed()
-                        {
-                            shared_state.color_table.write().build(
-                                render_settings.left_hue,
-                                render_settings.right_hue,
-                                render_settings.minimum_lightness,
-                                render_settings.maximum_lightness,
-                                render_settings.maximum_chroma,
-                            );
-                        };
-
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut render_settings.minimum_lightness, 0.0..=0.3)
-                                    .text("Minimum OkLCH lightness value"),
-                            )
-                            .changed()
-                        {
-                            shared_state.color_table.write().build(
-                                render_settings.left_hue,
-                                render_settings.right_hue,
-                                render_settings.minimum_lightness,
-                                render_settings.maximum_lightness,
-                                render_settings.maximum_chroma,
-                            );
-                        };
-
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut render_settings.maximum_lightness, 0.5..=1.0)
-                                    .text("Maximum OkLCH lightness value"),
-                            )
-                            .changed()
-                        {
-                            shared_state.color_table.write().build(
-                                render_settings.left_hue,
-                                render_settings.right_hue,
-                                render_settings.minimum_lightness,
-                                render_settings.maximum_lightness,
-                                render_settings.maximum_chroma,
-                            );
-                        };
-
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut render_settings.maximum_chroma, 0.0..=0.2)
-                                    .text("Maximum OkLCH chroma value"),
-                            )
-                            .changed()
-                        {
-                            shared_state.color_table.write().build(
-                                render_settings.left_hue,
-                                render_settings.right_hue,
-                                render_settings.minimum_lightness,
-                                render_settings.maximum_lightness,
-                                render_settings.maximum_chroma,
-                            );
-                        };
-
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut render_settings.lookup_size, 1..=8)
-                                    .logarithmic(true)
-                                    .clamping(egui::SliderClamping::Always)
-                                    .text("Color lookup table size multiplier"),
-                            )
-                            .changed()
-                        {
-                            let mut color_table = shared_state.color_table.write();
-
-                            *color_table = ColorTable::new(
-                                COLOR_TABLE_BASE_CHROMA_SIZE * render_settings.lookup_size,
-                                COLOR_TABLE_BASE_LIGHTNESS_SIZE * render_settings.lookup_size,
-                            );
-                            color_table.build(
-                                render_settings.left_hue,
-                                render_settings.right_hue,
-                                render_settings.minimum_lightness,
-                                render_settings.maximum_lightness,
-                                render_settings.maximum_chroma,
-                            );
-                        };
-
-                        if analysis_settings.masking {
-                            ui.checkbox(&mut render_settings.automatic_gain, "Automatic amplitude ranging");
-                        }
-
-                        if render_settings.automatic_gain && analysis_settings.masking {
-                            let mut agc_duration = render_settings.agc_duration.as_secs_f64();
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut agc_duration, 0.1..=8.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix("s")
-                                        .text("Amplitude ranging duration"),
-                                )
-                                .changed()
-                            {
-                                if agc_duration > 0.0 {
-                                    render_settings.agc_duration =
-                                        Duration::from_secs_f64(agc_duration);
-                                }
-                            };
-
-                            ui.add(
-                                egui::Slider::new(&mut render_settings.agc_above_masking, 0.0..=100.0)
-                                    .clamping(egui::SliderClamping::Never)
-                                    .suffix("dB")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Range above masking mean"),
-                            );
-
-                            ui.add(
-                                egui::Slider::new(&mut render_settings.agc_below_masking, -50.0..=50.0)
-                                    .clamping(egui::SliderClamping::Never)
-                                    .suffix("dB")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Range below masking mean"),
-                            );
-                        } else {
-                            if analysis_settings.normalize_amplitude {
-                                let mut min_phon =
-                                    (render_settings.min_db + analysis_settings.listening_volume).clamp(0.0, 100.0);
-                                let mut max_phon =
-                                    (render_settings.max_db + analysis_settings.listening_volume).clamp(0.0, 100.0);
-
-                                if ui.add(
-                                    egui::Slider::new(&mut max_phon, 0.0..=100.0)
-                                        .suffix(" phon")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("Maximum amplitude"),
-                                ).changed() {
-                                    render_settings.max_db =
-                                        max_phon - analysis_settings.listening_volume;
-                                }
-
-                                if ui.add(
-                                    egui::Slider::new(&mut min_phon, 0.0..=100.0)
-                                        .suffix(" phon")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("Minimum amplitude"),
-                                ).changed() {
-                                    render_settings.min_db =
-                                        min_phon - analysis_settings.listening_volume;
-                                }
-                            } else {
-                                ui.add(
-                                    egui::Slider::new(&mut render_settings.max_db, -100.0..=0.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix("dB")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("Maximum amplitude"),
-                                );
-
-                                ui.add(
-                                    egui::Slider::new(&mut render_settings.min_db, -100.0..=0.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix("dB")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("Minimum amplitude"),
-                                );
-                            }
-                        }
-
-                        if analysis_settings.masking {
-                            ui.checkbox(&mut render_settings.clamp_using_smr, "Use signal-to-mask ratio when calculating spectrogram shading");
-                        }
-
-                        let mut spectrogram_duration = render_settings.spectrogram_duration.as_secs_f64();
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut spectrogram_duration, 0.05..=8.0)
-                                    .logarithmic(true)
-                                    .clamping(egui::SliderClamping::Never)
-                                    .suffix("s")
-                                    .text("Spectrogram duration"),
-                            )
-                            .changed()
-                        {
-                            render_settings.spectrogram_duration =
-                                Duration::from_secs_f64(spectrogram_duration);
-                        };
-
-                        let mut bargraph_averaging = render_settings.bargraph_averaging.as_secs_f64() * 1000.0;
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut bargraph_averaging, 0.0..=1000.0)
-                                    .logarithmic(true)
-                                    .clamping(egui::SliderClamping::Never)
-                                    .suffix("ms")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Bargraph averaging"),
-                            )
-                            .changed()
-                        {
-                            render_settings.bargraph_averaging =
-                                Duration::from_secs_f64(bargraph_averaging / 1000.0);
-                        };
 
                         ui.add(
-                            egui::Slider::new(&mut render_settings.bargraph_height, 0.0..=1.0)
-                                .text("Bargraph height"),
-                        );
-
-                        ui.checkbox(&mut render_settings.spectrogram_nearest_neighbor, "Use nearest-neighbor scaling for spectrogram").changed();
-
-                        ui.checkbox(&mut render_settings.show_hover, "Show hover information");
-
-                        ui.checkbox(&mut render_settings.show_performance, "Show performance counters");
-
-                        ui.checkbox(&mut render_settings.show_format, "Show audio format information");
-
-                        if analysis_settings.masking {
-                            ui.checkbox(&mut render_settings.show_masking, "Highlight simultaneous masking thresholds");
-
-                            if render_settings.show_masking {
-                                let label = ui.label("Masking threshold color:");
-                                ui.color_edit_button_srgba(&mut render_settings.masking_color).labelled_by(label.id);
-                            }
-                        }
-
-                        if ui.button("Reset Render Options").clicked() {
-                            *render_settings = RenderSettings::default();
-                            render_settings.max_db =
-                                    80.0 - analysis_settings.listening_volume;
-                            render_settings.min_db =
-                                    20.0 - analysis_settings.listening_volume;
-                            if analysis_settings.normalize_amplitude {
-                                render_settings.agc_minimum =
-                                    3.0 - analysis_settings.listening_volume;
-                                render_settings.agc_maximum =
-                                    100.0 - analysis_settings.listening_volume;
-                            } else {
-                                render_settings.agc_minimum =
-                                    f32::NEG_INFINITY;
-                                render_settings.agc_maximum = f32::INFINITY;
-                            }
-                            shared_state.color_table.write().build(
-                                render_settings.left_hue,
-                                render_settings.right_hue,
-                                render_settings.minimum_lightness,
-                                render_settings.maximum_lightness,
-                                render_settings.maximum_chroma,
-                            );
-                        }
-                    });
-
-                    ui.collapsing("Analysis Options", |ui| {
-                        let update = |settings| {
-                            let mut lock = analysis_chain.lock();
-                            let analysis_chain = lock.as_mut().unwrap();
-                            analysis_chain.update_config(settings);
-                        };
-
-                        let update_and_clear = |settings| {
-                            let mut lock = analysis_chain.lock();
-                            let analysis_chain = lock.as_mut().unwrap();
-                            analysis_chain.update_config(settings);
-
-                            analysis_output.lock().0 =
-                                BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS);
-                        };
-
-                        let is_outside_hearing_range = analysis_settings.start_frequency < 20.0 || analysis_settings.start_frequency > 20000.0 || analysis_settings.end_frequency > 20000.0 || analysis_settings.end_frequency < 20.0;
-
-                        ui.colored_label(
-                            Color32::YELLOW,
-                            "Editing these options temporarily interrupts audio analysis.",
-                        );
-
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut analysis_settings.gain, -20.0..=40.0)
-                                    .clamping(egui::SliderClamping::Never)
-                                    .suffix("dB")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Analysis gain"),
-                            )
-                            .on_hover_text("This setting adjusts the amplitude of the incoming signal before it is processed (but does not affect the plugin's output channels; audio is always passed through unmodified).\n\nAll internal audio processing is done using 32-bit floating point, so this can be adjusted freely without concern for clipping.")
-                            .changed()
-                        {
-                            update(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        };
-
-                        let mut latency_offset = analysis_settings.latency_offset.as_secs_f64() * 1000.0;
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut latency_offset, 0.0..=500.0)
-                                    .clamping(egui::SliderClamping::Never)
-                                    .suffix("ms")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("Latency offset"),
-                            )
-                            .on_hover_text("This setting allows you to manually increase the processing latency reported to the plugin's host.\n\nBy default (when this is set to 0ms), the latency incurred by internal buffering is already accounted for.")
-                            .changed()
-                        {
-                            analysis_settings.latency_offset = Duration::from_secs_f64(latency_offset.max(0.0) / 1000.0);
-                            update(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        };
-
-                        if !is_outside_hearing_range {
-                            if ui
-                                .checkbox(
-                                    &mut analysis_settings.normalize_amplitude,
-                                    "Perform amplitude normalization",
-                                )
-                                .on_hover_text("If this is enabled, amplitude values are normalized using the ISO 226:2023 equal-loudness contours, which map the amplitudes of frequency bins into phons, a psychoacoustic unit of loudness measurement.\nIf this is disabled, amplitude values are not normalized.")
-                                .changed()
-                            {
-                                update(&analysis_settings);
-                                if analysis_settings.normalize_amplitude {
-                                    render_settings.agc_minimum =
-                                        3.0 - analysis_settings.listening_volume;
-                                    render_settings.agc_maximum =
-                                        100.0 - analysis_settings.listening_volume;
-                                } else {
-                                    render_settings.agc_minimum =
-                                        f32::NEG_INFINITY;
-                                    render_settings.agc_maximum = f32::INFINITY;
-                                }
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            }
-                        }
-
-                        if analysis_settings.normalize_amplitude {
-                            let old_tone_threshold_phon =
-                                (analysis_settings.midi_tone_amplitude_threshold + analysis_settings.listening_volume).clamp(0.0, 100.0);
-                            let old_min_phon =
-                                (render_settings.min_db + analysis_settings.listening_volume).clamp(0.0, 100.0);
-                            let old_max_phon =
-                                (render_settings.max_db + analysis_settings.listening_volume).clamp(0.0, 100.0);
-
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut analysis_settings.listening_volume, 20.0..=120.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix(" dB SPL")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("0dbFS output volume"),
-                                )
-                                .on_hover_text("When normalizing amplitude values using an equal-loudness contour, a reference value is necessary to convert dBFS into dB SPL.\nIn order to improve the accuracy of amplitude normalization and receive accurate phon values, this value should be set to the dB SPL value corresponding to 0 dBFS on your system.")
-                                .changed()
-                            {
-                                update_and_clear(&analysis_settings);
-                                analysis_settings.midi_tone_amplitude_threshold =
-                                    old_tone_threshold_phon - analysis_settings.listening_volume;
-                                render_settings.min_db =
-                                    old_min_phon - analysis_settings.listening_volume;
-                                render_settings.max_db =
-                                    old_max_phon - analysis_settings.listening_volume;
-                                render_settings.agc_minimum =
-                                    3.0 - analysis_settings.listening_volume;
-                                render_settings.agc_maximum =
-                                    100.0 - analysis_settings.listening_volume;
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            };
-                        }
-
-                        if !is_outside_hearing_range {
-                            if ui
-                                .checkbox(
-                                    &mut analysis_settings.masking,
-                                    "Perform simultaneous masking",
-                                )
-                                .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, simultaneous masking thresholds are calculated using a simple tone-masking-tone model.\nIf this is disabled, simultaneous masking thresholds are not calculated.")
-                                .changed()
-                            {
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            }
-
-                            if analysis_settings.masking {
-                                if ui
-                                    .checkbox(&mut analysis_settings.approximate_masking, "Approximate spreading function")
-                                    .on_hover_text("Calculating the simultaneous masking threshold makes use of a spreading function, which can be computationally intensive to compute in real time.\nIf this is enabled, the spreading function is approximated, reducing CPU usage at the expense of outputting less psychoacoustically accurate results.\nIf this is disabled, the spreading function is computed normally, resulting in more psychoacoustically accurate results at the expense of additional CPU usage.")
-                                    .changed()
-                                {
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                }
-                            }
-
-                            /*if analysis_settings.masking {
-                                if ui
-                                    .checkbox(
-                                        &mut analysis_settings.remove_masked_components,
-                                        "Remove masked components",
-                                    )
-                                    .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, tones underneath the simultaneous masking threshold are replaced with an amplitude of zero, creating a (sometimes) more readable but less psychoacoustically accurate output.\nIf this is disabled, tones underneath the simultaneous masking threshold are replaced with the simultaneous masking threshold's value.")
-                                    .changed()
-                                {
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                }
-                            }*/
-                        }
-
-                        if ui
-                            .checkbox(
-                                &mut analysis_settings.internal_buffering,
-                                "Use internal buffering",
-                            )
-                            .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows.\nIf this is enabled, the plugin maintains its own buffer of samples, allowing the number of overlapping windows per second to be changed by the user. This adds a small amount of latency, which is reported to the plugin's host so that it can be compensated for.\nIf this is disabled, the number of overlapping windows per second is determined by the buffer size set by the host.")
-                            .changed()
-                        {
-                            analysis_settings.output_osc = false;
-                            analysis_settings.output_midi = false;
-                            update(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        }
-
-                        if analysis_settings.internal_buffering {
-                            if ui
-                                .checkbox(
-                                    &mut analysis_settings.strict_synchronization,
-                                    "Use strict synchronization",
-                                )
-                                .on_hover_text("When using internal buffering, synchronization can be done in a relaxed manner, where audio analysis can desynchronize slightly from audio output (if the host supports delay compensation, the analysis ends up running slightly ahead of the output), or in a strict manner, where samples must be analyzed before they can be outputted.\nIf this is enabled, audio synchronization is performed in a strict manner.\nIf this is disabled, audio synchronization is performed in a relaxed manner.")
-                                .changed()
-                            {
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            }
-
-                            if ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut analysis_settings.update_rate_hz,
-                                        128.0..=4096.0,
-                                    )
-                                    .logarithmic(true)
-                                    .suffix("hz")
-                                    .step_by(128.0)
-                                    .fixed_decimals(0)
-                                    .text("Update rate"),
-                                )
-                                .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows. This setting allows you to adjust the number of overlapping windows per second, effectively setting the spectrogram's vertical resolution (and the associated amount of CPU usage required).\n\nThe default value for the setting is roughly half the length of the just-noticeable-difference in onset time between two auditory events.\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution.)")
-                                .changed()
-                            {
-                                update_and_clear(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            };
-                        }
-
-                        let maximum_resolution = if analysis_settings.output_osc {
-                            MAX_OSC_FREQUENCY_BINS
-                        } else {
-                            MAX_FREQUENCY_BINS
-                        };
-
-                        if ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut analysis_settings.resolution,
-                                    128..=maximum_resolution,
-                                )
-                                .suffix(" bins")
-                                .step_by(64.0)
+                            egui::Slider::new(&mut render_settings.min_db, -100.0..=0.0)
+                                .clamping(egui::SliderClamping::Never)
+                                .suffix("dB")
+                                .step_by(1.0)
                                 .fixed_decimals(0)
-                                .text("Resolution"),
-                            )
-                            .on_hover_text("In order to convert data into frequency domain, the selected frequency range needs to be split into a set number of frequency bins. This setting allows you to adjust the number of bins used, effectively setting the horizontal resolution of the spectrogram and bargraph (and the associated amount of CPU usage required).\n\nThis setting does not increase the width of the transform's filters beyond the time resolution setting.")
-                            .changed()
-                        {
-                            update_and_clear(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        };
+                                .text("Minimum amplitude"),
+                        );
+                    }
+                }
 
-                        let mut frame = egui::Frame::group(ui.style()).inner_margin(4.0).begin(ui);
+                if analysis_settings.masking {
+                    ui.checkbox(&mut render_settings.clamp_using_smr, "Use signal-to-mask ratio when calculating spectrogram shading");
+                }
 
-                        {
-                            let ui = &mut frame.content_ui;
+                let mut spectrogram_duration = render_settings.spectrogram_duration.as_secs_f64();
+                if ui
+                    .add(
+                        egui::Slider::new(&mut spectrogram_duration, 0.05..=8.0)
+                            .logarithmic(true)
+                            .clamping(egui::SliderClamping::Never)
+                            .suffix("s")
+                            .text("Spectrogram duration"),
+                    )
+                    .changed()
+                {
+                    render_settings.spectrogram_duration =
+                        Duration::from_secs_f64(spectrogram_duration);
+                };
 
-                            let label = ui.label("Frequency range");
+                let mut bargraph_averaging = render_settings.bargraph_averaging.as_secs_f64() * 1000.0;
+                if ui
+                    .add(
+                        egui::Slider::new(&mut bargraph_averaging, 0.0..=1000.0)
+                            .logarithmic(true)
+                            .clamping(egui::SliderClamping::Never)
+                            .suffix("ms")
+                            .step_by(1.0)
+                            .fixed_decimals(0)
+                            .text("Bargraph averaging"),
+                    )
+                    .changed()
+                {
+                    render_settings.bargraph_averaging =
+                        Duration::from_secs_f64(bargraph_averaging / 1000.0);
+                };
 
-                            if ui
-                                .add(
-                                    egui::DragValue::new(&mut analysis_settings.start_frequency)
-                                        .suffix("hz")
-                                        .fixed_decimals(0),
-                                )
-                                .labelled_by(label.id)
-                                .changed()
-                            {
-                                if analysis_settings.start_frequency < 0.0 {
-                                    analysis_settings.start_frequency = 0.0;
-                                }
-                                if analysis_settings.end_frequency < 0.0 {
-                                    analysis_settings.end_frequency = 0.0;
-                                }
-                                if analysis_settings.end_frequency > analysis_settings.start_frequency {
-                                    if analysis_settings.start_frequency < 20.0 || analysis_settings.start_frequency > 20000.0  {
-                                        analysis_settings.normalize_amplitude = false;
-                                        analysis_settings.masking = false;
-                                    }
-                                    update_and_clear(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                }
-                            };
+                ui.add(
+                    egui::Slider::new(&mut render_settings.bargraph_height, 0.0..=1.0)
+                        .text("Bargraph height"),
+                );
 
-                            if ui
-                                .add(
-                                    egui::DragValue::new(&mut analysis_settings.end_frequency)
-                                        .speed(20.0)
-                                        .suffix("hz")
-                                        .fixed_decimals(0),
-                                )
-                                .labelled_by(label.id)
-                                .changed()
-                            {
-                                if analysis_settings.start_frequency < 0.0 {
-                                    analysis_settings.start_frequency = 0.0;
-                                }
-                                if analysis_settings.end_frequency < 0.0 {
-                                    analysis_settings.end_frequency = 0.0;
-                                }
-                                if analysis_settings.end_frequency > analysis_settings.start_frequency {
-                                    if analysis_settings.end_frequency > 20000.0 || analysis_settings.end_frequency < 20.0 {
-                                        analysis_settings.normalize_amplitude = false;
-                                        analysis_settings.masking = false;
-                                    }
-                                    update_and_clear(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                }
-                            };
-                        }
-                        frame.end(ui).on_hover_text("The frequency range of human hearing in healthy young individuals generally spans from 20 Hz to 20 kHz. However, this range can vary significantly, often becoming narrower as age progresses.\n\nThere are many use cases where you may want to adjust the range of processed frequencies, such as zooming in on a specific range of auditory frequencies or checking for the presence or absence of ultrasonic/subsonic sounds. These settings allow you to do so.");
+                ui.checkbox(&mut render_settings.spectrogram_nearest_neighbor, "Use nearest-neighbor scaling for spectrogram").changed();
 
-                        if ui
-                            .checkbox(
-                                &mut analysis_settings.erb_frequency_scale,
-                                "Use ERB frequency scale",
-                            )
-                            .on_hover_text("If this is enabled, frequencies will be displayed using the Equivalent Rectangular Bandwidth scale, a psychoacoustic measure of pitch perception.\nIf this is disabled, frequencies will be displayed on a base 2 logarithmic scale, which is used by most musical scales.")
-                            .changed()
-                        {
-                            update_and_clear(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        }
+                ui.checkbox(&mut render_settings.show_hover, "Show hover information");
 
-                        if ui
-                            .checkbox(
-                                &mut analysis_settings.erb_time_resolution,
-                                "Use ERB time resolution",
-                            )
-                            .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nIf this setting is enabled, the appropriate time resolution will be determined using an adjusted version of the ERB scale.\nIf this setting is disabled, time resolution is determined based on the configured Q factor.")
-                            .changed()
-                        {
-                            update(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        }
+                ui.checkbox(&mut render_settings.show_performance, "Show performance counters");
 
-                        if analysis_settings.erb_time_resolution {
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut analysis_settings.erb_bandwidth_divisor, 0.5..=6.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .text("ERB bandwidth divisor"),
-                                )
-                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, adjusting the time resolution calculated by this function may be useful to improve visualization readability. This setting allows you to change how this adjustment is performed.")
-                                .changed()
-                            {
-                                if analysis_settings.erb_bandwidth_divisor < 0.01 {
-                                    analysis_settings.erb_bandwidth_divisor = 0.01;
-                                }
+                ui.checkbox(&mut render_settings.show_format, "Show audio format information");
 
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            };
-                        } else {
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut analysis_settings.q_time_resolution, 2.0..=128.0)
-                                        .logarithmic(true)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix(" Q")
-                                        .fixed_decimals(1)
-                                        .text("Time resolution"),
-                                )
-                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.")
-                                .changed()
-                            {
-                                analysis_settings.q_time_resolution = analysis_settings.q_time_resolution.max(0.1);
+                if analysis_settings.masking {
+                    ui.checkbox(&mut render_settings.show_masking, "Highlight simultaneous masking thresholds");
 
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            };
-                        }
+                    if render_settings.show_masking {
+                        let label = ui.label("Masking threshold color:");
+                        ui.color_edit_button_srgba(&mut render_settings.masking_color).labelled_by(label.id);
+                    }
+                }
 
-                        if ui
-                                .add(
-                                    egui::Slider::new(&mut analysis_settings.time_resolution_clamp.0, 0.0..=200.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix("ms")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("Minimum time resolution"),
-                                )
-                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen determining this tradeoff, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
-                                .changed()
-                            {
-                                analysis_settings.time_resolution_clamp.0 = analysis_settings.time_resolution_clamp.0.clamp(0.0, 1000.0);
-                                if analysis_settings.time_resolution_clamp.0 > analysis_settings.time_resolution_clamp.1 {
-                                    analysis_settings.time_resolution_clamp.1 = analysis_settings.time_resolution_clamp.0;
-                                }
+                if ui.button("Reset Render Options").clicked() {
+                    *render_settings = RenderSettings::default();
+                    render_settings.max_db =
+                            80.0 - analysis_settings.listening_volume;
+                    render_settings.min_db =
+                            20.0 - analysis_settings.listening_volume;
+                    if analysis_settings.normalize_amplitude {
+                        render_settings.agc_minimum =
+                            3.0 - analysis_settings.listening_volume;
+                        render_settings.agc_maximum =
+                            100.0 - analysis_settings.listening_volume;
+                    } else {
+                        render_settings.agc_minimum =
+                            f32::NEG_INFINITY;
+                        render_settings.agc_maximum = f32::INFINITY;
+                    }
+                    shared_state.color_table.write().build(
+                        render_settings.left_hue,
+                        render_settings.right_hue,
+                        render_settings.minimum_lightness,
+                        render_settings.maximum_lightness,
+                        render_settings.maximum_chroma,
+                    );
+                }
+            });
 
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            };
+            ui.collapsing("Analysis Options", |ui| {
+                let update = |settings| {
+                    let mut lock = analysis_chain.lock();
+                    let analysis_chain = lock.as_mut().unwrap();
+                    analysis_chain.update_config(settings);
+                };
 
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut analysis_settings.time_resolution_clamp.1, 0.0..=200.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix("ms")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("Maximum time resolution"),
-                                )
-                                .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen determining this tradeoff, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
-                                .changed()
-                            {
-                                analysis_settings.time_resolution_clamp.1 = analysis_settings.time_resolution_clamp.1.clamp(0.0, 1000.0);
-                                if analysis_settings.time_resolution_clamp.0 > analysis_settings.time_resolution_clamp.1 {
-                                    analysis_settings.time_resolution_clamp.0 = analysis_settings.time_resolution_clamp.1;
-                                }
+                let update_and_clear = |settings| {
+                    let mut lock = analysis_chain.lock();
+                    let analysis_chain = lock.as_mut().unwrap();
+                    analysis_chain.update_config(settings);
 
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            };
+                    analysis_output.lock().0 =
+                        BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS);
+                };
 
-                        if ui
-                            .checkbox(
-                                &mut analysis_settings.nc_method,
-                                "Use NC method",
-                            )
-                            .on_hover_text("If this is enabled, windowing is performed using the NC method, a form of spectral reassignment using phase information which usually outperforms typical window functions.\nIf this is disabled, windowing is performed using the Hann window function.")
-                            .changed()
-                        {
-                            update(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        }
+                let is_outside_hearing_range = analysis_settings.start_frequency < 20.0 || analysis_settings.start_frequency > 20000.0 || analysis_settings.end_frequency > 20000.0 || analysis_settings.end_frequency < 20.0;
 
-                        if analysis_settings.nc_method {
-                            if ui
-                                .checkbox(
-                                    &mut analysis_settings.strict_nc,
-                                    "Use optimal NC method",
-                                )
-                                .on_hover_text("If this is enabled, the \"optimal\" version of the NC method is used, improving filter bandwidth characteristics at the expense of introducing additional banding artifacts into the spectrogram.\nIf this is disabled, an alternate implementation of the NC method is used, which prioritizes the reduction of spectrogram artifacts.")
-                                .changed()
-                            {
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            }
-                        }
+                ui.colored_label(
+                    Color32::YELLOW,
+                    "Editing these options temporarily interrupts audio analysis.",
+                );
 
-                        ui.collapsing("External Outputs", |ui| {
-                            ui.colored_label(
-                                Color32::YELLOW,
-                                "Enabling external output requires internal buffering to be disabled.",
-                            );
+                if ui
+                    .add(
+                        egui::Slider::new(&mut analysis_settings.gain, -20.0..=40.0)
+                            .clamping(egui::SliderClamping::Never)
+                            .suffix("dB")
+                            .step_by(1.0)
+                            .fixed_decimals(0)
+                            .text("Analysis gain"),
+                    )
+                    .on_hover_text("This setting adjusts the amplitude of the incoming signal before it is processed (but does not affect the plugin's output channels; audio is always passed through unmodified).\n\nAll internal audio processing is done using 32-bit floating point, so this can be adjusted freely without concern for clipping.")
+                    .changed()
+                {
+                    update(&analysis_settings);
+                    egui_ctx.request_discard("Changed setting");
+                    return;
+                };
 
-                            if ui
-                                .checkbox(
-                                    &mut analysis_settings.output_osc,
-                                    "Output analysis via OSC",
-                                )
-                                .on_hover_text("If this is enabled, the plugin will output analysis data via OSC, which can then be used as an input for alternative visualization methods.")
-                                .changed()
-                            {
-                                if analysis_settings.output_osc {
-                                    analysis_settings.internal_buffering = false;
-                                    analysis_settings.normalize_amplitude = true;
-                                    analysis_settings.masking = true;
-                                    if analysis_settings.resolution > MAX_OSC_FREQUENCY_BINS {
-                                        analysis_settings.resolution = MAX_OSC_FREQUENCY_BINS;
-                                    }
-                                }
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            }
+                let mut latency_offset = analysis_settings.latency_offset.as_secs_f64() * 1000.0;
+                if ui
+                    .add(
+                        egui::Slider::new(&mut latency_offset, 0.0..=500.0)
+                            .clamping(egui::SliderClamping::Never)
+                            .suffix("ms")
+                            .step_by(1.0)
+                            .fixed_decimals(0)
+                            .text("Latency offset"),
+                    )
+                    .on_hover_text("This setting allows you to manually increase the processing latency reported to the plugin's host.\n\nBy default (when this is set to 0ms), the latency incurred by internal buffering is already accounted for.")
+                    .changed()
+                {
+                    analysis_settings.latency_offset = Duration::from_secs_f64(latency_offset.max(0.0) / 1000.0);
+                    update(&analysis_settings);
+                    egui_ctx.request_discard("Changed setting");
+                    return;
+                };
 
-                            if analysis_settings.output_osc {
-                                ui.colored_label(
-                                    Color32::YELLOW,
-                                    "OSC packets produced by this program are intended solely for further local analysis and significantly exceed the MTU of most networks.",
-                                );
-
-                                let address_label = ui
-                                    .label("OSC server UDP/IP address:")
-                                    .on_hover_text("The UDP/IP address of the OSC server that analysis output will be sent to.");
-
-                                if ui.
-                                    text_edit_singleline(&mut analysis_settings.osc_socket_address)
-                                    .labelled_by(address_label.id)
-                                    .on_hover_text("The UDP/IP address of the OSC server that analysis output will be sent to.")
-                                    .changed()
-                                {
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                }
-
-                                let message_label_1 = ui
-                                    .label("Frequency bin data OSC message address:")
-                                    .on_hover_text("The OSC address pattern that frequency bin data will be sent under.\n\nThe message format for frequency bin data is [(frequency, bandwidth, pan, volume, signalToMaskRatio)], with bins being listed in order of priority. Frequencies and bandwidths are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), pan ranges from -1 to 1, and signalToMaskRatio is in dB.");
-
-                                if ui.
-                                    text_edit_singleline(&mut analysis_settings.osc_resource_address_frequencies)
-                                    .labelled_by(message_label_1.id)
-                                    .on_hover_text("The OSC address pattern that frequency bin data will be sent under.\n\nThe message format for frequency bin data is [(frequency, bandwidth, pan, volume, signalToMaskRatio)], with bins being listed in order of priority. Frequencies and bandwidths are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), pan ranges from -1 to 1, and signalToMaskRatio is in dB.")
-                                    .changed()
-                                {
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                }
-
-                                let message_label_2 = ui
-                                    .label("Analysis statistics OSC message address:")
-                                    .on_hover_text("The OSC address pattern that analysis statistics will be sent under.\n\nThe message format for analysis statistics is (averageMasking, averageVolume, maximumVolume, chunkDuration), with amplitude values being in phon (or dBFS if amplitude normalization is disabled) and duration values being in seconds. Analysis statistics are only applicable for the most recent slice of tone data.");
-
-                                if ui.
-                                    text_edit_singleline(&mut analysis_settings.osc_resource_address_stats)
-                                    .labelled_by(message_label_2.id)
-                                    .on_hover_text("The OSC address pattern that analysis statistics will be sent under.\n\nThe message format for analysis statistics is (averageMasking, averageVolume, maximumVolume, chunkDuration), with amplitude values being in phon (or dBFS if amplitude normalization is disabled) and duration values being in seconds. Analysis statistics are only applicable for the most recent slice of tone data.")
-                                    .changed()
-                                {
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                }
-                            }
-
-                            #[cfg(feature = "midi")]
-                            if ui
-                                .checkbox(
-                                    &mut analysis_settings.output_midi,
-                                    "Output analysis via MIDI",
-                                )
-                                .on_hover_text("If this is enabled, the plugin will use analysis data to generate a MIDI output, which can then be used as an input for alternative visualization methods.")
-                                .changed()
-                            {
-                                if analysis_settings.output_midi {
-                                    analysis_settings.internal_buffering = false;
-                                    analysis_settings.normalize_amplitude = true;
-                                    analysis_settings.masking = true;
-                                    analysis_settings.erb_time_resolution = false;
-                                    analysis_settings.q_time_resolution = 17.30993;
-                                }
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            }
-
-                            #[cfg(feature = "midi")]
-                            if analysis_settings.output_midi {
-                                ui.colored_label(
-                                    Color32::YELLOW,
-                                    "Some MIDI software may struggle to handle this plugin's output rate. If you encounter issues, try lowering the number of simultaneous tones or increasing the plugin's buffer size.",
-                                );
-
-                                if ui
-                                    .add(
-                                        egui::Slider::new(&mut analysis_settings.midi_max_simultaneous_tones, 1..=128)
-                                            .suffix(" notes")
-                                            .logarithmic(true)
-                                            .text("Maximum simultaneous MIDI notes"),
-                                    )
-                                    .on_hover_text("This setting adjusts the maximum number of simultaneous MIDI notes output by the plugin.\nValid notes are prioritized by their distance from the masking threshold, or if masking data is not available, their perceptual amplitude. If amplitude normalization is also disabled, notes will then be prioritized based on absolute amplitude.")
-                                    .changed()
-                                {
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                };
-
-                                if analysis_settings.normalize_amplitude {
-                                    let mut tone_threshold_phon =
-                                        (analysis_settings.midi_tone_amplitude_threshold + analysis_settings.listening_volume).clamp(0.0, 100.0);
-
-                                    if ui
-                                        .add(
-                                            egui::Slider::new(&mut tone_threshold_phon, 0.0..=100.0)
-                                                .suffix(" phon")
-                                                .step_by(1.0)
-                                                .fixed_decimals(0)
-                                                .text("MIDI note amplitude threshold"),
-                                        )
-                                        .on_hover_text("This setting adjusts the minimum amplitude necessary for a note to be considered valid. Notes with an amplitude below this threshold will always be considered inactive, regardless of the note limit.")
-                                        .changed()
-                                    {
-                                        analysis_settings.midi_tone_amplitude_threshold =
-                                            tone_threshold_phon - analysis_settings.listening_volume;
-                                        update(&analysis_settings);
-                                        egui_ctx.request_discard("Changed setting");
-                                        return;
-                                    }
-                                } else {
-                                    if ui
-                                        .add(
-                                            egui::Slider::new(&mut analysis_settings.midi_tone_amplitude_threshold, -100.0..=0.0)
-                                                .clamping(egui::SliderClamping::Never)
-                                                .suffix("dB")
-                                                .step_by(1.0)
-                                                .fixed_decimals(0)
-                                                .text("MIDI note amplitude threshold"),
-                                        )
-                                        .on_hover_text("This setting adjusts the minimum amplitude necessary for a note to be considered valid. Notes with an amplitude below this threshold will always be considered inactive, regardless of the note limit.")
-                                        .changed()
-                                    {
-                                        update(&analysis_settings);
-                                        egui_ctx.request_discard("Changed setting");
-                                        return;
-                                    };
-                                }
-
-                                if ui
-                                    .add(
-                                        egui::Slider::new(&mut analysis_settings.midi_pressure_min_amplitude, -100.0..=0.0)
-                                            .clamping(egui::SliderClamping::Never)
-                                            .suffix("dB")
-                                            .step_by(1.0)
-                                            .fixed_decimals(0)
-                                            .text("MIDI note pressure minimum amplitude"),
-                                    )
-                                    .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
-                                    .changed()
-                                {
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                    return;
-                                };
-
-                                if ui
-                                    .add(
-                                        egui::Slider::new(&mut analysis_settings.midi_pressure_max_amplitude, -100.0..=0.0)
-                                            .clamping(egui::SliderClamping::Never)
-                                            .suffix("dB")
-                                            .step_by(1.0)
-                                            .fixed_decimals(0)
-                                            .text("MIDI note pressure maximum amplitude"),
-                                    )
-                                    .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
-                                    .changed()
-                                {
-                                    update(&analysis_settings);
-                                    egui_ctx.request_discard("Changed setting");
-                                };
-                            }
-                        });
-
-                        if ui.button("Reset Analysis Options").clicked() {
-                            *analysis_settings = AnalysisChainConfig::default();
-                            render_settings.max_db =
-                                80.0 - analysis_settings.listening_volume;
-                            render_settings.min_db =
-                                20.0 - analysis_settings.listening_volume;
+                if !is_outside_hearing_range {
+                    if ui
+                        .checkbox(
+                            &mut analysis_settings.normalize_amplitude,
+                            "Perform amplitude normalization",
+                        )
+                        .on_hover_text("If this is enabled, amplitude values are normalized using the ISO 226:2023 equal-loudness contours, which map the amplitudes of frequency bins into phons, a psychoacoustic unit of loudness measurement.\nIf this is disabled, amplitude values are not normalized.")
+                        .changed()
+                    {
+                        update(&analysis_settings);
+                        if analysis_settings.normalize_amplitude {
                             render_settings.agc_minimum =
                                 3.0 - analysis_settings.listening_volume;
                             render_settings.agc_maximum =
                                 100.0 - analysis_settings.listening_volume;
-                            update_and_clear(&analysis_settings);
+                        } else {
+                            render_settings.agc_minimum =
+                                f32::NEG_INFINITY;
+                            render_settings.agc_maximum = f32::INFINITY;
                         }
-                    });
+                        egui_ctx.request_discard("Changed setting");
+                        return;
+                    }
+                }
+
+                if analysis_settings.normalize_amplitude {
+                    let old_tone_threshold_phon =
+                        (analysis_settings.midi_tone_amplitude_threshold + analysis_settings.listening_volume).clamp(0.0, 100.0);
+                    let old_min_phon =
+                        (render_settings.min_db + analysis_settings.listening_volume).clamp(0.0, 100.0);
+                    let old_max_phon =
+                        (render_settings.max_db + analysis_settings.listening_volume).clamp(0.0, 100.0);
+
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut analysis_settings.listening_volume, 20.0..=120.0)
+                                .clamping(egui::SliderClamping::Never)
+                                .suffix(" dB SPL")
+                                .step_by(1.0)
+                                .fixed_decimals(0)
+                                .text("0dbFS output volume"),
+                        )
+                        .on_hover_text("When normalizing amplitude values using an equal-loudness contour, a reference value is necessary to convert dBFS into dB SPL.\nIn order to improve the accuracy of amplitude normalization and receive accurate phon values, this value should be set to the dB SPL value corresponding to 0 dBFS on your system.")
+                        .changed()
+                    {
+                        update_and_clear(&analysis_settings);
+                        analysis_settings.midi_tone_amplitude_threshold =
+                            old_tone_threshold_phon - analysis_settings.listening_volume;
+                        render_settings.min_db =
+                            old_min_phon - analysis_settings.listening_volume;
+                        render_settings.max_db =
+                            old_max_phon - analysis_settings.listening_volume;
+                        render_settings.agc_minimum =
+                            3.0 - analysis_settings.listening_volume;
+                        render_settings.agc_maximum =
+                            100.0 - analysis_settings.listening_volume;
+                        egui_ctx.request_discard("Changed setting");
+                        return;
+                    };
+                }
+
+                if !is_outside_hearing_range {
+                    if ui
+                        .checkbox(
+                            &mut analysis_settings.masking,
+                            "Perform simultaneous masking",
+                        )
+                        .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, simultaneous masking thresholds are calculated using a simple tone-masking-tone model.\nIf this is disabled, simultaneous masking thresholds are not calculated.")
+                        .changed()
+                    {
+                        update(&analysis_settings);
+                        egui_ctx.request_discard("Changed setting");
+                        return;
+                    }
+
+                    if analysis_settings.masking {
+                        if ui
+                            .checkbox(&mut analysis_settings.approximate_masking, "Approximate spreading function")
+                            .on_hover_text("Calculating the simultaneous masking threshold makes use of a spreading function, which can be computationally intensive to compute in real time.\nIf this is enabled, the spreading function is approximated, reducing CPU usage at the expense of outputting less psychoacoustically accurate results.\nIf this is disabled, the spreading function is computed normally, resulting in more psychoacoustically accurate results at the expense of additional CPU usage.")
+                            .changed()
+                        {
+                            update(&analysis_settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        }
+                    }
+
+                    /*if analysis_settings.masking {
+                        if ui
+                            .checkbox(
+                                &mut analysis_settings.remove_masked_components,
+                                "Remove masked components",
+                            )
+                            .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, tones underneath the simultaneous masking threshold are replaced with an amplitude of zero, creating a (sometimes) more readable but less psychoacoustically accurate output.\nIf this is disabled, tones underneath the simultaneous masking threshold are replaced with the simultaneous masking threshold's value.")
+                            .changed()
+                        {
+                            update(&analysis_settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        }
+                    }*/
+                }
+
+                if ui
+                    .checkbox(
+                        &mut analysis_settings.internal_buffering,
+                        "Use internal buffering",
+                    )
+                    .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows.\nIf this is enabled, the plugin maintains its own buffer of samples, allowing the number of overlapping windows per second to be changed by the user. This adds a small amount of latency, which is reported to the plugin's host so that it can be compensated for.\nIf this is disabled, the number of overlapping windows per second is determined by the buffer size set by the host.")
+                    .changed()
+                {
+                    analysis_settings.output_osc = false;
+                    analysis_settings.output_midi = false;
+                    update(&analysis_settings);
+                    egui_ctx.request_discard("Changed setting");
+                    return;
+                }
+
+                if analysis_settings.internal_buffering {
+                    if ui
+                        .checkbox(
+                            &mut analysis_settings.strict_synchronization,
+                            "Use strict synchronization",
+                        )
+                        .on_hover_text("When using internal buffering, synchronization can be done in a relaxed manner, where audio analysis can desynchronize slightly from audio output (if the host supports delay compensation, the analysis ends up running slightly ahead of the output), or in a strict manner, where samples must be analyzed before they can be outputted.\nIf this is enabled, audio synchronization is performed in a strict manner.\nIf this is disabled, audio synchronization is performed in a relaxed manner.")
+                        .changed()
+                    {
+                        update(&analysis_settings);
+                        egui_ctx.request_discard("Changed setting");
+                        return;
+                    }
+
+                    if ui
+                        .add(
+                            egui::Slider::new(
+                                &mut analysis_settings.update_rate_hz,
+                                128.0..=4096.0,
+                            )
+                            .logarithmic(true)
+                            .suffix("hz")
+                            .step_by(128.0)
+                            .fixed_decimals(0)
+                            .text("Update rate"),
+                        )
+                        .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows. This setting allows you to adjust the number of overlapping windows per second, effectively setting the spectrogram's vertical resolution (and the associated amount of CPU usage required).\n\nThe default value for the setting is roughly half the length of the just-noticeable-difference in onset time between two auditory events.\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution.)")
+                        .changed()
+                    {
+                        update_and_clear(&analysis_settings);
+                        egui_ctx.request_discard("Changed setting");
+                        return;
+                    };
+                }
+
+                let maximum_resolution = if analysis_settings.output_osc {
+                    MAX_OSC_FREQUENCY_BINS
+                } else {
+                    MAX_FREQUENCY_BINS
+                };
+
+                if ui
+                    .add(
+                        egui::Slider::new(
+                            &mut analysis_settings.resolution,
+                            128..=maximum_resolution,
+                        )
+                        .suffix(" bins")
+                        .step_by(64.0)
+                        .fixed_decimals(0)
+                        .text("Resolution"),
+                    )
+                    .on_hover_text("In order to convert data into frequency domain, the selected frequency range needs to be split into a set number of frequency bins. This setting allows you to adjust the number of bins used, effectively setting the horizontal resolution of the spectrogram and bargraph (and the associated amount of CPU usage required).\n\nThis setting does not increase the width of the transform's filters beyond the time resolution setting.")
+                    .changed()
+                {
+                    update_and_clear(&analysis_settings);
+                    egui_ctx.request_discard("Changed setting");
+                    return;
+                };
+
+                let mut frame = egui::Frame::group(ui.style()).inner_margin(4.0).begin(ui);
+
+                {
+                    let ui = &mut frame.content_ui;
+
+                    let label = ui.label("Frequency range");
+
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut analysis_settings.start_frequency)
+                                .suffix("hz")
+                                .fixed_decimals(0),
+                        )
+                        .labelled_by(label.id)
+                        .changed()
+                    {
+                        if analysis_settings.start_frequency < 0.0 {
+                            analysis_settings.start_frequency = 0.0;
+                        }
+                        if analysis_settings.end_frequency < 0.0 {
+                            analysis_settings.end_frequency = 0.0;
+                        }
+                        if analysis_settings.end_frequency > analysis_settings.start_frequency {
+                            if analysis_settings.start_frequency < 20.0 || analysis_settings.start_frequency > 20000.0  {
+                                analysis_settings.normalize_amplitude = false;
+                                analysis_settings.masking = false;
+                            }
+                            update_and_clear(&analysis_settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        }
+                    };
+
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut analysis_settings.end_frequency)
+                                .speed(20.0)
+                                .suffix("hz")
+                                .fixed_decimals(0),
+                        )
+                        .labelled_by(label.id)
+                        .changed()
+                    {
+                        if analysis_settings.start_frequency < 0.0 {
+                            analysis_settings.start_frequency = 0.0;
+                        }
+                        if analysis_settings.end_frequency < 0.0 {
+                            analysis_settings.end_frequency = 0.0;
+                        }
+                        if analysis_settings.end_frequency > analysis_settings.start_frequency {
+                            if analysis_settings.end_frequency > 20000.0 || analysis_settings.end_frequency < 20.0 {
+                                analysis_settings.normalize_amplitude = false;
+                                analysis_settings.masking = false;
+                            }
+                            update_and_clear(&analysis_settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        }
+                    };
+                }
+                frame.end(ui).on_hover_text("The frequency range of human hearing in healthy young individuals generally spans from 20 Hz to 20 kHz. However, this range can vary significantly, often becoming narrower as age progresses.\n\nThere are many use cases where you may want to adjust the range of processed frequencies, such as zooming in on a specific range of auditory frequencies or checking for the presence or absence of ultrasonic/subsonic sounds. These settings allow you to do so.");
+
+                if ui
+                    .checkbox(
+                        &mut analysis_settings.erb_frequency_scale,
+                        "Use ERB frequency scale",
+                    )
+                    .on_hover_text("If this is enabled, frequencies will be displayed using the Equivalent Rectangular Bandwidth scale, a psychoacoustic measure of pitch perception.\nIf this is disabled, frequencies will be displayed on a base 2 logarithmic scale, which is used by most musical scales.")
+                    .changed()
+                {
+                    update_and_clear(&analysis_settings);
+                    egui_ctx.request_discard("Changed setting");
+                    return;
+                }
+
+                if ui
+                    .checkbox(
+                        &mut analysis_settings.erb_time_resolution,
+                        "Use ERB time resolution",
+                    )
+                    .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nIf this setting is enabled, the appropriate time resolution will be determined using an adjusted version of the ERB scale.\nIf this setting is disabled, time resolution is determined based on the configured Q factor.")
+                    .changed()
+                {
+                    update(&analysis_settings);
+                    egui_ctx.request_discard("Changed setting");
+                    return;
+                }
+
+                if analysis_settings.erb_time_resolution {
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut analysis_settings.erb_bandwidth_divisor, 0.5..=6.0)
+                                .clamping(egui::SliderClamping::Never)
+                                .text("ERB bandwidth divisor"),
+                        )
+                        .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen using the Equivalent Rectangular Bandwidth model to determine this trade-off, adjusting the time resolution calculated by this function may be useful to improve visualization readability. This setting allows you to change how this adjustment is performed.")
+                        .changed()
+                    {
+                        if analysis_settings.erb_bandwidth_divisor < 0.01 {
+                            analysis_settings.erb_bandwidth_divisor = 0.01;
+                        }
+
+                        update(&analysis_settings);
+                        egui_ctx.request_discard("Changed setting");
+                        return;
+                    };
+                } else {
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut analysis_settings.q_time_resolution, 2.0..=128.0)
+                                .logarithmic(true)
+                                .clamping(egui::SliderClamping::Never)
+                                .suffix(" Q")
+                                .fixed_decimals(1)
+                                .text("Time resolution"),
+                        )
+                        .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.")
+                        .changed()
+                    {
+                        analysis_settings.q_time_resolution = analysis_settings.q_time_resolution.max(0.1);
+
+                        update(&analysis_settings);
+                        egui_ctx.request_discard("Changed setting");
+                        return;
+                    };
+                }
+
+                if ui
+                        .add(
+                            egui::Slider::new(&mut analysis_settings.time_resolution_clamp.0, 0.0..=200.0)
+                                .clamping(egui::SliderClamping::Never)
+                                .suffix("ms")
+                                .step_by(1.0)
+                                .fixed_decimals(0)
+                                .text("Minimum time resolution"),
+                        )
+                        .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen determining this tradeoff, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
+                        .changed()
+                    {
+                        analysis_settings.time_resolution_clamp.0 = analysis_settings.time_resolution_clamp.0.clamp(0.0, 1000.0);
+                        if analysis_settings.time_resolution_clamp.0 > analysis_settings.time_resolution_clamp.1 {
+                            analysis_settings.time_resolution_clamp.1 = analysis_settings.time_resolution_clamp.0;
+                        }
+
+                        update(&analysis_settings);
+                        egui_ctx.request_discard("Changed setting");
+                        return;
+                    };
+
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut analysis_settings.time_resolution_clamp.1, 0.0..=200.0)
+                                .clamping(egui::SliderClamping::Never)
+                                .suffix("ms")
+                                .step_by(1.0)
+                                .fixed_decimals(0)
+                                .text("Maximum time resolution"),
+                        )
+                        .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen determining this tradeoff, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
+                        .changed()
+                    {
+                        analysis_settings.time_resolution_clamp.1 = analysis_settings.time_resolution_clamp.1.clamp(0.0, 1000.0);
+                        if analysis_settings.time_resolution_clamp.0 > analysis_settings.time_resolution_clamp.1 {
+                            analysis_settings.time_resolution_clamp.0 = analysis_settings.time_resolution_clamp.1;
+                        }
+
+                        update(&analysis_settings);
+                        egui_ctx.request_discard("Changed setting");
+                        return;
+                    };
+
+                if ui
+                    .checkbox(
+                        &mut analysis_settings.nc_method,
+                        "Use NC method",
+                    )
+                    .on_hover_text("If this is enabled, windowing is performed using the NC method, a form of spectral reassignment using phase information which usually outperforms typical window functions.\nIf this is disabled, windowing is performed using the Hann window function.")
+                    .changed()
+                {
+                    update(&analysis_settings);
+                    egui_ctx.request_discard("Changed setting");
+                    return;
+                }
+
+                if analysis_settings.nc_method {
+                    if ui
+                        .checkbox(
+                            &mut analysis_settings.strict_nc,
+                            "Use optimal NC method",
+                        )
+                        .on_hover_text("If this is enabled, the \"optimal\" version of the NC method is used, improving filter bandwidth characteristics at the expense of introducing additional banding artifacts into the spectrogram.\nIf this is disabled, an alternate implementation of the NC method is used, which prioritizes the reduction of spectrogram artifacts.")
+                        .changed()
+                    {
+                        update(&analysis_settings);
+                        egui_ctx.request_discard("Changed setting");
+                        return;
+                    }
+                }
+
+                ui.collapsing("External Outputs", |ui| {
+                    ui.colored_label(
+                        Color32::YELLOW,
+                        "Enabling external output requires internal buffering to be disabled.",
+                    );
+
+                    if ui
+                        .checkbox(
+                            &mut analysis_settings.output_osc,
+                            "Output analysis via OSC",
+                        )
+                        .on_hover_text("If this is enabled, the plugin will output analysis data via OSC, which can then be used as an input for alternative visualization methods.")
+                        .changed()
+                    {
+                        if analysis_settings.output_osc {
+                            analysis_settings.internal_buffering = false;
+                            analysis_settings.normalize_amplitude = true;
+                            analysis_settings.masking = true;
+                            if analysis_settings.resolution > MAX_OSC_FREQUENCY_BINS {
+                                analysis_settings.resolution = MAX_OSC_FREQUENCY_BINS;
+                            }
+                        }
+                        update(&analysis_settings);
+                        egui_ctx.request_discard("Changed setting");
+                        return;
+                    }
+
+                    if analysis_settings.output_osc {
+                        ui.colored_label(
+                            Color32::YELLOW,
+                            "OSC packets produced by this program are intended solely for further local analysis and significantly exceed the MTU of most networks.",
+                        );
+
+                        let address_label = ui
+                            .label("OSC server UDP/IP address:")
+                            .on_hover_text("The UDP/IP address of the OSC server that analysis output will be sent to.");
+
+                        if ui.
+                            text_edit_singleline(&mut analysis_settings.osc_socket_address)
+                            .labelled_by(address_label.id)
+                            .on_hover_text("The UDP/IP address of the OSC server that analysis output will be sent to.")
+                            .changed()
+                        {
+                            update(&analysis_settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        }
+
+                        let message_label_1 = ui
+                            .label("Frequency bin data OSC message address:")
+                            .on_hover_text("The OSC address pattern that frequency bin data will be sent under.\n\nThe message format for frequency bin data is [(frequency, bandwidth, pan, volume, signalToMaskRatio)], with bins being listed in order of priority. Frequencies and bandwidths are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), pan ranges from -1 to 1, and signalToMaskRatio is in dB.");
+
+                        if ui.
+                            text_edit_singleline(&mut analysis_settings.osc_resource_address_frequencies)
+                            .labelled_by(message_label_1.id)
+                            .on_hover_text("The OSC address pattern that frequency bin data will be sent under.\n\nThe message format for frequency bin data is [(frequency, bandwidth, pan, volume, signalToMaskRatio)], with bins being listed in order of priority. Frequencies and bandwidths are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), pan ranges from -1 to 1, and signalToMaskRatio is in dB.")
+                            .changed()
+                        {
+                            update(&analysis_settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        }
+
+                        let message_label_2 = ui
+                            .label("Analysis statistics OSC message address:")
+                            .on_hover_text("The OSC address pattern that analysis statistics will be sent under.\n\nThe message format for analysis statistics is (averageMasking, averageVolume, maximumVolume, chunkDuration), with amplitude values being in phon (or dBFS if amplitude normalization is disabled) and duration values being in seconds. Analysis statistics are only applicable for the most recent slice of tone data.");
+
+                        if ui.
+                            text_edit_singleline(&mut analysis_settings.osc_resource_address_stats)
+                            .labelled_by(message_label_2.id)
+                            .on_hover_text("The OSC address pattern that analysis statistics will be sent under.\n\nThe message format for analysis statistics is (averageMasking, averageVolume, maximumVolume, chunkDuration), with amplitude values being in phon (or dBFS if amplitude normalization is disabled) and duration values being in seconds. Analysis statistics are only applicable for the most recent slice of tone data.")
+                            .changed()
+                        {
+                            update(&analysis_settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        }
+                    }
+
+                    #[cfg(feature = "midi")]
+                    if ui
+                        .checkbox(
+                            &mut analysis_settings.output_midi,
+                            "Output analysis via MIDI",
+                        )
+                        .on_hover_text("If this is enabled, the plugin will use analysis data to generate a MIDI output, which can then be used as an input for alternative visualization methods.")
+                        .changed()
+                    {
+                        if analysis_settings.output_midi {
+                            analysis_settings.internal_buffering = false;
+                            analysis_settings.normalize_amplitude = true;
+                            analysis_settings.masking = true;
+                            analysis_settings.erb_time_resolution = false;
+                            analysis_settings.q_time_resolution = 17.30993;
+                        }
+                        update(&analysis_settings);
+                        egui_ctx.request_discard("Changed setting");
+                        return;
+                    }
+
+                    #[cfg(feature = "midi")]
+                    if analysis_settings.output_midi {
+                        ui.colored_label(
+                            Color32::YELLOW,
+                            "Some MIDI software may struggle to handle this plugin's output rate. If you encounter issues, try lowering the number of simultaneous tones or increasing the plugin's buffer size.",
+                        );
+
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut analysis_settings.midi_max_simultaneous_tones, 1..=128)
+                                    .suffix(" notes")
+                                    .logarithmic(true)
+                                    .text("Maximum simultaneous MIDI notes"),
+                            )
+                            .on_hover_text("This setting adjusts the maximum number of simultaneous MIDI notes output by the plugin.\nValid notes are prioritized by their distance from the masking threshold, or if masking data is not available, their perceptual amplitude. If amplitude normalization is also disabled, notes will then be prioritized based on absolute amplitude.")
+                            .changed()
+                        {
+                            update(&analysis_settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        };
+
+                        if analysis_settings.normalize_amplitude {
+                            let mut tone_threshold_phon =
+                                (analysis_settings.midi_tone_amplitude_threshold + analysis_settings.listening_volume).clamp(0.0, 100.0);
+
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut tone_threshold_phon, 0.0..=100.0)
+                                        .suffix(" phon")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("MIDI note amplitude threshold"),
+                                )
+                                .on_hover_text("This setting adjusts the minimum amplitude necessary for a note to be considered valid. Notes with an amplitude below this threshold will always be considered inactive, regardless of the note limit.")
+                                .changed()
+                            {
+                                analysis_settings.midi_tone_amplitude_threshold =
+                                    tone_threshold_phon - analysis_settings.listening_volume;
+                                update(&analysis_settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            }
+                        } else {
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut analysis_settings.midi_tone_amplitude_threshold, -100.0..=0.0)
+                                        .clamping(egui::SliderClamping::Never)
+                                        .suffix("dB")
+                                        .step_by(1.0)
+                                        .fixed_decimals(0)
+                                        .text("MIDI note amplitude threshold"),
+                                )
+                                .on_hover_text("This setting adjusts the minimum amplitude necessary for a note to be considered valid. Notes with an amplitude below this threshold will always be considered inactive, regardless of the note limit.")
+                                .changed()
+                            {
+                                update(&analysis_settings);
+                                egui_ctx.request_discard("Changed setting");
+                                return;
+                            };
+                        }
+
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut analysis_settings.midi_pressure_min_amplitude, -100.0..=0.0)
+                                    .clamping(egui::SliderClamping::Never)
+                                    .suffix("dB")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("MIDI note pressure minimum amplitude"),
+                            )
+                            .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
+                            .changed()
+                        {
+                            update(&analysis_settings);
+                            egui_ctx.request_discard("Changed setting");
+                            return;
+                        };
+
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut analysis_settings.midi_pressure_max_amplitude, -100.0..=0.0)
+                                    .clamping(egui::SliderClamping::Never)
+                                    .suffix("dB")
+                                    .step_by(1.0)
+                                    .fixed_decimals(0)
+                                    .text("MIDI note pressure maximum amplitude"),
+                            )
+                            .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
+                            .changed()
+                        {
+                            update(&analysis_settings);
+                            egui_ctx.request_discard("Changed setting");
+                        };
+                    }
                 });
 
-            let now = Instant::now();
-            let mut frame_timing = shared_state.frame_timing.lock();
+                if ui.button("Reset Analysis Options").clicked() {
+                    *analysis_settings = AnalysisChainConfig::default();
+                    render_settings.max_db =
+                        80.0 - analysis_settings.listening_volume;
+                    render_settings.min_db =
+                        20.0 - analysis_settings.listening_volume;
+                    render_settings.agc_minimum =
+                        3.0 - analysis_settings.listening_volume;
+                    render_settings.agc_maximum =
+                        100.0 - analysis_settings.listening_volume;
+                    update_and_clear(&analysis_settings);
+                }
+            });
+        });
 
-            *frame_timing = (
-                now,
-                now.duration_since(frame_timing.0),
-                now.duration_since(start),
-            )
-        },
+    let now = Instant::now();
+    let mut frame_timing = shared_state.frame_timing.lock();
+
+    *frame_timing = (
+        now,
+        now.duration_since(frame_timing.0),
+        now.duration_since(start),
     )
 }
