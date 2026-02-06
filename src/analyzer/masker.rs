@@ -34,7 +34,7 @@ fn masking_threshold_offset(center_bark: f32, flatness: f32) -> f32 {
 // http://www.mp3-tech.org/programmer/docs/di042001.pdf
 // https://dn790006.ca.archive.org/0/items/05shlacpsychacousticsmodelsws201718gs/05_shl_AC_Psychacoustics_Models_WS-2017-18_gs.pdf
 
-const MAX_MASKING_DYNAMIC_RANGE: f32 = 100.0;
+const MAX_MASKING_DYNAMIC_RANGE: f32 = 97.0;
 
 #[derive(Clone)]
 struct MaskerCoeff {
