@@ -788,6 +788,7 @@ impl ColorTable {
 
 struct SharedState {
     settings: RwLock<RenderSettings>,
+    last_size: Mutex<(usize, usize)>,
     frame_timing: Mutex<(Instant, Duration, Duration)>,
     color_table: RwLock<ColorTable>,
     cached_analysis_settings: Mutex<AnalysisChainConfig>,
@@ -823,6 +824,7 @@ pub fn create(
 
         SharedState {
             settings: RwLock::new(settings),
+            last_size: Mutex::new((MAX_FREQUENCY_BINS, SPECTROGRAM_SLICES)),
             frame_timing: Mutex::new((Instant::now(), Duration::ZERO, Duration::ZERO)),
             color_table: RwLock::new(color_table),
             cached_analysis_settings: Mutex::new(AnalysisChainConfig::default()),
@@ -880,22 +882,23 @@ pub fn create(
             let start = Instant::now();
 
             egui::CentralPanel::default().show(egui_ctx, |ui| {
+                let last_size = *shared_state.last_size.lock();
+
                 let mut bargraph_mesh = Mesh::default();
                 bargraph_mesh.reserve_triangles(MAX_FREQUENCY_BINS * 2 * 2);
                 bargraph_mesh.reserve_vertices(MAX_FREQUENCY_BINS * 4 * 2);
 
                 let mut spectrogram_image_pixels =
-                    vec![Color32::TRANSPARENT; MAX_FREQUENCY_BINS * SPECTROGRAM_SLICES];
-                let mut bargraph_buffer_1 = vec![(0.0, 0.0); MAX_FREQUENCY_BINS];
-                let mut bargraph_buffer_2 = vec![0.0; MAX_FREQUENCY_BINS];
+                    vec![Color32::TRANSPARENT; last_size.0 * last_size.1];
+                let mut bargraph_buffer_1 = vec![(0.0, 0.0); last_size.0];
+                let mut bargraph_buffer_2 = vec![0.0; last_size.0];
 
                 let painter = ui.painter();
                 let max_x = painter.clip_rect().max.x;
                 let max_y = painter.clip_rect().max.y;
 
                 let settings = *shared_state.settings.read();
-                let color_table = &shared_state.color_table.read();
-                let spectrogram_texture = shared_state.spectrogram_texture.read().unwrap();
+
                 let frequencies = analysis_frequencies.read();
 
                 let bargraph_bounds = Rect {
@@ -927,9 +930,26 @@ pub fn create(
                     / front.duration.as_secs_f64())
                 .round() as usize;
 
-                spectrogram_image_pixels.truncate(spectrogram_width * spectrogram_height);
-                bargraph_buffer_1.truncate(spectrogram_width);
-                bargraph_buffer_2.truncate(spectrogram_width);
+                *shared_state.last_size.lock() = (spectrogram_width, spectrogram_height);
+
+                if (last_size.0 * last_size.1) > (spectrogram_width * spectrogram_height) {
+                    spectrogram_image_pixels.truncate(spectrogram_width * spectrogram_height);
+                } else if (last_size.0 * last_size.1) < (spectrogram_width * spectrogram_height) {
+                    spectrogram_image_pixels
+                        .resize(spectrogram_width * spectrogram_height, Color32::TRANSPARENT);
+                }
+
+                if last_size.0 > spectrogram_width {
+                    bargraph_buffer_1.truncate(spectrogram_width);
+                    bargraph_buffer_2.truncate(spectrogram_width);
+                } else if last_size.0 < spectrogram_width {
+                    bargraph_buffer_1.resize(spectrogram_width, (0.0, 0.0));
+                    bargraph_buffer_2.resize(spectrogram_width, 0.0);
+
+                    let additional = spectrogram_width - last_size.0;
+                    bargraph_mesh.reserve_triangles(additional * 2 * 2);
+                    bargraph_mesh.reserve_vertices(additional * 4 * 2);
+                }
 
                 let mut spectrogram_image = ColorImage {
                     size: [spectrogram_width, spectrogram_height],
@@ -946,41 +966,45 @@ pub fn create(
 
                 let (min_db, max_db) = calculate_volume_min_max(&settings, &spectrogram);
 
-                if settings.bargraph_height != 0.0 {
-                    if settings.show_masking {
-                        draw_bargraph(
-                            &mut bargraph_mesh,
+                {
+                    let color_table = &shared_state.color_table.read();
+
+                    if settings.bargraph_height != 0.0 {
+                        if settings.show_masking {
+                            draw_bargraph(
+                                &mut bargraph_mesh,
+                                &spectrogram,
+                                (bargraph_buffer_1, bargraph_buffer_2),
+                                bargraph_bounds,
+                                color_table,
+                                Some(settings.masking_color),
+                                (max_db, min_db),
+                                settings.bargraph_averaging,
+                            );
+                        } else {
+                            draw_bargraph(
+                                &mut bargraph_mesh,
+                                &spectrogram,
+                                (bargraph_buffer_1, bargraph_buffer_2),
+                                bargraph_bounds,
+                                color_table,
+                                None,
+                                (max_db, min_db),
+                                settings.bargraph_averaging,
+                            );
+                        }
+                    }
+
+                    if settings.bargraph_height != 1.0 {
+                        draw_spectrogram_image(
+                            &mut spectrogram_image,
                             &spectrogram,
-                            (bargraph_buffer_1, bargraph_buffer_2),
-                            bargraph_bounds,
+                            &frequencies,
                             color_table,
-                            Some(settings.masking_color),
                             (max_db, min_db),
-                            settings.bargraph_averaging,
-                        );
-                    } else {
-                        draw_bargraph(
-                            &mut bargraph_mesh,
-                            &spectrogram,
-                            (bargraph_buffer_1, bargraph_buffer_2),
-                            bargraph_bounds,
-                            color_table,
-                            None,
-                            (max_db, min_db),
-                            settings.bargraph_averaging,
+                            settings.clamp_using_smr,
                         );
                     }
-                }
-
-                if settings.bargraph_height != 1.0 {
-                    draw_spectrogram_image(
-                        &mut spectrogram_image,
-                        &spectrogram,
-                        &frequencies,
-                        color_table,
-                        (max_db, min_db),
-                        settings.clamp_using_smr,
-                    );
                 }
 
                 let under_pointer = if settings.show_hover {
@@ -1003,58 +1027,62 @@ pub fn create(
 
                 drop(spectrogram);
 
-                egui_ctx.tex_manager().write().set(
-                    spectrogram_texture,
-                    ImageDelta {
-                        image: ImageData::Color(Arc::new(spectrogram_image)),
-                        options: if settings.spectrogram_nearest_neighbor {
-                            TextureOptions {
-                                magnification: egui::TextureFilter::Nearest,
-                                minification: egui::TextureFilter::Nearest,
-                                wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                                mipmap_mode: None,
-                            }
-                        } else {
-                            TextureOptions {
-                                magnification: egui::TextureFilter::Linear,
-                                minification: egui::TextureFilter::Linear,
-                                wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                                mipmap_mode: None,
-                            }
-                        },
-                        pos: None,
-                    },
-                );
+                {
+                    let spectrogram_texture = shared_state.spectrogram_texture.read().unwrap();
 
-                painter.extend([
-                    Shape::Mesh(Arc::new(bargraph_mesh)),
-                    Shape::Mesh(Arc::new(Mesh {
-                        indices: vec![0, 1, 2, 2, 1, 3],
-                        vertices: vec![
-                            Vertex {
-                                pos: spectrogram_bounds.left_top(),
-                                uv: Pos2 { x: 0.0, y: 0.0 },
-                                color: Color32::WHITE,
+                    egui_ctx.tex_manager().write().set(
+                        spectrogram_texture,
+                        ImageDelta {
+                            image: ImageData::Color(Arc::new(spectrogram_image)),
+                            options: if settings.spectrogram_nearest_neighbor {
+                                TextureOptions {
+                                    magnification: egui::TextureFilter::Nearest,
+                                    minification: egui::TextureFilter::Nearest,
+                                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
+                                    mipmap_mode: None,
+                                }
+                            } else {
+                                TextureOptions {
+                                    magnification: egui::TextureFilter::Linear,
+                                    minification: egui::TextureFilter::Linear,
+                                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
+                                    mipmap_mode: None,
+                                }
                             },
-                            Vertex {
-                                pos: spectrogram_bounds.right_top(),
-                                uv: Pos2 { x: 1.0, y: 0.0 },
-                                color: Color32::WHITE,
-                            },
-                            Vertex {
-                                pos: spectrogram_bounds.left_bottom(),
-                                uv: Pos2 { x: 0.0, y: 1.0 },
-                                color: Color32::WHITE,
-                            },
-                            Vertex {
-                                pos: spectrogram_bounds.right_bottom(),
-                                uv: Pos2 { x: 1.0, y: 1.0 },
-                                color: Color32::WHITE,
-                            },
-                        ],
-                        texture_id: spectrogram_texture,
-                    })),
-                ]);
+                            pos: None,
+                        },
+                    );
+
+                    painter.extend([
+                        Shape::Mesh(Arc::new(bargraph_mesh)),
+                        Shape::Mesh(Arc::new(Mesh {
+                            indices: vec![0, 1, 2, 2, 1, 3],
+                            vertices: vec![
+                                Vertex {
+                                    pos: spectrogram_bounds.left_top(),
+                                    uv: Pos2 { x: 0.0, y: 0.0 },
+                                    color: Color32::WHITE,
+                                },
+                                Vertex {
+                                    pos: spectrogram_bounds.right_top(),
+                                    uv: Pos2 { x: 1.0, y: 0.0 },
+                                    color: Color32::WHITE,
+                                },
+                                Vertex {
+                                    pos: spectrogram_bounds.left_bottom(),
+                                    uv: Pos2 { x: 0.0, y: 1.0 },
+                                    color: Color32::WHITE,
+                                },
+                                Vertex {
+                                    pos: spectrogram_bounds.right_bottom(),
+                                    uv: Pos2 { x: 1.0, y: 1.0 },
+                                    color: Color32::WHITE,
+                                },
+                            ],
+                            texture_id: spectrogram_texture,
+                        })),
+                    ]);
+                }
 
                 if let Some(under) = under_pointer {
                     let analysis_settings = shared_state.cached_analysis_settings.lock();
@@ -1156,11 +1184,15 @@ pub fn create(
                     }
                 }
 
+                drop(frequencies);
+
                 if settings.show_performance {
                     let frame_timing = shared_state.frame_timing.lock();
 
                     let frame_elapsed = frame_timing.1;
                     let rasterize_elapsed = frame_timing.2;
+
+                    drop(frame_timing);
 
                     let buffering_secs = buffering_duration.as_secs_f64();
                     let rasterize_secs = rasterize_elapsed.as_secs_f64();
@@ -2214,8 +2246,6 @@ pub fn create(
                             update_and_clear(&analysis_settings);
                         }
                     });
-
-
                 });
 
             let now = Instant::now();
