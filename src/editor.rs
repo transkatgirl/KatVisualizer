@@ -1261,12 +1261,12 @@ pub fn create(
                             family: egui::FontFamily::Monospace,
                         },
                         if rasterize_elapsed
-                            >= Duration::from_secs_f64(BASELINE_TARGET_FRAME_SECS * 0.5)
+                            >= Duration::from_secs_f64(BASELINE_TARGET_FRAME_SECS * 0.6)
                         {
                             Color32::RED
                         } else if rasterize_elapsed
-                            >= Duration::from_secs_f64(BASELINE_TARGET_FRAME_SECS * 0.25)
-                            || rasterize_proportion >= 0.5
+                            >= Duration::from_secs_f64(BASELINE_TARGET_FRAME_SECS * 0.3)
+                            || rasterize_proportion >= 0.6
                         {
                             Color32::YELLOW
                         } else {
