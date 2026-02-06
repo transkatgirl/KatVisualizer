@@ -1837,6 +1837,7 @@ pub(crate) fn render<F>(
                     }*/
                 }
 
+                #[cfg(not(target_arch = "wasm32"))]
                 if ui
                     .checkbox(
                         &mut analysis_settings.internal_buffering,
