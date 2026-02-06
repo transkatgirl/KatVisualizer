@@ -36,13 +36,13 @@ function init() {
 		let inputBuffer = audioProcessingEvent.inputBuffer;
 		let outputBuffer = audioProcessingEvent.outputBuffer;
 
+		window.wasmBindings.set_rate(audioContext.sampleRate);
+
 		for (
 			let channel = 0;
 			channel < outputBuffer.numberOfChannels;
 			channel++
 		) {
-			window.wasmBindings.set_rate(audioContext.sampleRate);
-
 			let inputData = inputBuffer.getChannelData(channel);
 			let outputData = outputBuffer.getChannelData(channel);
 
