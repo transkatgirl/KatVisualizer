@@ -325,6 +325,8 @@ impl BetterAnalysis {
         let mut masking_sum: f32 = 0.0;
 
         if let Some(listening_volume) = normalization_volume {
+            let total_gain = gain.algebraic_add(listening_volume);
+
             let hearing_threshold = left
                 .hearing_threshold
                 .iter()
@@ -337,11 +339,7 @@ impl BetterAnalysis {
                 .for_each(
                     |(normalizer, (threshold, ((mask_pan, mask_volume), masking_result)))| {
                         let masking_norm_db = normalizer
-                            .spl_to_phon(
-                                (mask_volume.algebraic_add(gain))
-                                    .max(threshold)
-                                    .algebraic_add(listening_volume),
-                            )
+                            .spl_to_phon(mask_volume.algebraic_add(total_gain).max(threshold))
                             //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                             .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
                             .algebraic_sub(listening_volume);
@@ -375,10 +373,11 @@ impl BetterAnalysis {
             .copied()
             .map(|amplitude| amplitude.algebraic_mul(2.0));
 
-        let gain_amplitude = dbfs_to_amplitude(gain);
         let mut masking_sum: f32 = 0.0;
 
         if let Some(listening_volume) = normalization_volume {
+            let total_gain = gain.algebraic_add(listening_volume);
+
             let hearing_threshold = center
                 .hearing_threshold
                 .iter()
@@ -393,9 +392,9 @@ impl BetterAnalysis {
                     |(normalizer, (threshold, (mask_amplitude, masking_result)))| {
                         let masking_norm_db = normalizer
                             .spl_to_phon(
-                                amplitude_to_dbfs(mask_amplitude.algebraic_mul(gain_amplitude))
-                                    .max(threshold)
-                                    .algebraic_add(listening_volume),
+                                amplitude_to_dbfs(mask_amplitude)
+                                    .algebraic_add(total_gain)
+                                    .max(threshold),
                             )
                             //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
                             .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
@@ -406,6 +405,8 @@ impl BetterAnalysis {
                     },
                 );
         } else {
+            let gain_amplitude = dbfs_to_amplitude(gain);
+
             masking_data.zip(self.masking.iter_mut()).for_each(
                 |(mask_amplitude, masking_result)| {
                     let masking_amplitude = (mask_amplitude).algebraic_mul(gain_amplitude);
