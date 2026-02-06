@@ -27,7 +27,11 @@ function init() {
 		}
 	});
 
-	const scriptNode = audioContext.createScriptProcessor(512, 2, 2);
+	audioElement.addEventListener("pause", () => {
+		audioContext.suspend();
+	});
+
+	const scriptNode = audioContext.createScriptProcessor(256, 2, 2);
 	scriptNode.addEventListener("audioprocess", (audioProcessingEvent) => {
 		let inputBuffer = audioProcessingEvent.inputBuffer;
 		let outputBuffer = audioProcessingEvent.outputBuffer;
@@ -37,6 +41,8 @@ function init() {
 			channel < outputBuffer.numberOfChannels;
 			channel++
 		) {
+			window.wasmBindings.set_rate(audioContext.sampleRate);
+
 			let inputData = inputBuffer.getChannelData(channel);
 			let outputData = outputBuffer.getChannelData(channel);
 
@@ -64,6 +70,8 @@ function init() {
 	});
 
 	track.connect(scriptNode).connect(audioContext.destination);
+
+	audioContext.suspend();
 }
 
 function buildElements() {
@@ -83,6 +91,7 @@ function buildElements() {
 	audioElement.controls = true;
 
 	const fileInput = document.createElement("input");
+	fileInput.style.color = "white";
 	fileInput.type = "file";
 	fileInput.addEventListener("change", (event) => {
 		if (!event.target.files.length) return;
