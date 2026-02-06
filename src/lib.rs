@@ -7,10 +7,13 @@
 use mimalloc::MiMalloc;
 
 use parking_lot::{FairMutex, Mutex, RwLock};
-use std::{num::NonZero, sync::Arc};
+use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::time::{Duration, Instant};
+use std::{
+    num::NonZero,
+    time::{Duration, Instant},
+};
 
 #[cfg(target_arch = "wasm32")]
 use web_time::{Duration, Instant};
