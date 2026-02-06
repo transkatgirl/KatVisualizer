@@ -1,9 +1,10 @@
-var cacheName = "egui-template-pwa";
+var cacheName = "katvisualizer-pwa";
 var filesToCache = [
 	"./",
+	"./main.js",
 	"./index.html",
-	"./eframe_template.js",
-	"./eframe_template_bg.wasm",
+	"./katvisualizer_wasm.js",
+	"./katvisualizer_wasm_bg.wasm",
 ];
 
 self.addEventListener("install", function (e) {
