@@ -159,155 +159,171 @@ impl AnalysisChain {
         buffer: &mut Buffer,
         output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
     ) {
+        if self.internal_buffering {
+            self.analyze_buffered(buffer, output);
+        } else {
+            self.analyze_unbuffered(buffer, output);
+        }
+    }
+    fn analyze_buffered(
+        &mut self,
+        buffer: &mut Buffer,
+        output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
+    ) {
         let mut finished = Instant::now();
 
-        if self.internal_buffering {
-            let mut callback = |channel_idx, buffer: &[f32]| {
-                if channel_idx == 1 && self.single_input {
-                    return;
-                }
-
-                if self.single_input {
-                    let mut lock = self.left_analyzer.lock();
-                    let (ref _buffer, ref mut analyzer) = *lock;
-
-                    analyzer.analyze(buffer.iter().copied(), self.listening_volume);
-                } else {
-                    let analyzer = if channel_idx == 0 {
-                        self.left_analyzer.clone()
-                    } else {
-                        self.right_analyzer.clone()
-                    };
-                    let listening_volume = self.listening_volume;
-
-                    analyzer.lock().0.copy_from_slice(buffer);
-
-                    self.analyzer_pool.execute(move || {
-                        let mut lock = analyzer.lock();
-                        let (ref mut buffer, ref mut analyzer) = *lock;
-
-                        analyzer.analyze(buffer.iter().copied(), listening_volume);
-                    });
-                }
-
-                if channel_idx == 1 || (channel_idx == 0 && self.single_input) {
-                    let (ref mut spectrogram, ref mut metrics) = *output.lock();
-
-                    self.analyzer_pool.join();
-                    let left_lock = self.left_analyzer.lock();
-                    let right_lock = self.right_analyzer.lock();
-                    let left_analyzer = &left_lock.1;
-                    let right_analyzer = &right_lock.1;
-
-                    spectrogram.update_fn(|analysis_output| {
-                        if self.single_input {
-                            analysis_output.update_mono(
-                                left_analyzer,
-                                self.gain,
-                                self.listening_volume,
-                                self.chunk_duration,
-                            );
-                        } else {
-                            analysis_output.update_stereo(
-                                left_analyzer,
-                                right_analyzer,
-                                self.gain,
-                                self.listening_volume,
-                                self.chunk_duration,
-                            );
-                        }
-                    });
-
-                    let now = Instant::now();
-                    metrics.processing = now.duration_since(finished);
-                    metrics.finished = now;
-
-                    finished = now;
-                }
-            };
-
-            if self.strict_synchronization {
-                self.chunker
-                    .process_overlap_add(buffer, 1, |channel_idx, buffer| {
-                        callback(channel_idx, buffer);
-                    });
-            } else {
-                self.chunker
-                    .process_analyze_only(buffer, 1, |channel_idx, buffer| {
-                        callback(channel_idx, buffer);
-                    });
+        let mut callback = |channel_idx, buffer: &[f32]| {
+            if channel_idx == 1 && self.single_input {
+                return;
             }
-        } else {
+
             if self.single_input {
                 let mut lock = self.left_analyzer.lock();
                 let (ref _buffer, ref mut analyzer) = *lock;
 
-                analyzer.analyze(buffer.as_slice()[0].iter().copied(), self.listening_volume);
+                analyzer.analyze(buffer.iter().copied(), self.listening_volume);
             } else {
-                for (channel_idx, buffer) in buffer.as_slice().iter().enumerate() {
-                    let analyzer = if channel_idx == 0 {
-                        self.left_analyzer.clone()
-                    } else {
-                        self.right_analyzer.clone()
-                    };
+                let analyzer = if channel_idx == 0 {
+                    self.left_analyzer.clone()
+                } else {
+                    self.right_analyzer.clone()
+                };
+                let listening_volume = self.listening_volume;
 
-                    {
-                        let mut analyzer = analyzer.lock();
-                        if buffer.len() == analyzer.0.len() {
-                            analyzer.0.copy_from_slice(buffer);
-                        } else {
-                            analyzer.0.clear();
-                            analyzer.0.extend_from_slice(buffer);
-                        }
-                    }
+                analyzer.lock().0.copy_from_slice(buffer);
 
-                    let listening_volume = self.listening_volume;
+                self.analyzer_pool.execute(move || {
+                    let mut lock = analyzer.lock();
+                    let (ref mut buffer, ref mut analyzer) = *lock;
 
-                    self.analyzer_pool.execute(move || {
-                        let mut lock = analyzer.lock();
-                        let (ref mut buffer, ref mut analyzer) = *lock;
-
-                        analyzer.analyze(buffer.iter().copied(), listening_volume);
-                    });
-                }
+                    analyzer.analyze(buffer.iter().copied(), listening_volume);
+                });
             }
 
-            let chunk_duration =
-                Duration::from_secs_f64(buffer.samples() as f64 / self.sample_rate as f64);
+            if channel_idx == 1 || (channel_idx == 0 && self.single_input) {
+                let (ref mut spectrogram, ref mut metrics) = *output.lock();
 
-            let (ref mut spectrogram, ref mut metrics) = *output.lock();
+                self.analyzer_pool.join();
+                let left_lock = self.left_analyzer.lock();
+                let right_lock = self.right_analyzer.lock();
+                let left_analyzer = &left_lock.1;
+                let right_analyzer = &right_lock.1;
 
-            let (left_ref, right_ref) = (self.left_analyzer.clone(), self.right_analyzer.clone());
+                spectrogram.update_fn(|analysis_output| {
+                    if self.single_input {
+                        analysis_output.update_mono(
+                            left_analyzer,
+                            self.gain,
+                            self.listening_volume,
+                            self.chunk_duration,
+                        );
+                    } else {
+                        analysis_output.update_stereo(
+                            left_analyzer,
+                            right_analyzer,
+                            self.gain,
+                            self.listening_volume,
+                            self.chunk_duration,
+                        );
+                    }
+                });
 
-            self.analyzer_pool.join();
-            let mut left_lock = left_ref.lock();
-            let mut right_lock = right_ref.lock();
-            let left_analyzer = &mut left_lock.1;
-            let right_analyzer = &mut right_lock.1;
+                let now = Instant::now();
+                metrics.processing = now.duration_since(finished);
+                metrics.finished = now;
 
-            spectrogram.update_fn(|analysis_output| {
-                if self.single_input {
-                    analysis_output.update_mono(
-                        left_analyzer,
-                        self.gain,
-                        self.listening_volume,
-                        chunk_duration,
-                    );
-                } else {
-                    analysis_output.update_stereo(
-                        left_analyzer,
-                        right_analyzer,
-                        self.gain,
-                        self.listening_volume,
-                        chunk_duration,
-                    );
-                }
-            });
+                finished = now;
+            }
+        };
 
-            let now = Instant::now();
-            metrics.processing = now.duration_since(finished);
-            metrics.finished = now;
+        if self.strict_synchronization {
+            self.chunker
+                .process_overlap_add(buffer, 1, |channel_idx, buffer| {
+                    callback(channel_idx, buffer);
+                });
+        } else {
+            self.chunker
+                .process_analyze_only(buffer, 1, |channel_idx, buffer| {
+                    callback(channel_idx, buffer);
+                });
         }
+    }
+    fn analyze_unbuffered(
+        &mut self,
+        buffer: &mut Buffer,
+        output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
+    ) {
+        let finished = Instant::now();
+
+        if self.single_input {
+            let mut lock = self.left_analyzer.lock();
+            let (ref _buffer, ref mut analyzer) = *lock;
+
+            analyzer.analyze(buffer.as_slice()[0].iter().copied(), self.listening_volume);
+        } else {
+            for (channel_idx, buffer) in buffer.as_slice().iter().enumerate() {
+                let analyzer = if channel_idx == 0 {
+                    self.left_analyzer.clone()
+                } else {
+                    self.right_analyzer.clone()
+                };
+
+                {
+                    let mut analyzer = analyzer.lock();
+                    if buffer.len() == analyzer.0.len() {
+                        analyzer.0.copy_from_slice(buffer);
+                    } else {
+                        analyzer.0.clear();
+                        analyzer.0.extend_from_slice(buffer);
+                    }
+                }
+
+                let listening_volume = self.listening_volume;
+
+                self.analyzer_pool.execute(move || {
+                    let mut lock = analyzer.lock();
+                    let (ref mut buffer, ref mut analyzer) = *lock;
+
+                    analyzer.analyze(buffer.iter().copied(), listening_volume);
+                });
+            }
+        }
+
+        let chunk_duration =
+            Duration::from_secs_f64(buffer.samples() as f64 / self.sample_rate as f64);
+
+        let (ref mut spectrogram, ref mut metrics) = *output.lock();
+
+        let (left_ref, right_ref) = (self.left_analyzer.clone(), self.right_analyzer.clone());
+
+        self.analyzer_pool.join();
+        let mut left_lock = left_ref.lock();
+        let mut right_lock = right_ref.lock();
+        let left_analyzer = &mut left_lock.1;
+        let right_analyzer = &mut right_lock.1;
+
+        spectrogram.update_fn(|analysis_output| {
+            if self.single_input {
+                analysis_output.update_mono(
+                    left_analyzer,
+                    self.gain,
+                    self.listening_volume,
+                    chunk_duration,
+                );
+            } else {
+                analysis_output.update_stereo(
+                    left_analyzer,
+                    right_analyzer,
+                    self.gain,
+                    self.listening_volume,
+                    chunk_duration,
+                );
+            }
+        });
+
+        let now = Instant::now();
+        metrics.processing = now.duration_since(finished);
+        metrics.finished = now;
     }
     pub(crate) fn config(&self) -> AnalysisChainConfig {
         let analyzer = self.left_analyzer.lock();
