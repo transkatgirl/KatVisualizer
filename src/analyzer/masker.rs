@@ -35,6 +35,7 @@ fn masking_threshold_offset(center_bark: f32, flatness: f32) -> f32 {
 // https://dn790006.ca.archive.org/0/items/05shlacpsychacousticsmodelsws201718gs/05_shl_AC_Psychacoustics_Models_WS-2017-18_gs.pdf
 
 const MAX_MASKING_DYNAMIC_RANGE: f32 = 97.0;
+const MAX_APPROX_MASKING_DYNAMIC_RANGE: f32 = 85.0;
 
 #[derive(Clone)]
 struct MaskerCoeff {
@@ -52,10 +53,11 @@ pub(super) struct Masker {
     coeffs: Vec<MaskerCoeff>,
     bark_set: Vec<f32>,
     average_width: usize,
+    approximate: bool,
 }
 
 impl Masker {
-    pub(super) fn new(frequency_bands: &[FrequencyBand]) -> Self {
+    pub(super) fn new(frequency_bands: &[FrequencyBand], approximate: bool) -> Self {
         let frequency_set: Vec<f32> = frequency_bands.iter().map(|f| f.center).collect();
 
         let bark_set: Vec<f32> = frequency_set
@@ -69,7 +71,11 @@ impl Masker {
             let center_bark = FrequencyScale::Bark.scale(f.center);
 
             let min_masking_spread = (22.0 + (230.0 / f.center).min(10.0)).min(27.0);
-            let bark_spread = MAX_MASKING_DYNAMIC_RANGE / min_masking_spread;
+            let bark_spread = if approximate {
+                MAX_APPROX_MASKING_DYNAMIC_RANGE
+            } else {
+                MAX_MASKING_DYNAMIC_RANGE
+            } / min_masking_spread;
 
             let lower = (0..i.saturating_sub(1))
                 .rev()
@@ -91,31 +97,36 @@ impl Masker {
         const LOWER_SPREAD: f32 = -27.0;
         const AMPLITUDE_GUESS: f32 = -32.39315062; // amplitude_to_dbfs(-21.4 * f64::log10(1 + 0.00437 * 20000))
 
-        let coeffs: Vec<MaskerCoeff> =
-            frequency_set
-                .into_iter()
-                .zip(bark_set.iter().copied().zip(range_indices))
-                .map(|(frequency, (bark, range))| {
-                    let masking_coeff_1 = 22.0 + (230.0 / frequency).min(10.0);
-                    let upper_spread = -(masking_coeff_1 - 0.2 * AMPLITUDE_GUESS);
+        let coeffs: Vec<MaskerCoeff> = frequency_set
+            .into_iter()
+            .zip(bark_set.iter().copied().zip(range_indices))
+            .map(|(frequency, (bark, range))| {
+                let masking_coeff_1 = 22.0 + (230.0 / frequency).min(10.0);
+                let upper_spread = -(masking_coeff_1 - 0.2 * AMPLITUDE_GUESS);
 
-                    MaskerCoeff {
-                        bark,
-                        masking_offset_amplitude: dbfs_to_amplitude_f32(-6.025 - (0.275 * bark))
-                            / (band_count as f32 / 41.65407847),
-                        /*tonal_masking_threshold: -6.025 - (0.275 * bark),
-                        nontonal_masking_threshold: -2.025 - (0.175 * bark),*/
-                        lookup: (range.0..range.1)
+                MaskerCoeff {
+                    bark,
+                    masking_offset_amplitude: dbfs_to_amplitude_f32(-6.025 - (0.275 * bark))
+                        / (band_count as f32 / 41.65407847),
+                    /*tonal_masking_threshold: -6.025 - (0.275 * bark),
+                    nontonal_masking_threshold: -2.025 - (0.175 * bark),*/
+                    lookup: if approximate {
+                        (range.0..range.1)
                             .map(|i| dbfs_to_amplitude_f32(LOWER_SPREAD * (bark - bark_set[i])))
                             .chain((range.1..=range.2).map(|i| {
                                 dbfs_to_amplitude_f32(upper_spread * (bark_set[i] - bark))
                             }))
-                            .collect(),
-                        masking_coeff_1,
-                        range: (range.0, range.2),
-                    }
-                })
-                .collect();
+                            .collect()
+                    } else {
+                        (range.0..range.1)
+                            .map(|i| dbfs_to_amplitude_f32(LOWER_SPREAD * (bark - bark_set[i])))
+                            .collect()
+                    },
+                    masking_coeff_1,
+                    range: (range.0, range.2),
+                }
+            })
+            .collect();
 
         let average_width = coeffs
             .iter()
@@ -127,6 +138,7 @@ impl Masker {
             coeffs,
             bark_set,
             average_width,
+            approximate,
         }
     }
     pub(super) fn calculate_masking_threshold(
@@ -135,9 +147,8 @@ impl Masker {
         listening_volume: Option<f32>,
         //flatness: f32,
         masking_threshold: &mut [f32],
-        approximate: bool,
     ) {
-        if approximate {
+        if self.approximate {
             if self.average_width >= 128 {
                 /*if self.average_width >= 512 {
                     self.calculate_masking_threshold_inner::<32>(
@@ -151,7 +162,6 @@ impl Masker {
                     spectrum,
                     listening_volume,
                     masking_threshold,
-                    approximate,
                 );
                 //}
             } else {
@@ -159,7 +169,6 @@ impl Masker {
                     spectrum,
                     listening_volume,
                     masking_threshold,
-                    approximate,
                 );
             }
         } else {
@@ -176,7 +185,6 @@ impl Masker {
                     spectrum,
                     listening_volume,
                     masking_threshold,
-                    approximate,
                 );
                 //}
             } else {
@@ -184,7 +192,6 @@ impl Masker {
                     spectrum,
                     listening_volume,
                     masking_threshold,
-                    approximate,
                 );
             }
         }
@@ -195,13 +202,12 @@ impl Masker {
         listening_volume: Option<f32>,
         //flatness: f32,
         masking_threshold: &mut [f32],
-        approximate: bool,
     ) {
         assert_eq!(masking_threshold.len(), self.bark_set.len());
 
         masking_threshold.fill(0.0);
 
-        if approximate {
+        if self.approximate {
             for (component, coeff) in spectrum.zip(self.coeffs.iter()) {
                 let amplitude = component;
 

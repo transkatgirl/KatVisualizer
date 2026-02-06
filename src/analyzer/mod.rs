@@ -31,6 +31,7 @@ pub struct BetterAnalyzerConfiguration {
     pub strict_nc: bool,
 
     pub masking: bool,
+    pub approximate_masking: bool,
 }
 
 impl Default for BetterAnalyzerConfiguration {
@@ -49,6 +50,7 @@ impl Default for BetterAnalyzerConfiguration {
             nc_method: true,
             strict_nc: false,
             masking: true,
+            approximate_masking: false,
         }
     }
 }
@@ -126,7 +128,7 @@ impl BetterAnalyzer {
             config.strict_nc,
         );
 
-        let masker = Masker::new(&frequency_bands);
+        let masker = Masker::new(&frequency_bands, config.approximate_masking);
 
         let frequency_bands: Vec<_> = frequency_bands
             .iter()
@@ -162,7 +164,6 @@ impl BetterAnalyzer {
         &mut self,
         samples: impl ExactSizeIterator<Item = f32>,
         listening_volume: Option<f32>,
-        approximate_masking: bool,
     ) {
         self.transform.analyze(samples.map(|s| s as f64));
 
@@ -182,7 +183,6 @@ impl BetterAnalyzer {
                 listening_volume,
                 //0.0,
                 &mut self.masking,
-                approximate_masking,
             );
 
             unsafe { self.transform.spectrum_data.as_chunks_unchecked_mut::<64>() }

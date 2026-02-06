@@ -430,7 +430,6 @@ pub(crate) struct AnalysisChain {
     update_rate: f64,
     listening_volume: Option<f32>,
     masking: bool,
-    approximate_masking: bool,
     pub(crate) latency_samples: u32,
     additional_latency: Duration,
     sample_rate: f32,
@@ -464,6 +463,7 @@ impl AnalysisChain {
             nc_method: config.nc_method,
             strict_nc: config.strict_nc,
             masking: config.masking,
+            approximate_masking: config.approximate_masking,
         });
 
         let mut chunker = StftHelper::new(2, sample_rate.ceil() as usize, 0);
@@ -509,7 +509,6 @@ impl AnalysisChain {
                 None
             },
             masking: config.masking,
-            approximate_masking: config.approximate_masking,
             chunk_size,
             chunk_duration: Duration::from_secs_f64(chunk_size as f64 / sample_rate as f64),
             single_input: layout.main_input_channels == NonZero::new(1),
@@ -537,11 +536,7 @@ impl AnalysisChain {
                     let mut lock = self.left_analyzer.lock();
                     let (ref _buffer, ref mut analyzer) = *lock;
 
-                    analyzer.analyze(
-                        buffer.iter().copied(),
-                        self.listening_volume,
-                        self.approximate_masking,
-                    );
+                    analyzer.analyze(buffer.iter().copied(), self.listening_volume);
                 } else {
                     let analyzer = if channel_idx == 0 {
                         self.left_analyzer.clone()
@@ -549,7 +544,6 @@ impl AnalysisChain {
                         self.right_analyzer.clone()
                     };
                     let listening_volume = self.listening_volume;
-                    let approximate_masking = self.approximate_masking;
 
                     analyzer.lock().0.copy_from_slice(buffer);
 
@@ -557,11 +551,7 @@ impl AnalysisChain {
                         let mut lock = analyzer.lock();
                         let (ref mut buffer, ref mut analyzer) = *lock;
 
-                        analyzer.analyze(
-                            buffer.iter().copied(),
-                            listening_volume,
-                            approximate_masking,
-                        );
+                        analyzer.analyze(buffer.iter().copied(), listening_volume);
                     });
                 }
 
@@ -617,11 +607,7 @@ impl AnalysisChain {
                 let mut lock = self.left_analyzer.lock();
                 let (ref _buffer, ref mut analyzer) = *lock;
 
-                analyzer.analyze(
-                    buffer.as_slice()[0].iter().copied(),
-                    self.listening_volume,
-                    self.approximate_masking,
-                );
+                analyzer.analyze(buffer.as_slice()[0].iter().copied(), self.listening_volume);
             } else {
                 for (channel_idx, buffer) in buffer.as_slice().iter().enumerate() {
                     let analyzer = if channel_idx == 0 {
@@ -641,17 +627,12 @@ impl AnalysisChain {
                     }
 
                     let listening_volume = self.listening_volume;
-                    let approximate_masking = self.approximate_masking;
 
                     self.analyzer_pool.execute(move || {
                         let mut lock = analyzer.lock();
                         let (ref mut buffer, ref mut analyzer) = *lock;
 
-                        analyzer.analyze(
-                            buffer.iter().copied(),
-                            listening_volume,
-                            approximate_masking,
-                        );
+                        analyzer.analyze(buffer.iter().copied(), listening_volume);
                     });
                 }
             }
@@ -978,7 +959,7 @@ impl AnalysisChain {
                 .unwrap_or(AnalysisChainConfig::default().listening_volume),
             normalize_amplitude: self.listening_volume.is_some(),
             masking: self.masking,
-            approximate_masking: self.approximate_masking,
+            approximate_masking: analyzer_config.approximate_masking,
             internal_buffering: self.internal_buffering,
             strict_synchronization: self.strict_synchronization,
             output_osc: self.output_osc,
@@ -1012,7 +993,6 @@ impl AnalysisChain {
             None
         };
         self.masking = config.masking;
-        self.approximate_masking = config.approximate_masking;
 
         let old_left_analyzer = self.left_analyzer.lock();
         let old_analyzer_config = old_left_analyzer.1.config();
@@ -1068,6 +1048,7 @@ impl AnalysisChain {
             || old_analyzer_config.nc_method != config.nc_method
             || old_analyzer_config.strict_nc != config.strict_nc
             || old_analyzer_config.masking != config.masking
+            || old_analyzer_config.approximate_masking != config.approximate_masking
         {
             let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
                 resolution: config.resolution,
@@ -1082,6 +1063,7 @@ impl AnalysisChain {
                 nc_method: config.nc_method,
                 strict_nc: config.strict_nc,
                 masking: config.masking,
+                approximate_masking: config.approximate_masking,
             });
             drop(old_left_analyzer);
 
