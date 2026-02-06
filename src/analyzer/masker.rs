@@ -60,7 +60,7 @@ impl Masker {
     pub(super) fn new(frequency_bands: &[FrequencyBand], approximate: bool) -> Self {
         let frequency_set: Vec<f32> = frequency_bands.iter().map(|f| f.center).collect();
 
-        let bark_set: Vec<f32> = frequency_set
+        let mut bark_set: Vec<f32> = frequency_set
             .iter()
             .copied()
             .map(|f| FrequencyScale::Bark.scale(f))
@@ -134,6 +134,11 @@ impl Masker {
             .sum::<f32>()
             .round() as usize;
 
+        if approximate {
+            bark_set.clear();
+            bark_set.shrink_to_fit();
+        }
+
         Self {
             coeffs,
             bark_set,
@@ -148,6 +153,10 @@ impl Masker {
         //flatness: f32,
         masking_threshold: &mut [f32],
     ) {
+        assert_eq!(masking_threshold.len(), self.coeffs.len());
+
+        masking_threshold.fill(0.0);
+
         if self.approximate {
             if self.average_width >= 128 {
                 /*if self.average_width >= 512 {
@@ -158,18 +167,10 @@ impl Masker {
                         approximate,
                     );
                 } else {*/
-                self.calculate_masking_threshold_inner::<16>(
-                    spectrum,
-                    listening_volume,
-                    masking_threshold,
-                );
+                self.calculate_masking_threshold_inner_approx::<16>(spectrum, masking_threshold);
                 //}
             } else {
-                self.calculate_masking_threshold_inner::<8>(
-                    spectrum,
-                    listening_volume,
-                    masking_threshold,
-                );
+                self.calculate_masking_threshold_inner_approx::<8>(spectrum, masking_threshold);
             }
         } else {
             if self.average_width >= 256 {
@@ -181,14 +182,14 @@ impl Masker {
                         approximate,
                     );
                 } else {*/
-                self.calculate_masking_threshold_inner::<16>(
+                self.calculate_masking_threshold_inner_exact::<16>(
                     spectrum,
                     listening_volume,
                     masking_threshold,
                 );
                 //}
             } else {
-                self.calculate_masking_threshold_inner::<8>(
+                self.calculate_masking_threshold_inner_exact::<8>(
                     spectrum,
                     listening_volume,
                     masking_threshold,
@@ -196,120 +197,113 @@ impl Masker {
             }
         }
     }
-    fn calculate_masking_threshold_inner<const N: usize>(
+    fn calculate_masking_threshold_inner_approx<const N: usize>(
+        &self,
+        spectrum: impl Iterator<Item = f32>,
+        masking_threshold: &mut [f32],
+    ) {
+        for (component, coeff) in spectrum.zip(self.coeffs.iter()) {
+            let amplitude = component;
+
+            if amplitude == 0.0 {
+                continue;
+            }
+
+            let adjusted_amplitude = coeff.masking_offset_amplitude * amplitude;
+
+            {
+                let (masking_chunks, masking_rem) =
+                    unsafe { masking_threshold.get_unchecked_mut(coeff.range.0..=coeff.range.1) }
+                        .as_chunks_mut::<N>();
+                let (lookup_chunks, lookup_rem) = unsafe {
+                    coeff
+                        .lookup
+                        .get_unchecked(0..=(coeff.range.1 - coeff.range.0))
+                }
+                .as_chunks::<N>();
+
+                assert_eq!(masking_chunks.len(), lookup_chunks.len());
+                assert_eq!(masking_rem.len(), lookup_rem.len());
+
+                for (masking_chunk, lookup_chunk) in masking_chunks.iter_mut().zip(lookup_chunks) {
+                    for (t, x) in masking_chunk.iter_mut().zip(lookup_chunk) {
+                        *t = t.algebraic_add(x.algebraic_mul(adjusted_amplitude));
+                    }
+                }
+
+                for (t, x) in masking_rem.iter_mut().zip(lookup_rem) {
+                    *t = t.algebraic_add(x.algebraic_mul(adjusted_amplitude));
+                }
+            }
+        }
+    }
+    fn calculate_masking_threshold_inner_exact<const N: usize>(
         &self,
         spectrum: impl Iterator<Item = f32>,
         listening_volume: Option<f32>,
         //flatness: f32,
         masking_threshold: &mut [f32],
     ) {
-        assert_eq!(masking_threshold.len(), self.bark_set.len());
-
-        masking_threshold.fill(0.0);
-
-        if self.approximate {
-            for (component, coeff) in spectrum.zip(self.coeffs.iter()) {
-                let amplitude = component;
-
-                if amplitude == 0.0 {
-                    continue;
-                }
-
-                let adjusted_amplitude = coeff.masking_offset_amplitude * amplitude;
-
-                {
-                    let (masking_chunks, masking_rem) = unsafe {
-                        masking_threshold.get_unchecked_mut(coeff.range.0..=coeff.range.1)
-                    }
-                    .as_chunks_mut::<N>();
-                    let (lookup_chunks, lookup_rem) = unsafe {
-                        coeff
-                            .lookup
-                            .get_unchecked(0..=(coeff.range.1 - coeff.range.0))
-                    }
-                    .as_chunks::<N>();
-
-                    assert_eq!(masking_chunks.len(), lookup_chunks.len());
-                    assert_eq!(masking_rem.len(), lookup_rem.len());
-
-                    for (masking_chunk, lookup_chunk) in
-                        masking_chunks.iter_mut().zip(lookup_chunks)
-                    {
-                        for (t, x) in masking_chunk.iter_mut().zip(lookup_chunk) {
-                            *t = t.algebraic_add(x.algebraic_mul(adjusted_amplitude));
-                        }
-                    }
-
-                    for (t, x) in masking_rem.iter_mut().zip(lookup_rem) {
-                        *t = t.algebraic_add(x.algebraic_mul(adjusted_amplitude));
-                    }
-                }
-            }
+        let amplitude_correction_offset = if let Some(listening_volume) = listening_volume {
+            listening_volume - 90.0 // Assume the spreading function was calculated for -0dBFS = 90dBSPL
         } else {
-            let amplitude_correction_offset = if let Some(listening_volume) = listening_volume {
-                listening_volume - 90.0 // Assume the spreading function was calculated for -0dBFS = 90dBSPL
-            } else {
-                0.0
-            };
+            0.0
+        };
 
-            for (i, (component, coeff)) in spectrum.zip(self.coeffs.iter()).enumerate() {
-                let amplitude = component;
-                let amplitude_db = amplitude_to_dbfs_f32(component);
+        for (i, (component, coeff)) in spectrum.zip(self.coeffs.iter()).enumerate() {
+            let amplitude = component;
+            let amplitude_db = amplitude_to_dbfs_f32(component);
 
-                if amplitude == 0.0 {
-                    continue;
-                }
+            if amplitude == 0.0 {
+                continue;
+            }
 
-                let upper_spread =
-                    -(coeff.masking_coeff_1 - 0.2 * (amplitude_db + amplitude_correction_offset));
+            let upper_spread =
+                -(coeff.masking_coeff_1 - 0.2 * (amplitude_db + amplitude_correction_offset));
 
-                /*let threshold_offset = masking_threshold_offset(bark, flatness);
-                let offset = coeff.tonal_masking_threshold - simultaneous;
+            /*let threshold_offset = masking_threshold_offset(bark, flatness);
+            let offset = coeff.tonal_masking_threshold - simultaneous;
 
-                let adjusted_amplitude = dbfs_to_amplitude(offset) * amplitude;*/
+            let adjusted_amplitude = dbfs_to_amplitude(offset) * amplitude;*/
 
-                let adjusted_amplitude = coeff.masking_offset_amplitude * amplitude;
+            let adjusted_amplitude = coeff.masking_offset_amplitude * amplitude;
 
-                {
-                    let (masking_chunks, masking_rem) =
-                        unsafe { masking_threshold.get_unchecked_mut(coeff.range.0..i) }
-                            .as_chunks_mut::<N>();
-                    let (lookup_chunks, lookup_rem) =
-                        unsafe { coeff.lookup.get_unchecked(0..(i - coeff.range.0)) }
-                            .as_chunks::<N>();
+            {
+                let (masking_chunks, masking_rem) =
+                    unsafe { masking_threshold.get_unchecked_mut(coeff.range.0..i) }
+                        .as_chunks_mut::<N>();
+                let (lookup_chunks, lookup_rem) =
+                    unsafe { coeff.lookup.get_unchecked(0..(i - coeff.range.0)) }.as_chunks::<N>();
 
-                    assert_eq!(masking_chunks.len(), lookup_chunks.len());
-                    assert_eq!(masking_rem.len(), lookup_rem.len());
+                assert_eq!(masking_chunks.len(), lookup_chunks.len());
+                assert_eq!(masking_rem.len(), lookup_rem.len());
 
-                    for (masking_chunk, lookup_chunk) in
-                        masking_chunks.iter_mut().zip(lookup_chunks)
-                    {
-                        for (t, x) in masking_chunk.iter_mut().zip(lookup_chunk) {
-                            *t = t.algebraic_add(x.algebraic_mul(adjusted_amplitude));
-                        }
-                    }
-
-                    for (t, x) in masking_rem.iter_mut().zip(lookup_rem) {
+                for (masking_chunk, lookup_chunk) in masking_chunks.iter_mut().zip(lookup_chunks) {
+                    for (t, x) in masking_chunk.iter_mut().zip(lookup_chunk) {
                         *t = t.algebraic_add(x.algebraic_mul(adjusted_amplitude));
                     }
                 }
 
-                unsafe { masking_threshold.get_unchecked_mut(i..=coeff.range.1) }
-                    .iter_mut()
-                    .zip(
-                        unsafe { self.bark_set.get_unchecked(i..=coeff.range.1) }
-                            .iter()
-                            .copied(),
-                    )
-                    .for_each(|(t, b)| {
-                        *t = t.algebraic_add(
-                            dbfs_to_amplitude_f32(
-                                upper_spread.algebraic_mul(b.algebraic_sub(coeff.bark)),
-                            )
-                            .algebraic_mul(adjusted_amplitude),
-                        );
-                    });
+                for (t, x) in masking_rem.iter_mut().zip(lookup_rem) {
+                    *t = t.algebraic_add(x.algebraic_mul(adjusted_amplitude));
+                }
             }
+
+            unsafe { masking_threshold.get_unchecked_mut(i..=coeff.range.1) }
+                .iter_mut()
+                .zip(
+                    unsafe { self.bark_set.get_unchecked(i..=coeff.range.1) }
+                        .iter()
+                        .copied(),
+                )
+                .for_each(|(t, b)| {
+                    *t = t.algebraic_add(
+                        dbfs_to_amplitude_f32(
+                            upper_spread.algebraic_mul(b.algebraic_sub(coeff.bark)),
+                        )
+                        .algebraic_mul(adjusted_amplitude),
+                    );
+                });
         }
     }
 }
