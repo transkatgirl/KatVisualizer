@@ -61,7 +61,6 @@ pub struct BetterAnalyzer {
     masker: Masker,
     masking: Vec<f32>,
     frequency_bands: Vec<(f32, f32, f32)>,
-    frequency_indices: Vec<(usize, usize)>,
     normalizers: Vec<PrecomputedNormalizer>,
     hearing_threshold: Vec<f32>,
 }
@@ -92,22 +91,6 @@ impl BetterAnalyzer {
         let band_count = frequency_bands.len();
 
         assert!(band_count.is_multiple_of(64));
-
-        let frequency_indices = frequency_bands
-            .iter()
-            .enumerate()
-            .map(|(i, f)| {
-                let lower = (0..i.saturating_sub(1))
-                    .rev()
-                    .find(|i| frequency_bands[*i].high <= f.low)
-                    .unwrap_or(0);
-                let upper = (i..band_count)
-                    .find(|i| frequency_bands[*i].low >= f.high)
-                    .unwrap_or(band_count - 1);
-
-                ((lower + 1).min(i), upper.saturating_sub(1))
-            })
-            .collect();
 
         let normalizers: Vec<_> = frequency_bands
             .iter()
@@ -142,7 +125,6 @@ impl BetterAnalyzer {
             masking: vec![0.0; frequency_bands.len()],
             transform,
             frequency_bands,
-            frequency_indices,
             normalizers,
             hearing_threshold,
         }
@@ -202,17 +184,6 @@ impl BetterAnalyzer {
     pub fn raw_masking(&self) -> &[f32] {
         &self.masking
     }
-    pub fn remove_masked_components(&mut self) {
-        self.transform
-            .spectrum_data
-            .iter_mut()
-            .zip(self.masking.iter().copied())
-            .for_each(|(amplitude, masking_amplitude)| {
-                if masking_amplitude as f64 >= *amplitude {
-                    *amplitude = f64::NEG_INFINITY;
-                }
-            });
-    }
 }
 
 #[derive(Clone)]
@@ -224,8 +195,6 @@ pub struct BetterAnalysis {
     pub mean: f32,
     pub max: f32,
     pub masking_mean: f32,
-    peak_scratchpad: Vec<bool>,
-    sorting_scratchpad: Vec<(f32, usize)>,
 }
 
 impl BetterAnalysis {
@@ -238,8 +207,6 @@ impl BetterAnalysis {
             mean: f32::NEG_INFINITY,
             max: f32::NEG_INFINITY,
             masking_mean: f32::NEG_INFINITY,
-            sorting_scratchpad: Vec::with_capacity(capacity),
-            peak_scratchpad: Vec::with_capacity(capacity),
         }
     }
     pub fn update_stereo(
@@ -507,70 +474,6 @@ impl BetterAnalysis {
 
         self.duration = duration;
     }
-    pub fn peaks(
-        &mut self,
-        volume_threshold: f32,
-        max_count: usize,
-        analyzer: &BetterAnalyzer,
-    ) -> impl Iterator<Item = f32> {
-        self.sorting_scratchpad.clear();
-
-        let min = volume_threshold.max(self.min);
-
-        if self.masking_mean.is_finite() {
-            self.data
-                .iter()
-                .copied()
-                .zip(self.masking.iter().copied())
-                .enumerate()
-                .for_each(|(i, ((_, a), (_, m)))| {
-                    if a > min && a > m {
-                        self.sorting_scratchpad.push((a - m, i));
-                    }
-                });
-        } else {
-            self.data
-                .iter()
-                .copied()
-                .enumerate()
-                .for_each(|(i, (_, a))| {
-                    if a > min {
-                        self.sorting_scratchpad.push((a, i));
-                    }
-                });
-        }
-        self.sorting_scratchpad
-            .sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-
-        if self.peak_scratchpad.len() == self.data.len() {
-            self.peak_scratchpad.fill(false);
-        } else {
-            self.peak_scratchpad.clear();
-
-            for _ in 0..self.data.len() {
-                self.peak_scratchpad.push(false);
-            }
-        }
-
-        self.sorting_scratchpad
-            .iter()
-            .copied()
-            .rev()
-            .filter_map(|(_stm, i)| {
-                if !self.peak_scratchpad[i] {
-                    let (min, max) = analyzer.frequency_indices[i];
-
-                    (min..=max).for_each(|i| {
-                        self.peak_scratchpad[i] = true;
-                    });
-
-                    Some(analyzer.frequency_bands[i].1)
-                } else {
-                    None
-                }
-            })
-            .take(max_count)
-    }
 }
 
 #[derive(Clone)]
@@ -590,8 +493,6 @@ impl BetterSpectrogram {
                     mean: f32::NEG_INFINITY,
                     max: f32::NEG_INFINITY,
                     masking_mean: f32::NEG_INFINITY,
-                    sorting_scratchpad: vec![(f32::NEG_INFINITY, 0); slice_capacity],
-                    peak_scratchpad: vec![false; slice_capacity],
                 })
             })),
         }

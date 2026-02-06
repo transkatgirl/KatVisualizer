@@ -3,7 +3,6 @@
 
 use color::{ColorSpaceTag, DynamicColor, Flags, Rgba8, Srgb};
 use nih_plug::{editor::Editor, prelude::ProcessMode};
-//use nih_plug::prelude::*;
 use nih_plug_egui::{
     EguiSettings, GlConfig, GraphicsConfig, create_egui_editor,
     egui::{
@@ -19,8 +18,8 @@ use std::{
 };
 
 use crate::{
-    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS,
-    MAX_OSC_FREQUENCY_BINS, PluginParams, PluginStateInfo, SPECTROGRAM_SLICES,
+    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS, PluginParams,
+    PluginStateInfo, SPECTROGRAM_SLICES,
     analyzer::{BetterSpectrogram, FrequencyScale, map_value_f32},
 };
 
@@ -1732,8 +1731,6 @@ F: FnOnce(&Ui),*/
                 }
 
                 if analysis_settings.normalize_amplitude {
-                    let old_tone_threshold_phon =
-                        (analysis_settings.midi_tone_amplitude_threshold + analysis_settings.listening_volume).clamp(0.0, 100.0);
                     let old_min_phon =
                         (render_settings.min_db + analysis_settings.listening_volume).clamp(0.0, 100.0);
                     let old_max_phon =
@@ -1752,8 +1749,6 @@ F: FnOnce(&Ui),*/
                         .changed()
                     {
                         update_and_clear(&analysis_settings);
-                        analysis_settings.midi_tone_amplitude_threshold =
-                            old_tone_threshold_phon - analysis_settings.listening_volume;
                         render_settings.min_db =
                             old_min_phon - analysis_settings.listening_volume;
                         render_settings.max_db =
@@ -1817,8 +1812,6 @@ F: FnOnce(&Ui),*/
                     .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows.\nIf this is enabled, the plugin maintains its own buffer of samples, allowing the number of overlapping windows per second to be changed by the user. This adds a small amount of latency, which is reported to the plugin's host so that it can be compensated for.\nIf this is disabled, the number of overlapping windows per second is determined by the buffer size set by the host.")
                     .changed()
                 {
-                    analysis_settings.output_osc = false;
-                    analysis_settings.output_midi = false;
                     update(&analysis_settings);
                     egui_ctx.request_discard("Changed setting");
                     return;
@@ -1859,17 +1852,11 @@ F: FnOnce(&Ui),*/
                     };
                 }
 
-                let maximum_resolution = if analysis_settings.output_osc {
-                    MAX_OSC_FREQUENCY_BINS
-                } else {
-                    MAX_FREQUENCY_BINS
-                };
-
                 if ui
                     .add(
                         egui::Slider::new(
                             &mut analysis_settings.resolution,
-                            128..=maximum_resolution,
+                            128..=MAX_FREQUENCY_BINS,
                         )
                         .suffix(" bins")
                         .step_by(64.0)
@@ -2082,203 +2069,6 @@ F: FnOnce(&Ui),*/
                         return;
                     }
                 }
-
-                ui.collapsing("External Outputs", |ui| {
-                    ui.colored_label(
-                        Color32::YELLOW,
-                        "Enabling external output requires internal buffering to be disabled.",
-                    );
-
-                    if ui
-                        .checkbox(
-                            &mut analysis_settings.output_osc,
-                            "Output analysis via OSC",
-                        )
-                        .on_hover_text("If this is enabled, the plugin will output analysis data via OSC, which can then be used as an input for alternative visualization methods.")
-                        .changed()
-                    {
-                        if analysis_settings.output_osc {
-                            analysis_settings.internal_buffering = false;
-                            analysis_settings.normalize_amplitude = true;
-                            analysis_settings.masking = true;
-                            if analysis_settings.resolution > MAX_OSC_FREQUENCY_BINS {
-                                analysis_settings.resolution = MAX_OSC_FREQUENCY_BINS;
-                            }
-                        }
-                        update(&analysis_settings);
-                        egui_ctx.request_discard("Changed setting");
-                        return;
-                    }
-
-                    if analysis_settings.output_osc {
-                        ui.colored_label(
-                            Color32::YELLOW,
-                            "OSC packets produced by this program are intended solely for further local analysis and significantly exceed the MTU of most networks.",
-                        );
-
-                        let address_label = ui
-                            .label("OSC server UDP/IP address:")
-                            .on_hover_text("The UDP/IP address of the OSC server that analysis output will be sent to.");
-
-                        if ui.
-                            text_edit_singleline(&mut analysis_settings.osc_socket_address)
-                            .labelled_by(address_label.id)
-                            .on_hover_text("The UDP/IP address of the OSC server that analysis output will be sent to.")
-                            .changed()
-                        {
-                            update(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        }
-
-                        let message_label_1 = ui
-                            .label("Frequency bin data OSC message address:")
-                            .on_hover_text("The OSC address pattern that frequency bin data will be sent under.\n\nThe message format for frequency bin data is [(frequency, bandwidth, pan, volume, signalToMaskRatio)], with bins being listed in order of priority. Frequencies and bandwidths are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), pan ranges from -1 to 1, and signalToMaskRatio is in dB.");
-
-                        if ui.
-                            text_edit_singleline(&mut analysis_settings.osc_resource_address_frequencies)
-                            .labelled_by(message_label_1.id)
-                            .on_hover_text("The OSC address pattern that frequency bin data will be sent under.\n\nThe message format for frequency bin data is [(frequency, bandwidth, pan, volume, signalToMaskRatio)], with bins being listed in order of priority. Frequencies and bandwidths are in Hz, volume is in phon (or dBFS if amplitude normalization is disabled), pan ranges from -1 to 1, and signalToMaskRatio is in dB.")
-                            .changed()
-                        {
-                            update(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        }
-
-                        let message_label_2 = ui
-                            .label("Analysis statistics OSC message address:")
-                            .on_hover_text("The OSC address pattern that analysis statistics will be sent under.\n\nThe message format for analysis statistics is (averageMasking, averageVolume, maximumVolume, chunkDuration), with amplitude values being in phon (or dBFS if amplitude normalization is disabled) and duration values being in seconds. Analysis statistics are only applicable for the most recent slice of tone data.");
-
-                        if ui.
-                            text_edit_singleline(&mut analysis_settings.osc_resource_address_stats)
-                            .labelled_by(message_label_2.id)
-                            .on_hover_text("The OSC address pattern that analysis statistics will be sent under.\n\nThe message format for analysis statistics is (averageMasking, averageVolume, maximumVolume, chunkDuration), with amplitude values being in phon (or dBFS if amplitude normalization is disabled) and duration values being in seconds. Analysis statistics are only applicable for the most recent slice of tone data.")
-                            .changed()
-                        {
-                            update(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        }
-                    }
-
-                    #[cfg(feature = "midi")]
-                    if ui
-                        .checkbox(
-                            &mut analysis_settings.output_midi,
-                            "Output analysis via MIDI",
-                        )
-                        .on_hover_text("If this is enabled, the plugin will use analysis data to generate a MIDI output, which can then be used as an input for alternative visualization methods.")
-                        .changed()
-                    {
-                        if analysis_settings.output_midi {
-                            analysis_settings.internal_buffering = false;
-                            analysis_settings.normalize_amplitude = true;
-                            analysis_settings.masking = true;
-                            analysis_settings.erb_time_resolution = false;
-                            analysis_settings.q_time_resolution = 17.30993;
-                        }
-                        update(&analysis_settings);
-                        egui_ctx.request_discard("Changed setting");
-                        return;
-                    }
-
-                    #[cfg(feature = "midi")]
-                    if analysis_settings.output_midi {
-                        ui.colored_label(
-                            Color32::YELLOW,
-                            "Some MIDI software may struggle to handle this plugin's output rate. If you encounter issues, try lowering the number of simultaneous tones or increasing the plugin's buffer size.",
-                        );
-
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut analysis_settings.midi_max_simultaneous_tones, 1..=128)
-                                    .suffix(" notes")
-                                    .logarithmic(true)
-                                    .text("Maximum simultaneous MIDI notes"),
-                            )
-                            .on_hover_text("This setting adjusts the maximum number of simultaneous MIDI notes output by the plugin.\nValid notes are prioritized by their distance from the masking threshold, or if masking data is not available, their perceptual amplitude. If amplitude normalization is also disabled, notes will then be prioritized based on absolute amplitude.")
-                            .changed()
-                        {
-                            update(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        };
-
-                        if analysis_settings.normalize_amplitude {
-                            let mut tone_threshold_phon =
-                                (analysis_settings.midi_tone_amplitude_threshold + analysis_settings.listening_volume).clamp(0.0, 100.0);
-
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut tone_threshold_phon, 0.0..=100.0)
-                                        .suffix(" phon")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("MIDI note amplitude threshold"),
-                                )
-                                .on_hover_text("This setting adjusts the minimum amplitude necessary for a note to be considered valid. Notes with an amplitude below this threshold will always be considered inactive, regardless of the note limit.")
-                                .changed()
-                            {
-                                analysis_settings.midi_tone_amplitude_threshold =
-                                    tone_threshold_phon - analysis_settings.listening_volume;
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            }
-                        } else {
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut analysis_settings.midi_tone_amplitude_threshold, -100.0..=0.0)
-                                        .clamping(egui::SliderClamping::Never)
-                                        .suffix("dB")
-                                        .step_by(1.0)
-                                        .fixed_decimals(0)
-                                        .text("MIDI note amplitude threshold"),
-                                )
-                                .on_hover_text("This setting adjusts the minimum amplitude necessary for a note to be considered valid. Notes with an amplitude below this threshold will always be considered inactive, regardless of the note limit.")
-                                .changed()
-                            {
-                                update(&analysis_settings);
-                                egui_ctx.request_discard("Changed setting");
-                                return;
-                            };
-                        }
-
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut analysis_settings.midi_pressure_min_amplitude, -100.0..=0.0)
-                                    .clamping(egui::SliderClamping::Never)
-                                    .suffix("dB")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("MIDI note pressure minimum amplitude"),
-                            )
-                            .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 0%.\n\nNote: Due to a quirk of the MIDI specification, a note pressure of exactly 0% will cause the note to be released.")
-                            .changed()
-                        {
-                            update(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                            return;
-                        };
-
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut analysis_settings.midi_pressure_max_amplitude, -100.0..=0.0)
-                                    .clamping(egui::SliderClamping::Never)
-                                    .suffix("dB")
-                                    .step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .text("MIDI note pressure maximum amplitude"),
-                            )
-                            .on_hover_text("When converting frequency data into MIDI notes, amplitudes must be mapped to a note pressure level.\nThis setting allows you to adjust the amplitude corresponding to a note pressure of 100%.")
-                            .changed()
-                        {
-                            update(&analysis_settings);
-                            egui_ctx.request_discard("Changed setting");
-                        };
-                    }
-                });
 
                 if ui.button("Reset Analysis Options").clicked() {
                     *analysis_settings = AnalysisChainConfig::default();
