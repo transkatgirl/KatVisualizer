@@ -11,6 +11,7 @@ use nih_plug::prelude::*;
 use nih_plug_egui::EguiState;
 use parking_lot::{FairMutex, Mutex, RwLock};
 use std::{
+    num::NonZero,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -34,10 +35,36 @@ pub(crate) struct AnalysisMetrics {
     finished: Instant,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct PluginStateInfo {
-    audio_io_layout: AudioIOLayout,
-    buffer_config: BufferConfig,
+#[derive(Clone, Debug)]
+pub(crate) struct AudioState {
+    pub(crate) buffer_size_range: (u32, u32),
+    pub(crate) sample_rate: f32,
+    pub(crate) process_mode_title: String,
+    pub(crate) realtime: bool,
+    pub(crate) input_channels: u32,
+    pub(crate) output_channels: u32,
+}
+
+impl AudioState {
+    fn new(audio_io_layout: AudioIOLayout, buffer_config: BufferConfig) -> Self {
+        Self {
+            buffer_size_range: (
+                buffer_config.min_buffer_size.unwrap_or(0),
+                buffer_config.max_buffer_size,
+            ),
+            sample_rate: buffer_config.sample_rate,
+            process_mode_title: format!("{:?}", buffer_config.process_mode),
+            realtime: buffer_config.process_mode == ProcessMode::Realtime,
+            input_channels: audio_io_layout
+                .main_input_channels
+                .map(u32::from)
+                .unwrap_or(0),
+            output_channels: audio_io_layout
+                .main_output_channels
+                .map(u32::from)
+                .unwrap_or(0),
+        }
+    }
 }
 
 pub struct MyPlugin {
@@ -46,7 +73,7 @@ pub struct MyPlugin {
     latency_samples: u32,
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
     analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
-    state_info: Arc<RwLock<Option<PluginStateInfo>>>,
+    state_info: Arc<RwLock<Option<AudioState>>>,
     keepawake: Option<KeepAwake>,
 }
 
@@ -192,7 +219,7 @@ impl Plugin for MyPlugin {
         let new_chain = AnalysisChain::new(
             &analysis_config,
             buffer_config.sample_rate,
-            audio_io_layout,
+            audio_io_layout.main_input_channels == NonZero::new(1),
             self.analysis_frequencies.clone(),
         );
         context.set_latency_samples(new_chain.latency_samples);
@@ -208,10 +235,7 @@ impl Plugin for MyPlugin {
             },
         );
 
-        *self.state_info.write() = Some(PluginStateInfo {
-            audio_io_layout: *audio_io_layout,
-            buffer_config: *buffer_config,
-        });
+        *self.state_info.write() = Some(AudioState::new(*audio_io_layout, *buffer_config));
 
         self.keepawake = keepawake::Builder::default()
             .app_name("KatVisualizer")

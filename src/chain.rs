@@ -1,10 +1,9 @@
 use std::{
-    num::NonZero,
     sync::Arc,
     time::{Duration, Instant},
 };
 
-use nih_plug::{buffer::Buffer, prelude::AudioIOLayout, util::StftHelper};
+use nih_plug::{buffer::Buffer, util::StftHelper};
 use parking_lot::{FairMutex, Mutex, RwLock};
 use threadpool::ThreadPool;
 
@@ -89,7 +88,7 @@ impl AnalysisChain {
     pub(crate) fn new(
         config: &AnalysisChainConfig,
         sample_rate: f32,
-        layout: &AudioIOLayout,
+        single_input: bool,
         frequency_list_container: Arc<RwLock<Vec<(f32, f32, f32)>>>,
     ) -> Self {
         let analyzer_config = BetterAnalyzerConfiguration {
@@ -150,7 +149,7 @@ impl AnalysisChain {
             masking: config.masking,
             chunk_size,
             chunk_duration: Duration::from_secs_f64(chunk_size as f64 / sample_rate as f64),
-            single_input: layout.main_input_channels == NonZero::new(1),
+            single_input,
             analyzer_pool: ThreadPool::new(2),
         }
     }

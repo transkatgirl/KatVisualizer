@@ -2,7 +2,7 @@
 #![allow(clippy::collapsible_else_if)]
 
 use color::{ColorSpaceTag, DynamicColor, Flags, Rgba8, Srgb};
-use nih_plug::{editor::Editor, prelude::ProcessMode};
+use nih_plug::editor::Editor;
 use nih_plug_egui::{
     EguiSettings, GlConfig, GraphicsConfig, create_egui_editor,
     egui::{
@@ -18,8 +18,8 @@ use std::{
 };
 
 use crate::{
-    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS, PluginParams,
-    PluginStateInfo, SPECTROGRAM_SLICES,
+    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, AudioState, MAX_FREQUENCY_BINS,
+    PluginParams, SPECTROGRAM_SLICES,
     analyzer::{BetterSpectrogram, FrequencyScale, map_value_f32},
 };
 
@@ -795,39 +795,6 @@ struct SharedState {
     spectrogram_texture: Arc<RwLock<Option<TextureId>>>,
 }
 
-pub struct AudioState {
-    buffer_size_range: (u32, u32),
-    sample_rate: f32,
-    process_mode_title: String,
-    realtime: bool,
-    input_channels: u32,
-    output_channels: u32,
-}
-
-impl From<&PluginStateInfo> for AudioState {
-    fn from(value: &PluginStateInfo) -> Self {
-        Self {
-            buffer_size_range: (
-                value.buffer_config.min_buffer_size.unwrap_or(0),
-                value.buffer_config.max_buffer_size,
-            ),
-            sample_rate: value.buffer_config.sample_rate,
-            process_mode_title: format!("{:?}", value.buffer_config.process_mode),
-            realtime: value.buffer_config.process_mode == ProcessMode::Realtime,
-            input_channels: value
-                .audio_io_layout
-                .main_input_channels
-                .map(u32::from)
-                .unwrap_or(0),
-            output_channels: value
-                .audio_io_layout
-                .main_output_channels
-                .map(u32::from)
-                .unwrap_or(0),
-        }
-    }
-}
-
 const BASELINE_TARGET_FPS: f64 = 60.0;
 const BASELINE_TARGET_FRAME_SECS: f64 = 1.0 / BASELINE_TARGET_FPS;
 
@@ -836,7 +803,7 @@ pub fn create(
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
     analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
-    plugin_state: Arc<RwLock<Option<PluginStateInfo>>>,
+    audio_state: Arc<RwLock<Option<AudioState>>>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
 
@@ -884,14 +851,12 @@ pub fn create(
             build(egui_ctx, &spectrogram_texture);
         },
         move |egui_ctx, _setter, _, _| {
-            let audio_state = plugin_state.read().as_ref().map(|s| s.into());
-
             render(
                 egui_ctx,
                 &analysis_chain,
                 &analysis_output,
                 &analysis_frequencies,
-                audio_state,
+                &audio_state,
                 &shared_state,
             );
         },
@@ -932,7 +897,7 @@ fn render(
     analysis_chain: &Mutex<Option<AnalysisChain>>,
     analysis_output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
     analysis_frequencies: &RwLock<Vec<(f32, f32, f32)>>,
-    audio_state: Option<AudioState>,
+    audio_state: &RwLock<Option<AudioState>>,
     shared_state: &SharedState,
     //backend_specific_ui: F,
 ) /*where
@@ -1196,7 +1161,7 @@ F: FnOnce(&Ui),*/
         }
 
         if settings.show_format {
-            if let Some(ref audio_state) = audio_state {
+            if let Some(audio_state) = audio_state.read().as_ref() {
                 let min_buffer_size_s =
                     audio_state.buffer_size_range.0 as f32 / audio_state.sample_rate;
                 let max_buffer_size_s =
