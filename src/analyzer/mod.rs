@@ -409,10 +409,10 @@ impl BetterAnalysis {
 
             masking_data.zip(self.masking.iter_mut()).for_each(
                 |(mask_amplitude, masking_result)| {
-                    let masking_amplitude = (mask_amplitude).algebraic_mul(gain_amplitude);
+                    let masking_amplitude = mask_amplitude.algebraic_mul(gain_amplitude);
 
                     *masking_result = (0.0, amplitude_to_dbfs(masking_amplitude));
-                    masking_sum = (mask_amplitude).algebraic_add(masking_amplitude);
+                    masking_sum = masking_sum.algebraic_add(masking_amplitude);
                 },
             );
         }
