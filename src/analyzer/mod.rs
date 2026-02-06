@@ -1,6 +1,6 @@
 use std::{
     collections::VecDeque,
-    f64::consts::{PI, SQRT_2},
+    f32::consts::{PI, SQRT_2},
     sync::Arc,
     time::Duration,
 };
@@ -347,8 +347,7 @@ impl BetterAnalysis {
                             .algebraic_sub(listening_volume);
 
                         *masking_result = (mask_pan, masking_norm_db);
-                        masking_sum =
-                            masking_sum.algebraic_add(dbfs_to_amplitude_f32(masking_norm_db));
+                        masking_sum = masking_sum.algebraic_add(dbfs_to_amplitude(masking_norm_db));
                     },
                 );
         } else {
@@ -357,13 +356,12 @@ impl BetterAnalysis {
                     let masking_norm_db = mask_volume.algebraic_add(gain);
 
                     *masking_result = (mask_pan, masking_norm_db);
-                    masking_sum = masking_sum.algebraic_add(dbfs_to_amplitude_f32(masking_norm_db));
+                    masking_sum = masking_sum.algebraic_add(dbfs_to_amplitude(masking_norm_db));
                 },
             );
         }
 
-        self.masking_mean =
-            amplitude_to_dbfs_f32(masking_sum.algebraic_div(self.masking.len() as f32));
+        self.masking_mean = amplitude_to_dbfs(masking_sum.algebraic_div(self.masking.len() as f32));
     }
     fn update_mono_masking(
         &mut self,
@@ -377,7 +375,7 @@ impl BetterAnalysis {
             .copied()
             .map(|amplitude| amplitude.algebraic_mul(2.0));
 
-        let gain_amplitude = dbfs_to_amplitude_f32(gain);
+        let gain_amplitude = dbfs_to_amplitude(gain);
         let mut masking_sum: f32 = 0.0;
 
         if let Some(listening_volume) = normalization_volume {
@@ -395,7 +393,7 @@ impl BetterAnalysis {
                     |(normalizer, (threshold, (mask_amplitude, masking_result)))| {
                         let masking_norm_db = normalizer
                             .spl_to_phon(
-                                amplitude_to_dbfs_f32(mask_amplitude.algebraic_mul(gain_amplitude))
+                                amplitude_to_dbfs(mask_amplitude.algebraic_mul(gain_amplitude))
                                     .max(threshold)
                                     .algebraic_add(listening_volume),
                             )
@@ -404,8 +402,7 @@ impl BetterAnalysis {
                             .algebraic_sub(listening_volume);
 
                         *masking_result = (0.0, masking_norm_db);
-                        masking_sum =
-                            masking_sum.algebraic_add(dbfs_to_amplitude_f32(masking_norm_db));
+                        masking_sum = masking_sum.algebraic_add(dbfs_to_amplitude(masking_norm_db));
                     },
                 );
         } else {
@@ -413,14 +410,13 @@ impl BetterAnalysis {
                 |(mask_amplitude, masking_result)| {
                     let masking_amplitude = (mask_amplitude).algebraic_mul(gain_amplitude);
 
-                    *masking_result = (0.0, amplitude_to_dbfs_f32(masking_amplitude));
+                    *masking_result = (0.0, amplitude_to_dbfs(masking_amplitude));
                     masking_sum = (mask_amplitude).algebraic_add(masking_amplitude);
                 },
             );
         }
 
-        self.masking_mean =
-            amplitude_to_dbfs_f32(masking_sum.algebraic_div(self.masking.len() as f32));
+        self.masking_mean = amplitude_to_dbfs(masking_sum.algebraic_div(self.masking.len() as f32));
     }
     fn update_mono_data(
         &mut self,
@@ -439,7 +435,7 @@ impl BetterAnalysis {
             {
                 let volume = normalizer
                     .spl_to_phon(
-                        amplitude_to_dbfs_f32((amplitude as f32).algebraic_mul(2.0))
+                        amplitude_to_dbfs((amplitude as f32).algebraic_mul(2.0))
                             .algebraic_add(total_gain),
                     )
                     //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
@@ -455,8 +451,8 @@ impl BetterAnalysis {
                 .copied()
                 .zip(self.data.iter_mut())
             {
-                let volume = amplitude_to_dbfs_f32((amplitude as f32).algebraic_mul(2.0))
-                    .algebraic_add(gain);
+                let volume =
+                    amplitude_to_dbfs((amplitude as f32).algebraic_mul(2.0)).algebraic_add(gain);
 
                 *result = (0.0, volume);
             }
@@ -521,42 +517,7 @@ impl BetterSpectrogram {
 
 // ----- Below formula is based on https://stackoverflow.com/a/35614871 -----
 
-const NEG_SQRT_2: f64 = -SQRT_2;
-
-pub fn calculate_pan_and_volume_from_amplitude(
-    left_amplitude: f64,
-    right_amplitude: f64,
-) -> (f64, f64) {
-    let ratio = left_amplitude.algebraic_div(right_amplitude);
-
-    let pan = if ratio == 1.0 {
-        0.0
-    } else if left_amplitude == 0.0 && right_amplitude > 0.0 {
-        1.0
-    } else if right_amplitude == 0.0 && left_amplitude > 0.0 {
-        -1.0
-    } else if ratio.is_nan() {
-        0.0
-    } else {
-        const COEFF: f64 = (180.0 / PI) / 22.5;
-
-        (f64::atan(
-            (NEG_SQRT_2
-                .algebraic_mul(f64::sqrt(ratio.algebraic_mul(ratio).algebraic_add(1.0)))
-                .algebraic_add(ratio)
-                .algebraic_add(1.0))
-            .algebraic_div(ratio.algebraic_sub(1.0)),
-        ))
-        .algebraic_mul(COEFF)
-    };
-
-    (
-        pan,
-        amplitude_to_dbfs(left_amplitude.algebraic_add(right_amplitude)),
-    )
-}
-
-const NEG_SQRT_2_F32: f32 = -std::f32::consts::SQRT_2;
+const NEG_SQRT_2: f32 = -SQRT_2;
 
 pub fn calculate_pan_and_volume_from_amplitude_f32(
     left_amplitude: f32,
@@ -573,10 +534,10 @@ pub fn calculate_pan_and_volume_from_amplitude_f32(
     } else if ratio.is_nan() {
         0.0
     } else {
-        const COEFF: f32 = (180.0 / std::f32::consts::PI) / 22.5;
+        const COEFF: f32 = (180.0 / PI) / 22.5;
 
         (f32::atan(
-            (NEG_SQRT_2_F32
+            (NEG_SQRT_2
                 .algebraic_mul(f32::sqrt(ratio.algebraic_mul(ratio).algebraic_add(1.0)))
                 .algebraic_add(ratio)
                 .algebraic_add(1.0))
@@ -587,7 +548,7 @@ pub fn calculate_pan_and_volume_from_amplitude_f32(
 
     (
         pan,
-        amplitude_to_dbfs_f32(left_amplitude.algebraic_add(right_amplitude)),
+        amplitude_to_dbfs(left_amplitude.algebraic_add(right_amplitude)),
     )
 }
 
@@ -721,35 +682,17 @@ fn approximate_hearing_threshold(frequency: f32) -> f32 {
 // ----- Below algorithms are taken from https://codepen.io/TF3RDL/pen/MWLzPoO -----
 
 #[inline(always)]
-pub fn amplitude_to_dbfs(amplitude: f64) -> f64 {
-    20.0_f64.algebraic_mul(f64::log10(amplitude))
-}
-
-#[inline(always)]
-pub fn amplitude_to_dbfs_f32(amplitude: f32) -> f32 {
+pub fn amplitude_to_dbfs(amplitude: f32) -> f32 {
     20.0_f32.algebraic_mul(f32::log10(amplitude))
 }
 
 #[inline(always)]
-pub fn dbfs_to_amplitude(decibels: f64) -> f64 {
-    10.0_f64.powf(decibels.algebraic_div(20.0))
-}
-
-#[inline(always)]
-pub fn dbfs_to_amplitude_f32(decibels: f32) -> f32 {
+pub fn dbfs_to_amplitude(decibels: f32) -> f32 {
     10.0_f32.powf(decibels.algebraic_div(20.0))
 }
 
 #[inline(always)]
-pub fn map_value_f64(x: f64, min: f64, max: f64, target_min: f64, target_max: f64) -> f64 {
-    (x.algebraic_sub(min))
-        .algebraic_div(max.algebraic_sub(min))
-        .algebraic_mul(target_max.algebraic_sub(target_min))
-        .algebraic_add(target_min)
-}
-
-#[inline(always)]
-pub fn map_value_f32(x: f32, min: f32, max: f32, target_min: f32, target_max: f32) -> f32 {
+pub fn map_value(x: f32, min: f32, max: f32, target_min: f32, target_max: f32) -> f32 {
     (x.algebraic_sub(min))
         .algebraic_div(max.algebraic_sub(min))
         .algebraic_mul(target_max.algebraic_sub(target_min))
@@ -791,21 +734,21 @@ impl FrequencyScale {
                 let i = i as f32;
                 let target_max = (n - 1) as f32;
 
-                let center = self.inv_scale(map_value_f32(
+                let center = self.inv_scale(map_value(
                     i,
                     0.0,
                     target_max,
                     self.scale(low),
                     self.scale(high),
                 ));
-                let lower = self.inv_scale(map_value_f32(
+                let lower = self.inv_scale(map_value(
                     i - 0.5,
                     0.0,
                     target_max,
                     self.scale(low),
                     self.scale(high),
                 ));
-                let higher = self.inv_scale(map_value_f32(
+                let higher = self.inv_scale(map_value(
                     i + 0.5,
                     0.0,
                     target_max,

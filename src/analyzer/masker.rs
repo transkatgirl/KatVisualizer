@@ -1,6 +1,6 @@
 #![allow(clippy::excessive_precision)]
 
-use super::{FrequencyBand, FrequencyScale, amplitude_to_dbfs_f32, dbfs_to_amplitude_f32};
+use super::{FrequencyBand, FrequencyScale, amplitude_to_dbfs, dbfs_to_amplitude};
 
 // ----- Below algorithms are taken from https://www.gammaelectronics.xyz/poda_6e_11b.html -----
 
@@ -97,36 +97,37 @@ impl Masker {
         const LOWER_SPREAD: f32 = -27.0;
         const AMPLITUDE_GUESS: f32 = -32.39315062; // amplitude_to_dbfs(-21.4 * f64::log10(1 + 0.00437 * 20000))
 
-        let coeffs: Vec<MaskerCoeff> = frequency_set
-            .into_iter()
-            .zip(bark_set.iter().copied().zip(range_indices))
-            .map(|(frequency, (bark, range))| {
-                let masking_coeff_1 = 22.0 + (230.0 / frequency).min(10.0);
-                let upper_spread = -(masking_coeff_1 - 0.2 * AMPLITUDE_GUESS);
+        let coeffs: Vec<MaskerCoeff> =
+            frequency_set
+                .into_iter()
+                .zip(bark_set.iter().copied().zip(range_indices))
+                .map(|(frequency, (bark, range))| {
+                    let masking_coeff_1 = 22.0 + (230.0 / frequency).min(10.0);
+                    let upper_spread = -(masking_coeff_1 - 0.2 * AMPLITUDE_GUESS);
 
-                MaskerCoeff {
-                    bark,
-                    masking_offset_amplitude: dbfs_to_amplitude_f32(-6.025 - (0.275 * bark))
-                        / (band_count as f32 / 41.65407847),
-                    /*tonal_masking_threshold: -6.025 - (0.275 * bark),
-                    nontonal_masking_threshold: -2.025 - (0.175 * bark),*/
-                    lookup: if approximate {
-                        (range.0..range.1)
-                            .map(|i| dbfs_to_amplitude_f32(LOWER_SPREAD * (bark - bark_set[i])))
-                            .chain((range.1..=range.2).map(|i| {
-                                dbfs_to_amplitude_f32(upper_spread * (bark_set[i] - bark))
-                            }))
-                            .collect()
-                    } else {
-                        (range.0..range.1)
-                            .map(|i| dbfs_to_amplitude_f32(LOWER_SPREAD * (bark - bark_set[i])))
-                            .collect()
-                    },
-                    masking_coeff_1,
-                    range: (range.0, range.2),
-                }
-            })
-            .collect();
+                    MaskerCoeff {
+                        bark,
+                        masking_offset_amplitude: dbfs_to_amplitude(-6.025 - (0.275 * bark))
+                            / (band_count as f32 / 41.65407847),
+                        /*tonal_masking_threshold: -6.025 - (0.275 * bark),
+                        nontonal_masking_threshold: -2.025 - (0.175 * bark),*/
+                        lookup: if approximate {
+                            (range.0..range.1)
+                                .map(|i| dbfs_to_amplitude(LOWER_SPREAD * (bark - bark_set[i])))
+                                .chain((range.1..=range.2).map(|i| {
+                                    dbfs_to_amplitude(upper_spread * (bark_set[i] - bark))
+                                }))
+                                .collect()
+                        } else {
+                            (range.0..range.1)
+                                .map(|i| dbfs_to_amplitude(LOWER_SPREAD * (bark - bark_set[i])))
+                                .collect()
+                        },
+                        masking_coeff_1,
+                        range: (range.0, range.2),
+                    }
+                })
+                .collect();
 
         let average_width = coeffs
             .iter()
@@ -252,7 +253,7 @@ impl Masker {
 
         for (i, (component, coeff)) in spectrum.zip(self.coeffs.iter()).enumerate() {
             let amplitude = component;
-            let amplitude_db = amplitude_to_dbfs_f32(component);
+            let amplitude_db = amplitude_to_dbfs(component);
 
             if amplitude == 0.0 {
                 continue;
@@ -298,10 +299,8 @@ impl Masker {
                 )
                 .for_each(|(t, b)| {
                     *t = t.algebraic_add(
-                        dbfs_to_amplitude_f32(
-                            upper_spread.algebraic_mul(b.algebraic_sub(coeff.bark)),
-                        )
-                        .algebraic_mul(adjusted_amplitude),
+                        dbfs_to_amplitude(upper_spread.algebraic_mul(b.algebraic_sub(coeff.bark)))
+                            .algebraic_mul(adjusted_amplitude),
                     );
                 });
         }

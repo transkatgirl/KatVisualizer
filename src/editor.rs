@@ -20,7 +20,7 @@ use std::{
 use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, AudioState, MAX_FREQUENCY_BINS,
     PluginParams, SPECTROGRAM_SLICES,
-    analyzer::{BetterSpectrogram, FrequencyScale, map_value_f32},
+    analyzer::{BetterSpectrogram, FrequencyScale, map_value},
 };
 
 fn calculate_volume_min_max(
@@ -81,7 +81,7 @@ fn draw_bargraph(
             .iter()
             .enumerate()
             .take_while(|(i, row)| {
-                row.duration.mul_f64(*i as f64) <= averaging
+                row.duration.mul_f32(*i as f32) <= averaging
                     && row.data.len() == target_len
                     && row.duration == target_duration
             })
@@ -192,7 +192,7 @@ fn draw_bargraph_from(
         for (ii, ((pan, volume), output)) in
             chunk.iter().copied().zip(buffer.iter_mut()).enumerate()
         {
-            let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+            let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
 
             let start_x = bounds
                 .min
@@ -279,7 +279,7 @@ fn draw_secondary_bargraph(
         let offset = ci * 64;
 
         for (ii, (volume, output)) in chunk.iter().copied().zip(buffer.iter_mut()).enumerate() {
-            let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+            let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
 
             let start_x = bounds
                 .min
@@ -363,7 +363,7 @@ fn draw_secondary_bargraph_from_pairs(
 
         for (ii, ((_, volume), output)) in chunk.iter().copied().zip(buffer.iter_mut()).enumerate()
         {
-            let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+            let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
 
             let start_x = bounds
                 .min
@@ -492,9 +492,13 @@ fn draw_spectrogram_image(
                             .zip(buffer.iter_mut()),
                     )
                 {
-                    let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0).min(
-                        map_value_f32(volume.algebraic_sub(masking), 0.0, range, 0.0, 1.0),
-                    );
+                    let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).min(map_value(
+                        volume.algebraic_sub(masking),
+                        0.0,
+                        range,
+                        0.0,
+                        1.0,
+                    ));
 
                     *output = color_table.calculate_index(pan, intensity);
                 }
@@ -525,7 +529,7 @@ fn draw_spectrogram_image(
             {
                 for ((pan, volume), output) in analysis_chunk.iter().copied().zip(buffer.iter_mut())
                 {
-                    let intensity = map_value_f32(volume, min_db, max_db, 0.0, 1.0);
+                    let intensity = map_value(volume, min_db, max_db, 0.0, 1.0);
                     *output = color_table.calculate_index(pan, intensity);
                 }
 
@@ -556,7 +560,7 @@ fn get_under_cursor(
     let frequency_count = frequencies.len() as f32;
 
     if bargraph_bounds.contains(cursor) {
-        let frequency = frequencies[map_value_f32(
+        let frequency = frequencies[map_value(
             cursor.x,
             bargraph_bounds.min.x,
             bargraph_bounds.max.x,
@@ -564,7 +568,7 @@ fn get_under_cursor(
             frequency_count,
         )
         .floor() as usize];
-        let amplitude = map_value_f32(
+        let amplitude = map_value(
             bargraph_bounds.max.y - cursor.y,
             bargraph_bounds.min.y,
             bargraph_bounds.max.y,
@@ -579,7 +583,7 @@ fn get_under_cursor(
             time: None,
         })
     } else if spectrogram_bounds.contains(cursor) {
-        let x = map_value_f32(
+        let x = map_value(
             cursor.x,
             spectrogram_bounds.min.x,
             spectrogram_bounds.max.x,
@@ -587,7 +591,7 @@ fn get_under_cursor(
             frequency_count,
         )
         .floor() as usize;
-        let y = map_value_f32(
+        let y = map_value(
             cursor.y,
             spectrogram_bounds.min.y,
             spectrogram_bounds.max.y,
@@ -613,7 +617,7 @@ fn get_under_cursor(
                 frequency,
                 amplitude,
                 pan: Some(pan),
-                time: Some(duration.mul_f64(y as f64)),
+                time: Some(duration.mul_f32(y as f32)),
             })
         } else {
             None
@@ -661,7 +665,7 @@ impl Default for RenderSettings {
             maximum_chroma: 0.09,
             automatic_gain: true,
             lookup_size: 4,
-            agc_duration: Duration::from_secs_f64(1.0),
+            agc_duration: Duration::from_secs_f32(1.0),
             agc_above_masking: 40.0,
             agc_below_masking: 0.0,
             agc_minimum: 3.0 - AnalysisChainConfig::default().listening_volume,
@@ -670,8 +674,8 @@ impl Default for RenderSettings {
             max_db: 80.0 - AnalysisChainConfig::default().listening_volume,
             clamp_using_smr: false,
             bargraph_height: 0.33,
-            spectrogram_duration: Duration::from_secs_f64(0.67),
-            bargraph_averaging: Duration::from_secs_f64(BASELINE_TARGET_FRAME_SECS),
+            spectrogram_duration: Duration::from_secs_f32(0.67),
+            bargraph_averaging: Duration::from_secs_f32(BASELINE_TARGET_FRAME_SECS),
             spectrogram_nearest_neighbor: false,
             show_performance: true,
             show_format: false,
@@ -719,27 +723,27 @@ impl ColorTable {
         };
 
         for split_index in 0..self.size.0 {
-            let split = map_value_f32(split_index as f32, 0.0, self.max.0, -1.0, 1.0);
+            let split = map_value(split_index as f32, 0.0, self.max.0, -1.0, 1.0);
             for intensity_index in 0..self.size.1 {
                 if intensity_index == 0 {
                     self.table[split_index * self.size.1] = (0, 0, 0);
                     continue;
                 }
 
-                let intensity = map_value_f32(intensity_index as f32, 0.0, self.max.1, 0.0, 1.0);
+                let intensity = map_value(intensity_index as f32, 0.0, self.max.1, 0.0, 1.0);
 
                 let mut color = if split >= 0.0 {
                     let mut color = right_color;
-                    color.components[1] = map_value_f32(split, 0.0, 1.0, 0.0, color.components[1]);
+                    color.components[1] = map_value(split, 0.0, 1.0, 0.0, color.components[1]);
                     color
                 } else {
                     let mut color = left_color;
-                    color.components[1] = map_value_f32(-split, 0.0, 1.0, 0.0, color.components[1]);
+                    color.components[1] = map_value(-split, 0.0, 1.0, 0.0, color.components[1]);
                     color
                 };
 
                 color.components[0] =
-                    map_value_f32(intensity, 0.0, 1.0, min_lightness, color.components[0]);
+                    map_value(intensity, 0.0, 1.0, min_lightness, color.components[0]);
 
                 let converted: Rgba8 = color.to_alpha_color::<Srgb>().to_rgba8();
 
@@ -750,10 +754,10 @@ impl ColorTable {
     }
     /*fn lookup(&self, split: f32, intensity: f32) -> Color32 {
         let location = (
-            map_value_f32(split, -1.0, 1.0, 0.0, self.max.0)
+            map_value(split, -1.0, 1.0, 0.0, self.max.0)
                 .round()
                 .clamp(0.0, self.max.0) as usize,
-            map_value_f32(intensity, 0.0, 1.0, 0.0, self.max.1)
+            map_value(intensity, 0.0, 1.0, 0.0, self.max.1)
                 .round()
                 .clamp(0.0, self.max.1) as usize,
         );
@@ -770,10 +774,10 @@ impl ColorTable {
     }*/
     fn calculate_index(&self, split: f32, intensity: f32) -> usize {
         let location = (
-            map_value_f32(split, -1.0, 1.0, 0.0, self.max.0)
+            map_value(split, -1.0, 1.0, 0.0, self.max.0)
                 .round()
                 .clamp(0.0, self.max.0) as usize,
-            map_value_f32(intensity, 0.0, 1.0, 0.0, self.max.1)
+            map_value(intensity, 0.0, 1.0, 0.0, self.max.1)
                 .round()
                 .clamp(0.0, self.max.1) as usize,
         );
@@ -795,8 +799,8 @@ struct SharedState {
     spectrogram_texture: Arc<RwLock<Option<TextureId>>>,
 }
 
-const BASELINE_TARGET_FPS: f64 = 60.0;
-const BASELINE_TARGET_FRAME_SECS: f64 = 1.0 / BASELINE_TARGET_FPS;
+const BASELINE_TARGET_FPS: f32 = 60.0;
+const BASELINE_TARGET_FRAME_SECS: f32 = 1.0 / BASELINE_TARGET_FPS;
 
 pub fn create(
     params: Arc<PluginParams>,
@@ -951,8 +955,8 @@ F: FnOnce(&Ui),*/
         let front = spectrogram.data.front().unwrap();
 
         let spectrogram_width = front.data.len();
-        let spectrogram_height = (settings.spectrogram_duration.as_secs_f64()
-            / front.duration.as_secs_f64())
+        let spectrogram_height = (settings.spectrogram_duration.as_secs_f32()
+            / front.duration.as_secs_f32())
         .round() as usize;
 
         *shared_state.last_size.lock() = (spectrogram_width, spectrogram_height);
@@ -1127,13 +1131,13 @@ F: FnOnce(&Ui),*/
                 format!(
                     "{:.0}hz, -{:.3}s\n{}, {:+.2} pan",
                     under.frequency.1,
-                    elapsed.as_secs_f64(),
+                    elapsed.as_secs_f32(),
                     amplitude_text,
                     pan
                 )
             } else {
                 let resolution = (1.0 / (under.frequency.2 - under.frequency.0)) * 1000.0;
-                let averaging = settings.bargraph_averaging.as_secs_f64() * 1000.0;
+                let averaging = settings.bargraph_averaging.as_secs_f32() * 1000.0;
 
                 if averaging > 0.0 {
                     format!(
@@ -1209,17 +1213,17 @@ F: FnOnce(&Ui),*/
 
             drop(frame_timing);
 
-            let buffering_secs = buffering_duration.as_secs_f64();
-            let rasterize_secs = rasterize_elapsed.as_secs_f64();
-            let chunk_secs = chunk_duration.as_secs_f64();
-            let frame_secs = frame_elapsed.as_secs_f64();
+            let buffering_secs = buffering_duration.as_secs_f32();
+            let rasterize_secs = rasterize_elapsed.as_secs_f32();
+            let chunk_secs = chunk_duration.as_secs_f32();
+            let frame_secs = frame_elapsed.as_secs_f32();
 
             /*let rasterize_processing_duration = rasterize_secs / (frame_secs / chunk_secs);
             let adjusted_processing_duration =
-                processing_duration.as_secs_f64() + rasterize_processing_duration;*/
+                processing_duration.as_secs_f32() + rasterize_processing_duration;*/
             let buffer_processing_duration = buffering_secs / (frame_secs / chunk_secs);
             let adjusted_processing_duration =
-                processing_duration.as_secs_f64() + buffer_processing_duration;
+                processing_duration.as_secs_f32() + buffer_processing_duration;
             let rasterize_proportion = rasterize_secs / frame_secs;
             let processing_proportion = adjusted_processing_duration / chunk_secs;
             let buffering_proportion = buffering_secs / frame_secs;
@@ -1280,10 +1284,10 @@ F: FnOnce(&Ui),*/
                     size: 12.0,
                     family: egui::FontFamily::Monospace,
                 },
-                if frame_elapsed >= Duration::from_secs_f64(1.0 / (BASELINE_TARGET_FPS * 0.5)) {
+                if frame_elapsed >= Duration::from_secs_f32(1.0 / (BASELINE_TARGET_FPS * 0.5)) {
                     Color32::RED
                 } else if frame_elapsed
-                    >= Duration::from_secs_f64(1.0 / (BASELINE_TARGET_FPS * 0.9))
+                    >= Duration::from_secs_f32(1.0 / (BASELINE_TARGET_FPS * 0.9))
                 {
                     Color32::YELLOW
                 } else {
@@ -1299,16 +1303,16 @@ F: FnOnce(&Ui),*/
                 format!(
                     "{:.0}% ({:.1}ms) rasterize",
                     rasterize_proportion * 100.0,
-                    rasterize_elapsed.as_secs_f64() * 1000.0,
+                    rasterize_elapsed.as_secs_f32() * 1000.0,
                 ),
                 FontId {
                     size: 12.0,
                     family: egui::FontFamily::Monospace,
                 },
-                if rasterize_elapsed >= Duration::from_secs_f64(BASELINE_TARGET_FRAME_SECS * 0.6) {
+                if rasterize_elapsed >= Duration::from_secs_f32(BASELINE_TARGET_FRAME_SECS * 0.6) {
                     Color32::RED
                 } else if rasterize_elapsed
-                    >= Duration::from_secs_f64(BASELINE_TARGET_FRAME_SECS * 0.3)
+                    >= Duration::from_secs_f32(BASELINE_TARGET_FRAME_SECS * 0.3)
                     || rasterize_proportion >= 0.6
                 {
                     Color32::YELLOW
