@@ -55,7 +55,6 @@ impl Default for BetterAnalyzerConfiguration {
     }
 }
 
-#[derive(Clone)]
 pub struct BetterAnalyzer {
     config: BetterAnalyzerConfiguration,
     transform: VQsDFT,

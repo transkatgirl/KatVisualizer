@@ -1,4 +1,4 @@
-use std::f64::consts::PI;
+use std::{cell::UnsafeCell, f64::consts::PI};
 
 use super::FrequencyBand;
 
@@ -15,9 +15,8 @@ pub enum Window {
     FlatTop,
 }
 
-#[derive(Clone)]
 pub(super) struct VQsDFT {
-    coeffs: VQsDFTCoeffWrapper,
+    coeffs: UnsafeCell<VQsDFTCoeffWrapper>,
     buffer: Vec<f64>,
     buffer_index: usize,
     pub(super) spectrum_data: Vec<f64>,
@@ -168,7 +167,7 @@ impl VQsDFT {
 
         VQsDFT {
             spectrum_data: vec![0.0; freq_bands.len()],
-            coeffs: if use_nc {
+            coeffs: UnsafeCell::new(if use_nc {
                 VQsDFTCoeffWrapper::NC(
                     freq_bands
                         .iter()
@@ -558,7 +557,7 @@ impl VQsDFT {
                         })
                         .collect(),
                 )
-            },
+            }),
             buffer: vec![0.0; buffer_size + 1],
             buffer_index: buffer_size,
         }
@@ -566,7 +565,7 @@ impl VQsDFT {
     pub(super) fn reset(&mut self) {
         self.buffer.fill(0.0);
         self.buffer_index = self.buffer.len() - 1;
-        match &mut self.coeffs {
+        match self.coeffs.get_mut() {
             VQsDFTCoeffWrapper::Rectangular(coeffs) => {
                 coeffs.iter_mut().for_each(|(_, coeff)| {
                     coeff.reset();
@@ -619,328 +618,36 @@ impl VQsDFT {
     pub(super) fn analyze(&mut self, samples: impl ExactSizeIterator<Item = f64>) -> &[f64] {
         self.spectrum_data.fill(0.0);
 
-        let buffer_len = self.buffer.len();
-        let buffer_len_int = buffer_len as isize;
-
         let sample_count = samples.len().max(1) as f64;
 
-        let spectrum_chunks = unsafe { self.spectrum_data.as_chunks_unchecked_mut::<64>() };
+        let ptr = self.coeffs.get();
+        let coeffs = unsafe { &mut *ptr };
 
-        match &mut self.coeffs {
+        match coeffs {
             VQsDFTCoeffWrapper::NC(coeffs) => {
-                let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
-
-                for sample in samples {
-                    self.buffer_index =
-                        (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
-                    let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
-                    *latest = sample;
-                    let latest = sample;
-
-                    for (coeff_chunk, spectrum_chunk) in
-                        coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
-                    {
-                        for ((period, coeffs), spectrum_data) in
-                            coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
-                        {
-                            let period = *period;
-
-                            let oldest = unsafe {
-                                *self.buffer.get_unchecked(
-                                    (((self.buffer_index as isize - period) % buffer_len_int)
-                                        + buffer_len_int)
-                                        as usize
-                                        % buffer_len,
-                                )
-                            };
-
-                            let left_result = coeffs[0].calculate(latest, oldest);
-                            let right_result = coeffs[1].calculate(latest, oldest);
-
-                            *spectrum_data = spectrum_data.algebraic_add(
-                                left_result
-                                    .0
-                                    .algebraic_mul(right_result.0)
-                                    .algebraic_add(left_result.1.algebraic_mul(right_result.1))
-                                    .algebraic_mul(-1.0)
-                                    .max(0.0)
-                                    .sqrt(),
-                            );
-                        }
-                    }
-                }
+                self.analyze_nc(samples, coeffs);
             }
             VQsDFTCoeffWrapper::Rectangular(coeffs) => {
-                let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
-
-                for sample in samples {
-                    self.buffer_index =
-                        (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
-                    let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
-                    *latest = sample;
-                    let latest = sample;
-
-                    for (coeff_chunk, spectrum_chunk) in
-                        coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
-                    {
-                        for ((period, coeffs), spectrum_data) in
-                            coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
-                        {
-                            let period = *period;
-
-                            let oldest = unsafe {
-                                *self.buffer.get_unchecked(
-                                    (((self.buffer_index as isize - period) % buffer_len_int)
-                                        + buffer_len_int)
-                                        as usize
-                                        % buffer_len,
-                                )
-                            };
-
-                            let result = coeffs.calculate(latest, oldest);
-
-                            *spectrum_data = spectrum_data.algebraic_add(
-                                result
-                                    .0
-                                    .algebraic_mul(result.0)
-                                    .algebraic_add(result.1.algebraic_mul(result.1))
-                                    .sqrt(),
-                            );
-                        }
-                    }
-                }
+                self.analyze_rect(samples, coeffs);
             }
             VQsDFTCoeffWrapper::Window2Term(coeffs) => {
-                let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
-
-                for sample in samples {
-                    self.buffer_index =
-                        (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
-                    let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
-                    *latest = sample;
-                    let latest = sample;
-
-                    for (coeff_chunk, spectrum_chunk) in
-                        coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
-                    {
-                        for ((period, coeffs), spectrum_data) in
-                            coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
-                        {
-                            let period = *period;
-
-                            let oldest = unsafe {
-                                *self.buffer.get_unchecked(
-                                    (((self.buffer_index as isize - period) % buffer_len_int)
-                                        + buffer_len_int)
-                                        as usize
-                                        % buffer_len,
-                                )
-                            };
-
-                            let mut sum: (f64, f64) = (0.0, 0.0);
-
-                            for coeff in coeffs {
-                                let result = coeff.calculate(latest, oldest);
-
-                                sum.0 = sum.0.algebraic_add(result.0);
-                                sum.1 = sum.1.algebraic_add(result.1);
-                            }
-
-                            *spectrum_data = spectrum_data.algebraic_add(
-                                sum.0
-                                    .algebraic_mul(sum.0)
-                                    .algebraic_add(sum.1.algebraic_mul(sum.1))
-                                    .sqrt(),
-                            );
-                        }
-                    }
-                }
+                self.analyze_window_2(samples, coeffs);
             }
             VQsDFTCoeffWrapper::Window3Term(coeffs) => {
-                let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
-
-                for sample in samples {
-                    self.buffer_index =
-                        (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
-                    let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
-                    *latest = sample;
-                    let latest = sample;
-
-                    for (coeff_chunk, spectrum_chunk) in
-                        coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
-                    {
-                        for ((period, coeffs), spectrum_data) in
-                            coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
-                        {
-                            let period = *period;
-
-                            let oldest = unsafe {
-                                *self.buffer.get_unchecked(
-                                    (((self.buffer_index as isize - period) % buffer_len_int)
-                                        + buffer_len_int)
-                                        as usize
-                                        % buffer_len,
-                                )
-                            };
-
-                            let mut sum: (f64, f64) = (0.0, 0.0);
-
-                            for coeff in coeffs {
-                                let result = coeff.calculate(latest, oldest);
-
-                                sum.0 = sum.0.algebraic_add(result.0);
-                                sum.1 = sum.1.algebraic_add(result.1);
-                            }
-
-                            *spectrum_data = spectrum_data.algebraic_add(
-                                sum.0
-                                    .algebraic_mul(sum.0)
-                                    .algebraic_add(sum.1.algebraic_mul(sum.1))
-                                    .sqrt(),
-                            );
-                        }
-                    }
-                }
+                self.analyze_window_3(samples, coeffs);
             }
             VQsDFTCoeffWrapper::Window4Term(coeffs) => {
-                let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
-
-                for sample in samples {
-                    self.buffer_index =
-                        (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
-                    let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
-                    *latest = sample;
-                    let latest = sample;
-
-                    for (coeff_chunk, spectrum_chunk) in
-                        coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
-                    {
-                        for ((period, coeffs), spectrum_data) in
-                            coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
-                        {
-                            let period = *period;
-
-                            let oldest = unsafe {
-                                *self.buffer.get_unchecked(
-                                    (((self.buffer_index as isize - period) % buffer_len_int)
-                                        + buffer_len_int)
-                                        as usize
-                                        % buffer_len,
-                                )
-                            };
-
-                            let mut sum: (f64, f64) = (0.0, 0.0);
-
-                            for coeff in coeffs {
-                                let result = coeff.calculate(latest, oldest);
-
-                                sum.0 = sum.0.algebraic_add(result.0);
-                                sum.1 = sum.1.algebraic_add(result.1);
-                            }
-
-                            *spectrum_data = spectrum_data.algebraic_add(
-                                sum.0
-                                    .algebraic_mul(sum.0)
-                                    .algebraic_add(sum.1.algebraic_mul(sum.1))
-                                    .sqrt(),
-                            );
-                        }
-                    }
-                }
+                self.analyze_window_4(samples, coeffs);
             }
             VQsDFTCoeffWrapper::Window5Term(coeffs) => {
-                let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
-
-                for sample in samples {
-                    self.buffer_index =
-                        (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
-                    let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
-                    *latest = sample;
-                    let latest = sample;
-
-                    for (coeff_chunk, spectrum_chunk) in
-                        coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
-                    {
-                        for ((period, coeffs), spectrum_data) in
-                            coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
-                        {
-                            let period = *period;
-
-                            let oldest = unsafe {
-                                *self.buffer.get_unchecked(
-                                    (((self.buffer_index as isize - period) % buffer_len_int)
-                                        + buffer_len_int)
-                                        as usize
-                                        % buffer_len,
-                                )
-                            };
-
-                            let mut sum: (f64, f64) = (0.0, 0.0);
-
-                            for coeff in coeffs {
-                                let result = coeff.calculate(latest, oldest);
-
-                                sum.0 = sum.0.algebraic_add(result.0);
-                                sum.1 = sum.1.algebraic_add(result.1);
-                            }
-
-                            *spectrum_data = spectrum_data.algebraic_add(
-                                sum.0
-                                    .algebraic_mul(sum.0)
-                                    .algebraic_add(sum.1.algebraic_mul(sum.1))
-                                    .sqrt(),
-                            );
-                        }
-                    }
-                }
+                self.analyze_window_5(samples, coeffs);
             }
             VQsDFTCoeffWrapper::ArbitraryWindow(coeffs) => {
-                let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
-
-                for sample in samples {
-                    self.buffer_index =
-                        (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
-                    let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
-                    *latest = sample;
-                    let latest = sample;
-
-                    for (coeff_chunk, spectrum_chunk) in
-                        coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
-                    {
-                        for ((period, coeffs), spectrum_data) in
-                            coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
-                        {
-                            let period = *period;
-
-                            let oldest = unsafe {
-                                *self.buffer.get_unchecked(
-                                    (((self.buffer_index as isize - period) % buffer_len_int)
-                                        + buffer_len_int)
-                                        as usize
-                                        % buffer_len,
-                                )
-                            };
-
-                            let mut sum: (f64, f64) = (0.0, 0.0);
-
-                            for coeff in coeffs {
-                                let result = coeff.calculate(latest, oldest);
-
-                                sum.0 = sum.0.algebraic_add(result.0);
-                                sum.1 = sum.1.algebraic_add(result.1);
-                            }
-
-                            *spectrum_data = spectrum_data.algebraic_add(
-                                sum.0
-                                    .algebraic_mul(sum.0)
-                                    .algebraic_add(sum.1.algebraic_mul(sum.1))
-                                    .sqrt(),
-                            );
-                        }
-                    }
-                }
+                self.analyze_arbitrary(samples, coeffs);
             }
         }
+
+        let spectrum_chunks = unsafe { self.spectrum_data.as_chunks_unchecked_mut::<64>() };
 
         spectrum_chunks.iter_mut().for_each(|chunk| {
             chunk.iter_mut().for_each(|s| {
@@ -949,5 +656,360 @@ impl VQsDFT {
         });
 
         &self.spectrum_data
+    }
+    fn analyze_nc(
+        &mut self,
+        samples: impl ExactSizeIterator<Item = f64>,
+        coeffs: &mut [(isize, [VQsDFTCoeffSet; 2])],
+    ) {
+        let buffer_len = self.buffer.len();
+        let buffer_len_int = buffer_len as isize;
+
+        let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
+        let spectrum_chunks = unsafe { self.spectrum_data.as_chunks_unchecked_mut::<64>() };
+
+        for sample in samples {
+            self.buffer_index = (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
+            let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
+            *latest = sample;
+            let latest = sample;
+
+            for (coeff_chunk, spectrum_chunk) in
+                coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
+            {
+                for ((period, coeffs), spectrum_data) in
+                    coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
+                {
+                    let period = *period;
+
+                    let oldest = unsafe {
+                        *self.buffer.get_unchecked(
+                            (((self.buffer_index as isize - period) % buffer_len_int)
+                                + buffer_len_int) as usize
+                                % buffer_len,
+                        )
+                    };
+
+                    let left_result = coeffs[0].calculate(latest, oldest);
+                    let right_result = coeffs[1].calculate(latest, oldest);
+
+                    *spectrum_data = spectrum_data.algebraic_add(
+                        left_result
+                            .0
+                            .algebraic_mul(right_result.0)
+                            .algebraic_add(left_result.1.algebraic_mul(right_result.1))
+                            .algebraic_mul(-1.0)
+                            .max(0.0)
+                            .sqrt(),
+                    );
+                }
+            }
+        }
+    }
+    fn analyze_rect(
+        &mut self,
+        samples: impl ExactSizeIterator<Item = f64>,
+        coeffs: &mut [(isize, VQsDFTCoeffSet)],
+    ) {
+        let buffer_len = self.buffer.len();
+        let buffer_len_int = buffer_len as isize;
+
+        let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
+        let spectrum_chunks = unsafe { self.spectrum_data.as_chunks_unchecked_mut::<64>() };
+
+        for sample in samples {
+            self.buffer_index = (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
+            let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
+            *latest = sample;
+            let latest = sample;
+
+            for (coeff_chunk, spectrum_chunk) in
+                coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
+            {
+                for ((period, coeffs), spectrum_data) in
+                    coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
+                {
+                    let period = *period;
+
+                    let oldest = unsafe {
+                        *self.buffer.get_unchecked(
+                            (((self.buffer_index as isize - period) % buffer_len_int)
+                                + buffer_len_int) as usize
+                                % buffer_len,
+                        )
+                    };
+
+                    let result = coeffs.calculate(latest, oldest);
+
+                    *spectrum_data = spectrum_data.algebraic_add(
+                        result
+                            .0
+                            .algebraic_mul(result.0)
+                            .algebraic_add(result.1.algebraic_mul(result.1))
+                            .sqrt(),
+                    );
+                }
+            }
+        }
+    }
+    fn analyze_window_2(
+        &mut self,
+        samples: impl ExactSizeIterator<Item = f64>,
+        coeffs: &mut [(isize, [VQsDFTCoeffSet; 3])],
+    ) {
+        let buffer_len = self.buffer.len();
+        let buffer_len_int = buffer_len as isize;
+
+        let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
+        let spectrum_chunks = unsafe { self.spectrum_data.as_chunks_unchecked_mut::<64>() };
+
+        for sample in samples {
+            self.buffer_index = (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
+            let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
+            *latest = sample;
+            let latest = sample;
+
+            for (coeff_chunk, spectrum_chunk) in
+                coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
+            {
+                for ((period, coeffs), spectrum_data) in
+                    coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
+                {
+                    let period = *period;
+
+                    let oldest = unsafe {
+                        *self.buffer.get_unchecked(
+                            (((self.buffer_index as isize - period) % buffer_len_int)
+                                + buffer_len_int) as usize
+                                % buffer_len,
+                        )
+                    };
+
+                    let mut sum: (f64, f64) = (0.0, 0.0);
+
+                    for coeff in coeffs {
+                        let result = coeff.calculate(latest, oldest);
+
+                        sum.0 = sum.0.algebraic_add(result.0);
+                        sum.1 = sum.1.algebraic_add(result.1);
+                    }
+
+                    *spectrum_data = spectrum_data.algebraic_add(
+                        sum.0
+                            .algebraic_mul(sum.0)
+                            .algebraic_add(sum.1.algebraic_mul(sum.1))
+                            .sqrt(),
+                    );
+                }
+            }
+        }
+    }
+    fn analyze_window_3(
+        &mut self,
+        samples: impl ExactSizeIterator<Item = f64>,
+        coeffs: &mut [(isize, [VQsDFTCoeffSet; 5])],
+    ) {
+        let buffer_len = self.buffer.len();
+        let buffer_len_int = buffer_len as isize;
+
+        let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
+        let spectrum_chunks = unsafe { self.spectrum_data.as_chunks_unchecked_mut::<64>() };
+
+        for sample in samples {
+            self.buffer_index = (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
+            let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
+            *latest = sample;
+            let latest = sample;
+
+            for (coeff_chunk, spectrum_chunk) in
+                coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
+            {
+                for ((period, coeffs), spectrum_data) in
+                    coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
+                {
+                    let period = *period;
+
+                    let oldest = unsafe {
+                        *self.buffer.get_unchecked(
+                            (((self.buffer_index as isize - period) % buffer_len_int)
+                                + buffer_len_int) as usize
+                                % buffer_len,
+                        )
+                    };
+
+                    let mut sum: (f64, f64) = (0.0, 0.0);
+
+                    for coeff in coeffs {
+                        let result = coeff.calculate(latest, oldest);
+
+                        sum.0 = sum.0.algebraic_add(result.0);
+                        sum.1 = sum.1.algebraic_add(result.1);
+                    }
+
+                    *spectrum_data = spectrum_data.algebraic_add(
+                        sum.0
+                            .algebraic_mul(sum.0)
+                            .algebraic_add(sum.1.algebraic_mul(sum.1))
+                            .sqrt(),
+                    );
+                }
+            }
+        }
+    }
+    fn analyze_window_4(
+        &mut self,
+        samples: impl ExactSizeIterator<Item = f64>,
+        coeffs: &mut [(isize, [VQsDFTCoeffSet; 7])],
+    ) {
+        let buffer_len = self.buffer.len();
+        let buffer_len_int = buffer_len as isize;
+
+        let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
+        let spectrum_chunks = unsafe { self.spectrum_data.as_chunks_unchecked_mut::<64>() };
+
+        for sample in samples {
+            self.buffer_index = (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
+            let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
+            *latest = sample;
+            let latest = sample;
+
+            for (coeff_chunk, spectrum_chunk) in
+                coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
+            {
+                for ((period, coeffs), spectrum_data) in
+                    coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
+                {
+                    let period = *period;
+
+                    let oldest = unsafe {
+                        *self.buffer.get_unchecked(
+                            (((self.buffer_index as isize - period) % buffer_len_int)
+                                + buffer_len_int) as usize
+                                % buffer_len,
+                        )
+                    };
+
+                    let mut sum: (f64, f64) = (0.0, 0.0);
+
+                    for coeff in coeffs {
+                        let result = coeff.calculate(latest, oldest);
+
+                        sum.0 = sum.0.algebraic_add(result.0);
+                        sum.1 = sum.1.algebraic_add(result.1);
+                    }
+
+                    *spectrum_data = spectrum_data.algebraic_add(
+                        sum.0
+                            .algebraic_mul(sum.0)
+                            .algebraic_add(sum.1.algebraic_mul(sum.1))
+                            .sqrt(),
+                    );
+                }
+            }
+        }
+    }
+    fn analyze_window_5(
+        &mut self,
+        samples: impl ExactSizeIterator<Item = f64>,
+        coeffs: &mut [(isize, [VQsDFTCoeffSet; 9])],
+    ) {
+        let buffer_len = self.buffer.len();
+        let buffer_len_int = buffer_len as isize;
+
+        let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
+        let spectrum_chunks = unsafe { self.spectrum_data.as_chunks_unchecked_mut::<64>() };
+
+        for sample in samples {
+            self.buffer_index = (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
+            let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
+            *latest = sample;
+            let latest = sample;
+
+            for (coeff_chunk, spectrum_chunk) in
+                coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
+            {
+                for ((period, coeffs), spectrum_data) in
+                    coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
+                {
+                    let period = *period;
+
+                    let oldest = unsafe {
+                        *self.buffer.get_unchecked(
+                            (((self.buffer_index as isize - period) % buffer_len_int)
+                                + buffer_len_int) as usize
+                                % buffer_len,
+                        )
+                    };
+
+                    let mut sum: (f64, f64) = (0.0, 0.0);
+
+                    for coeff in coeffs {
+                        let result = coeff.calculate(latest, oldest);
+
+                        sum.0 = sum.0.algebraic_add(result.0);
+                        sum.1 = sum.1.algebraic_add(result.1);
+                    }
+
+                    *spectrum_data = spectrum_data.algebraic_add(
+                        sum.0
+                            .algebraic_mul(sum.0)
+                            .algebraic_add(sum.1.algebraic_mul(sum.1))
+                            .sqrt(),
+                    );
+                }
+            }
+        }
+    }
+    fn analyze_arbitrary(
+        &mut self,
+        samples: impl ExactSizeIterator<Item = f64>,
+        coeffs: &mut [(isize, Vec<VQsDFTCoeffSet>)],
+    ) {
+        let buffer_len = self.buffer.len();
+        let buffer_len_int = buffer_len as isize;
+
+        let coeff_chunks = unsafe { coeffs.as_chunks_unchecked_mut::<64>() };
+        let spectrum_chunks = unsafe { self.spectrum_data.as_chunks_unchecked_mut::<64>() };
+
+        for sample in samples {
+            self.buffer_index = (((self.buffer_index + 1) % buffer_len) + buffer_len) % buffer_len;
+            let latest = unsafe { self.buffer.get_unchecked_mut(self.buffer_index) };
+            *latest = sample;
+            let latest = sample;
+
+            for (coeff_chunk, spectrum_chunk) in
+                coeff_chunks.iter_mut().zip(spectrum_chunks.iter_mut())
+            {
+                for ((period, coeffs), spectrum_data) in
+                    coeff_chunk.iter_mut().zip(spectrum_chunk.iter_mut())
+                {
+                    let period = *period;
+
+                    let oldest = unsafe {
+                        *self.buffer.get_unchecked(
+                            (((self.buffer_index as isize - period) % buffer_len_int)
+                                + buffer_len_int) as usize
+                                % buffer_len,
+                        )
+                    };
+
+                    let mut sum: (f64, f64) = (0.0, 0.0);
+
+                    for coeff in coeffs {
+                        let result = coeff.calculate(latest, oldest);
+
+                        sum.0 = sum.0.algebraic_add(result.0);
+                        sum.1 = sum.1.algebraic_add(result.1);
+                    }
+
+                    *spectrum_data = spectrum_data.algebraic_add(
+                        sum.0
+                            .algebraic_mul(sum.0)
+                            .algebraic_add(sum.1.algebraic_mul(sum.1))
+                            .sqrt(),
+                    );
+                }
+            }
+        }
     }
 }

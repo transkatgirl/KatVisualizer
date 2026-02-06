@@ -450,7 +450,7 @@ impl AnalysisChain {
         layout: &AudioIOLayout,
         frequency_list_container: Arc<RwLock<Vec<(f32, f32, f32)>>>,
     ) -> Self {
-        let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
+        let analyzer_config = BetterAnalyzerConfiguration {
             resolution: config.resolution,
             start_frequency: config.start_frequency,
             end_frequency: config.end_frequency,
@@ -464,7 +464,10 @@ impl AnalysisChain {
             strict_nc: config.strict_nc,
             masking: config.masking,
             approximate_masking: config.approximate_masking,
-        });
+        };
+
+        let left_analyzer = BetterAnalyzer::new(analyzer_config.clone());
+        let right_analyzer = BetterAnalyzer::new(analyzer_config);
 
         let mut chunker = StftHelper::new(2, sample_rate.ceil() as usize, 0);
         let chunk_size = (sample_rate as f64 / config.update_rate_hz).round() as usize;
@@ -473,7 +476,12 @@ impl AnalysisChain {
         {
             let mut frequencies = frequency_list_container.write();
             frequencies.clear();
-            frequencies.extend(analyzer.frequencies().iter().map(|(a, b, c)| (*a, *b, *c)));
+            frequencies.extend(
+                left_analyzer
+                    .frequencies()
+                    .iter()
+                    .map(|(a, b, c)| (*a, *b, *c)),
+            );
         }
 
         Self {
@@ -499,8 +507,8 @@ impl AnalysisChain {
             additional_latency: config.latency_offset,
             chunker,
             frequencies: frequency_list_container,
-            left_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], analyzer.clone()))),
-            right_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], analyzer))),
+            left_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], left_analyzer))),
+            right_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], right_analyzer))),
             gain: config.gain,
             update_rate: config.update_rate_hz,
             listening_volume: if config.normalize_amplitude {
@@ -1050,7 +1058,7 @@ impl AnalysisChain {
             || old_analyzer_config.masking != config.masking
             || old_analyzer_config.approximate_masking != config.approximate_masking
         {
-            let analyzer = BetterAnalyzer::new(BetterAnalyzerConfiguration {
+            let analyzer_config = BetterAnalyzerConfiguration {
                 resolution: config.resolution,
                 start_frequency: config.start_frequency,
                 end_frequency: config.end_frequency,
@@ -1064,16 +1072,23 @@ impl AnalysisChain {
                 strict_nc: config.strict_nc,
                 masking: config.masking,
                 approximate_masking: config.approximate_masking,
-            });
+            };
             drop(old_left_analyzer);
+            let left_analyzer = BetterAnalyzer::new(analyzer_config.clone());
+            let right_analyzer = BetterAnalyzer::new(analyzer_config);
 
             let mut frequencies = self.frequencies.write();
             frequencies.clear();
-            frequencies.extend(analyzer.frequencies().iter().map(|(a, b, c)| (*a, *b, *c)));
+            frequencies.extend(
+                left_analyzer
+                    .frequencies()
+                    .iter()
+                    .map(|(a, b, c)| (*a, *b, *c)),
+            );
 
-            self.left_analyzer =
-                Arc::new(Mutex::new((vec![0.0; self.chunk_size], analyzer.clone())));
-            self.right_analyzer = Arc::new(Mutex::new((vec![0.0; self.chunk_size], analyzer)));
+            self.left_analyzer = Arc::new(Mutex::new((vec![0.0; self.chunk_size], left_analyzer)));
+            self.right_analyzer =
+                Arc::new(Mutex::new((vec![0.0; self.chunk_size], right_analyzer)));
         } else if self.update_rate != config.update_rate_hz
             || self.internal_buffering != config.internal_buffering
         {
