@@ -1,9 +1,13 @@
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::sync::Arc;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{Duration, Instant};
+
+#[cfg(target_arch = "wasm32")]
+use web_time::{Duration, Instant};
 
 use parking_lot::{FairMutex, Mutex, RwLock};
+#[cfg(not(target_arch = "wasm32"))]
 use threadpool::ThreadPool;
 
 use crate::{
@@ -45,11 +49,20 @@ impl Default for AnalysisChainConfig {
             listening_volume: 90.0,
             normalize_amplitude: true,
             masking: true,
+            #[cfg(not(target_arch = "wasm32"))]
             approximate_masking: false,
+            #[cfg(target_arch = "wasm32")]
+            approximate_masking: true,
             internal_buffering: true,
             strict_synchronization: true,
+            #[cfg(not(target_arch = "wasm32"))]
             update_rate_hz: 2048.0,
+            #[cfg(target_arch = "wasm32")]
+            update_rate_hz: 256.0,
+            #[cfg(not(target_arch = "wasm32"))]
             resolution: 1024,
+            #[cfg(target_arch = "wasm32")]
+            resolution: 448,
             latency_offset: Duration::ZERO,
 
             start_frequency: BetterAnalyzerConfiguration::default().start_frequency,
@@ -82,6 +95,7 @@ pub(crate) struct AnalysisChain {
     chunk_size: usize,
     chunk_duration: Duration,
     single_input: bool,
+    #[cfg(not(target_arch = "wasm32"))]
     analyzer_pool: ThreadPool,
     pub(crate) frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
 }
@@ -152,6 +166,7 @@ impl AnalysisChain {
             chunk_size,
             chunk_duration: Duration::from_secs_f64(chunk_size as f64 / sample_rate as f64),
             single_input,
+            #[cfg(not(target_arch = "wasm32"))]
             analyzer_pool: ThreadPool::new(2),
         }
     }
@@ -186,27 +201,54 @@ impl AnalysisChain {
 
                 analyzer.analyze(buffer.iter().copied(), self.listening_volume);
             } else {
-                let analyzer = if channel_idx == 0 {
-                    self.left_analyzer.clone()
-                } else {
-                    self.right_analyzer.clone()
-                };
-                let listening_volume = self.listening_volume;
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let analyzer = if channel_idx == 0 {
+                        self.left_analyzer.clone()
+                    } else {
+                        self.right_analyzer.clone()
+                    };
+                    let listening_volume = self.listening_volume;
 
-                analyzer.lock().0.copy_from_slice(buffer);
+                    {
+                        let mut analyzer = analyzer.lock();
+                        if buffer.len() == analyzer.0.len() {
+                            analyzer.0.copy_from_slice(buffer);
+                        } else {
+                            analyzer.0.clear();
+                            analyzer.0.extend_from_slice(buffer);
+                        }
+                    }
 
-                self.analyzer_pool.execute(move || {
-                    let mut lock = analyzer.lock();
-                    let (ref mut buffer, ref mut analyzer) = *lock;
+                    analyzer.lock().0.copy_from_slice(buffer);
 
-                    analyzer.analyze(buffer.iter().copied(), listening_volume);
-                });
+                    self.analyzer_pool.execute(move || {
+                        let mut lock = analyzer.lock();
+                        let (ref mut buffer, ref mut analyzer) = *lock;
+
+                        analyzer.analyze(buffer.iter().copied(), listening_volume);
+                    });
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let mut lock = if channel_idx == 0 {
+                        self.left_analyzer.lock()
+                    } else {
+                        self.right_analyzer.lock()
+                    };
+                    let (ref _buffer, ref mut analyzer) = *lock;
+
+                    analyzer.analyze(buffer.iter().copied(), self.listening_volume);
+                }
             }
 
             if channel_idx == 1 || (channel_idx == 0 && self.single_input) {
                 let (ref mut spectrogram, ref mut metrics) = *output.lock();
 
+                #[cfg(not(target_arch = "wasm32"))]
                 self.analyzer_pool.join();
+
                 let left_lock = self.left_analyzer.lock();
                 let right_lock = self.right_analyzer.lock();
                 let left_analyzer = &left_lock.1;
@@ -239,6 +281,7 @@ impl AnalysisChain {
             }
         };
 
+        #[cfg(not(target_arch = "wasm32"))]
         if self.strict_synchronization {
             self.chunker
                 .process_overlap_add(buffer, 1, |channel_idx, buffer| {
@@ -250,6 +293,12 @@ impl AnalysisChain {
                     callback(channel_idx, buffer);
                 });
         }
+
+        #[cfg(target_arch = "wasm32")]
+        self.chunker
+            .process_analyze_only(buffer, 1, |channel_idx, buffer| {
+                callback(channel_idx, buffer);
+            });
     }
     fn analyze_unbuffered(
         &mut self,
@@ -258,6 +307,7 @@ impl AnalysisChain {
     ) {
         let finished = Instant::now();
 
+        #[cfg(not(target_arch = "wasm32"))]
         if self.single_input {
             let mut lock = self.left_analyzer.lock();
             let (ref _buffer, ref mut analyzer) = *lock;
@@ -265,30 +315,45 @@ impl AnalysisChain {
             analyzer.analyze(buffer[0].iter().copied(), self.listening_volume);
         } else {
             for (channel_idx, buffer) in buffer.iter().enumerate() {
-                let analyzer = if channel_idx == 0 {
-                    self.left_analyzer.clone()
-                } else {
-                    self.right_analyzer.clone()
-                };
-
+                #[cfg(not(target_arch = "wasm32"))]
                 {
-                    let mut analyzer = analyzer.lock();
-                    if buffer.len() == analyzer.0.len() {
-                        analyzer.0.copy_from_slice(buffer);
+                    let analyzer = if channel_idx == 0 {
+                        self.left_analyzer.clone()
                     } else {
-                        analyzer.0.clear();
-                        analyzer.0.extend_from_slice(buffer);
+                        self.right_analyzer.clone()
+                    };
+
+                    {
+                        let mut analyzer = analyzer.lock();
+                        if buffer.len() == analyzer.0.len() {
+                            analyzer.0.copy_from_slice(buffer);
+                        } else {
+                            analyzer.0.clear();
+                            analyzer.0.extend_from_slice(buffer);
+                        }
                     }
+
+                    let listening_volume = self.listening_volume;
+
+                    self.analyzer_pool.execute(move || {
+                        let mut lock = analyzer.lock();
+                        let (ref mut buffer, ref mut analyzer) = *lock;
+
+                        analyzer.analyze(buffer.iter().copied(), listening_volume);
+                    });
                 }
 
-                let listening_volume = self.listening_volume;
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let mut lock = if channel_idx == 0 {
+                        self.left_analyzer.lock()
+                    } else {
+                        self.right_analyzer.lock()
+                    };
+                    let (ref _buffer, ref mut analyzer) = *lock;
 
-                self.analyzer_pool.execute(move || {
-                    let mut lock = analyzer.lock();
-                    let (ref mut buffer, ref mut analyzer) = *lock;
-
-                    analyzer.analyze(buffer.iter().copied(), listening_volume);
-                });
+                    analyzer.analyze(buffer.iter().copied(), self.listening_volume);
+                }
             }
         }
 
@@ -299,7 +364,9 @@ impl AnalysisChain {
 
         let (left_ref, right_ref) = (self.left_analyzer.clone(), self.right_analyzer.clone());
 
+        #[cfg(not(target_arch = "wasm32"))]
         self.analyzer_pool.join();
+
         let mut left_lock = left_ref.lock();
         let mut right_lock = right_ref.lock();
         let left_analyzer = &mut left_lock.1;

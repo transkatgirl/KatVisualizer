@@ -2,7 +2,15 @@
 #![allow(clippy::collapsible_else_if)]
 
 use color::{ColorSpaceTag, DynamicColor, Flags, Rgba8, Srgb};
+#[cfg(target_arch = "wasm32")]
+use eframe::egui::{
+    self, Align2, Color32, ColorImage, Context, FontId, ImageData, Mesh, Pos2, Rect, Shape,
+    TextureId, TextureOptions, ThemePreference, Vec2,
+    epaint::{ImageDelta, Vertex, WHITE_UV},
+};
+#[cfg(not(target_arch = "wasm32"))]
 use nih_plug::editor::Editor;
+#[cfg(not(target_arch = "wasm32"))]
 use nih_plug_egui::{
     EguiSettings, GlConfig, GraphicsConfig, create_egui_editor,
     egui::{
@@ -12,14 +20,20 @@ use nih_plug_egui::{
     },
 };
 use parking_lot::{FairMutex, Mutex, RwLock};
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::sync::Arc;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{Duration, Instant};
+
+#[cfg(target_arch = "wasm32")]
+use web_time::{Duration, Instant};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::PluginParams;
 
 use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, AudioState, MAX_FREQUENCY_BINS,
-    PluginParams, SPECTROGRAM_SLICES,
+    SPECTROGRAM_SLICES,
     analyzer::{BetterSpectrogram, FrequencyScale, map_value},
 };
 
@@ -557,7 +571,7 @@ fn get_under_cursor(
     (bargraph_max_db, bargraph_min_db): (f32, f32),
     spectrogram_height: usize,
 ) -> Option<UnderCursor> {
-    let frequency_count = frequencies.len() as f32;
+    let max_frequency = (frequencies.len() - 1) as f32;
 
     if bargraph_bounds.contains(cursor) {
         let frequency = frequencies[map_value(
@@ -565,7 +579,7 @@ fn get_under_cursor(
             bargraph_bounds.min.x,
             bargraph_bounds.max.x,
             0.0,
-            frequency_count,
+            max_frequency,
         )
         .floor() as usize];
         let amplitude = map_value(
@@ -588,7 +602,7 @@ fn get_under_cursor(
             spectrogram_bounds.min.x,
             spectrogram_bounds.max.x,
             0.0,
-            frequency_count,
+            max_frequency,
         )
         .floor() as usize;
         let y = map_value(
@@ -596,7 +610,7 @@ fn get_under_cursor(
             spectrogram_bounds.min.y,
             spectrogram_bounds.max.y,
             0.0,
-            spectrogram_height as f32,
+            (spectrogram_height - 1) as f32,
         )
         .floor() as usize;
 
@@ -664,7 +678,10 @@ impl Default for RenderSettings {
             maximum_lightness: 0.82,
             maximum_chroma: 0.09,
             automatic_gain: true,
+            #[cfg(not(target_arch = "wasm32"))]
             lookup_size: 4,
+            #[cfg(target_arch = "wasm32")]
+            lookup_size: 2,
             agc_duration: Duration::from_secs_f32(1.0),
             agc_above_masking: 40.0,
             agc_below_masking: 0.0,
@@ -676,7 +693,10 @@ impl Default for RenderSettings {
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f32(0.67),
             bargraph_averaging: Duration::from_secs_f32(BASELINE_TARGET_FRAME_SECS),
+            #[cfg(not(target_arch = "wasm32"))]
             spectrogram_nearest_neighbor: false,
+            #[cfg(target_arch = "wasm32")]
+            spectrogram_nearest_neighbor: true,
             show_performance: true,
             show_format: false,
             show_hover: true,
@@ -790,28 +810,17 @@ impl ColorTable {
     }
 }
 
-struct SharedState {
+pub(crate) struct SharedState {
     settings: RwLock<RenderSettings>,
     last_size: Mutex<(usize, usize)>,
     frame_timing: Mutex<(Instant, Duration, Duration)>,
     color_table: RwLock<ColorTable>,
     cached_analysis_settings: Mutex<AnalysisChainConfig>,
-    spectrogram_texture: Arc<RwLock<Option<TextureId>>>,
+    pub(crate) spectrogram_texture: Arc<RwLock<Option<TextureId>>>,
 }
 
-const BASELINE_TARGET_FPS: f32 = 60.0;
-const BASELINE_TARGET_FRAME_SECS: f32 = 1.0 / BASELINE_TARGET_FPS;
-
-pub fn create(
-    params: Arc<PluginParams>,
-    analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
-    analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
-    analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
-    audio_state: Arc<RwLock<Option<AudioState>>>,
-) -> Option<Box<dyn Editor>> {
-    let egui_state = params.editor_state.clone();
-
-    let shared_state = {
+impl SharedState {
+    pub(crate) fn new() -> Self {
         let settings = RenderSettings::default();
         let mut color_table = ColorTable::new(
             COLOR_TABLE_BASE_CHROMA_SIZE * settings.lookup_size,
@@ -825,7 +834,7 @@ pub fn create(
             settings.maximum_chroma,
         );
 
-        SharedState {
+        Self {
             settings: RwLock::new(settings),
             last_size: Mutex::new((MAX_FREQUENCY_BINS, SPECTROGRAM_SLICES)),
             frame_timing: Mutex::new((Instant::now(), Duration::ZERO, Duration::ZERO)),
@@ -833,7 +842,23 @@ pub fn create(
             cached_analysis_settings: Mutex::new(AnalysisChainConfig::default()),
             spectrogram_texture: Arc::new(RwLock::new(None)),
         }
-    };
+    }
+}
+
+const BASELINE_TARGET_FPS: f32 = 60.0;
+const BASELINE_TARGET_FRAME_SECS: f32 = 1.0 / BASELINE_TARGET_FPS;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn create(
+    params: Arc<PluginParams>,
+    analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
+    analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
+    analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
+    audio_state: Arc<RwLock<Option<AudioState>>>,
+) -> Option<Box<dyn Editor>> {
+    let egui_state = params.editor_state.clone();
+
+    let shared_state = SharedState::new();
 
     let spectrogram_texture = shared_state.spectrogram_texture.clone();
 
@@ -862,13 +887,14 @@ pub fn create(
                 &analysis_frequencies,
                 &audio_state,
                 &shared_state,
+                false,
                 |_| {},
             );
         },
     )
 }
 
-fn build(egui_ctx: &Context, spectrogram_texture: &RwLock<Option<TextureId>>) {
+pub(crate) fn build(egui_ctx: &Context, spectrogram_texture: &RwLock<Option<TextureId>>) {
     let manager = egui_ctx.tex_manager();
     let mut manager = manager.write();
     let mut spectrogram_texture = spectrogram_texture.write();
@@ -897,13 +923,15 @@ fn build(egui_ctx: &Context, spectrogram_texture: &RwLock<Option<TextureId>>) {
     egui_ctx.set_theme(ThemePreference::Dark);
 }
 
-fn render<F>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render<F>(
     egui_ctx: &Context,
     analysis_chain: &Mutex<Option<AnalysisChain>>,
     analysis_output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
     analysis_frequencies: &RwLock<Vec<(f32, f32, f32)>>,
     audio_state: &RwLock<Option<AudioState>>,
     shared_state: &SharedState,
+    mut paused: bool,
     callback: F,
 ) where
     F: FnOnce(&Context),
@@ -990,7 +1018,9 @@ fn render<F>(
             pixels: spectrogram_image_pixels,
         };
 
+        #[cfg(not(target_arch = "wasm32"))]
         let buffering_duration = metrics.finished.elapsed();
+
         let processing_duration = metrics.processing;
         let chunk_duration = front.duration;
 
@@ -1214,7 +1244,9 @@ fn render<F>(
 
             drop(frame_timing);
 
+            #[cfg(not(target_arch = "wasm32"))]
             let buffering_secs = buffering_duration.as_secs_f32();
+
             let rasterize_secs = rasterize_elapsed.as_secs_f32();
             let chunk_secs = chunk_duration.as_secs_f32();
             let frame_secs = frame_elapsed.as_secs_f32();
@@ -1222,14 +1254,38 @@ fn render<F>(
             /*let rasterize_processing_duration = rasterize_secs / (frame_secs / chunk_secs);
             let adjusted_processing_duration =
                 processing_duration.as_secs_f32() + rasterize_processing_duration;*/
+            #[cfg(not(target_arch = "wasm32"))]
             let buffer_processing_duration = buffering_secs / (frame_secs / chunk_secs);
+
+            #[cfg(target_arch = "wasm32")]
+            let buffer_processing_duration = 0.0;
+
             let adjusted_processing_duration =
                 processing_duration.as_secs_f32() + buffer_processing_duration;
             let rasterize_proportion = rasterize_secs / frame_secs;
             let processing_proportion = adjusted_processing_duration / chunk_secs;
+
+            #[cfg(not(target_arch = "wasm32"))]
             let buffering_proportion = buffering_secs / frame_secs;
 
-            if buffering_duration < Duration::from_millis(500) {
+            #[cfg(not(target_arch = "wasm32"))]
+            if buffering_duration > Duration::from_millis(500) {
+                paused = true;
+            }
+
+            #[cfg(not(target_arch = "wasm32"))]
+            const RASTERIZE_PROPORTION_TARGETS: (f32, f32) = (0.3, 0.6);
+
+            #[cfg(target_arch = "wasm32")]
+            const RASTERIZE_PROPORTION_TARGETS: (f32, f32) = (0.125, 0.25);
+
+            #[cfg(not(target_arch = "wasm32"))]
+            const PROCESSING_PROPORTION_TARGETS: (f32, f32) = (0.8, 0.95);
+
+            #[cfg(target_arch = "wasm32")]
+            const PROCESSING_PROPORTION_TARGETS: (f32, f32) = (0.25, 0.5);
+
+            if !paused {
                 painter.text(
                     Pos2 {
                         x: max_x - 32.0,
@@ -1245,14 +1301,15 @@ fn render<F>(
                         size: 12.0,
                         family: egui::FontFamily::Monospace,
                     },
-                    if processing_proportion >= 0.95 {
+                    if processing_proportion >= PROCESSING_PROPORTION_TARGETS.1 {
                         Color32::RED
-                    } else if processing_proportion >= 0.8 {
+                    } else if processing_proportion >= PROCESSING_PROPORTION_TARGETS.0 {
                         Color32::YELLOW
                     } else {
                         Color32::from_rgb(224, 224, 224)
                     },
                 );
+                #[cfg(not(target_arch = "wasm32"))]
                 painter.text(
                     Pos2 {
                         x: max_x - 32.0,
@@ -1310,11 +1367,17 @@ fn render<F>(
                     size: 12.0,
                     family: egui::FontFamily::Monospace,
                 },
-                if rasterize_elapsed >= Duration::from_secs_f32(BASELINE_TARGET_FRAME_SECS * 0.6) {
+                if rasterize_elapsed
+                    >= Duration::from_secs_f32(
+                        BASELINE_TARGET_FRAME_SECS * RASTERIZE_PROPORTION_TARGETS.1,
+                    )
+                {
                     Color32::RED
                 } else if rasterize_elapsed
-                    >= Duration::from_secs_f32(BASELINE_TARGET_FRAME_SECS * 0.3)
-                    || rasterize_proportion >= 0.6
+                    >= Duration::from_secs_f32(
+                        BASELINE_TARGET_FRAME_SECS * RASTERIZE_PROPORTION_TARGETS.0,
+                    )
+                    || rasterize_proportion >= RASTERIZE_PROPORTION_TARGETS.1
                 {
                     Color32::YELLOW
                 } else {
@@ -1788,6 +1851,7 @@ fn render<F>(
                 }
 
                 if analysis_settings.internal_buffering {
+                    #[cfg(not(target_arch = "wasm32"))]
                     if ui
                         .checkbox(
                             &mut analysis_settings.strict_synchronization,

@@ -5,8 +5,6 @@ use std::{
     time::Duration,
 };
 
-use serde::{Deserialize, Serialize};
-
 //mod gammatone;
 mod masker;
 mod vqsdft;
@@ -15,7 +13,7 @@ use vqsdft::{VQsDFT, Window};
 
 use crate::analyzer::masker::Masker;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct BetterAnalyzerConfiguration {
     pub resolution: usize,
     pub start_frequency: f32,

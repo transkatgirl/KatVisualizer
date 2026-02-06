@@ -3,22 +3,39 @@
 
 // TODO: Go through https://nnethercote.github.io/perf-book/title-page.html and apply applicable optimizations
 
-#[cfg(not(debug_assertions))]
+#[cfg(all(not(debug_assertions), not(target_arch = "wasm32")))]
 use mimalloc::MiMalloc;
 
-use keepawake::KeepAwake;
-use nih_plug::prelude::*;
-use nih_plug_egui::EguiState;
 use parking_lot::{FairMutex, Mutex, RwLock};
-use std::{
-    num::NonZero,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{num::NonZero, sync::Arc};
 
-#[cfg(not(debug_assertions))]
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{Duration, Instant};
+
+#[cfg(target_arch = "wasm32")]
+use web_time::{Duration, Instant};
+
+#[cfg(target_arch = "wasm32")]
+use std::sync::LazyLock;
+
+#[cfg(not(target_arch = "wasm32"))]
+use keepawake::KeepAwake;
+#[cfg(not(target_arch = "wasm32"))]
+use nih_plug::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
+use nih_plug_egui::EguiState;
+
+#[cfg(target_arch = "wasm32")]
+use js_sys::Float32Array;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(all(not(debug_assertions), not(target_arch = "wasm32")))]
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
+
+#[cfg(target_arch = "wasm32")]
+use crate::editor::{SharedState, build, render};
 
 use crate::{
     analyzer::BetterSpectrogram,
@@ -45,7 +62,22 @@ pub(crate) struct AudioState {
     pub(crate) output_channels: u32,
 }
 
+#[cfg(target_arch = "wasm32")]
+impl Default for AudioState {
+    fn default() -> Self {
+        Self {
+            buffer_size_range: (0, 9600),
+            sample_rate: 48000.0,
+            process_mode_title: "Chunked".to_string(),
+            realtime: false,
+            input_channels: 2,
+            output_channels: 0,
+        }
+    }
+}
+
 impl AudioState {
+    #[cfg(not(target_arch = "wasm32"))]
     fn new(audio_io_layout: AudioIOLayout, buffer_config: BufferConfig) -> Self {
         Self {
             buffer_size_range: (
@@ -67,6 +99,193 @@ impl AudioState {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+static SAMPLES: LazyLock<Mutex<(u16, bool, f32, Vec<f32>, Vec<f32>)>> =
+    LazyLock::new(|| Mutex::new((0, false, 48000.0, vec![0.0; 9600], vec![0.0; 9600]))); // The WASM module and the sample passer MUST be on the same thread
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn left_sample_buffer() -> Float32Array {
+    let lock = LazyLock::force(&SAMPLES).lock();
+
+    unsafe { Float32Array::view(&lock.3) }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn right_sample_buffer() -> Float32Array {
+    let lock = LazyLock::force(&SAMPLES).lock();
+
+    unsafe { Float32Array::view(&lock.4) }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn drain_buffers(callback: impl FnOnce(bool, f32, [&mut [f32]; 2])) {
+    let mut lock = LazyLock::force(&SAMPLES).lock();
+
+    let (ref mut position, ref single_input, ref rate, ref mut left_samples, ref mut right_samples) =
+        *lock;
+
+    callback(
+        *single_input,
+        *rate,
+        [
+            &mut left_samples[0..*position as usize],
+            &mut right_samples[0..*position as usize],
+        ],
+    );
+
+    *position = 0;
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn get_position() -> u16 {
+    let lock = LazyLock::force(&SAMPLES).lock();
+
+    lock.0
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_position(position: u16) {
+    let mut lock = LazyLock::force(&SAMPLES).lock();
+
+    lock.0 = position;
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_rate(rate: f32) {
+    let mut lock = LazyLock::force(&SAMPLES).lock();
+
+    lock.2 = rate;
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_mono(position: u16) {
+    let mut lock = LazyLock::force(&SAMPLES).lock();
+
+    lock.1 = true;
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_stereo(position: u16) {
+    let mut lock = LazyLock::force(&SAMPLES).lock();
+
+    lock.1 = false;
+}
+
+#[cfg(target_arch = "wasm32")]
+pub struct WasmApp {
+    analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
+    analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
+    analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
+    state_info: Arc<RwLock<Option<AudioState>>>,
+    last_single_input: bool,
+    last_sample_rate: f32,
+
+    shared_state: SharedState,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl WasmApp {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let shared_state = SharedState::new();
+
+        let spectrogram_texture = shared_state.spectrogram_texture.clone();
+
+        build(&cc.egui_ctx, &spectrogram_texture);
+
+        let analysis_frequencies = Arc::new(RwLock::new(Vec::with_capacity(MAX_FREQUENCY_BINS)));
+
+        let analysis_chain = AnalysisChain::new(
+            &AnalysisChainConfig::default(),
+            AudioState::default().sample_rate,
+            false,
+            analysis_frequencies.clone(),
+        );
+
+        Self {
+            analysis_chain: Arc::new(Mutex::new(Some(analysis_chain))),
+            analysis_output: Arc::new(FairMutex::new((
+                BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
+                AnalysisMetrics {
+                    processing: Duration::ZERO,
+                    finished: Instant::now(),
+                },
+            ))),
+            analysis_frequencies,
+            state_info: Arc::new(RwLock::new(Some(AudioState::default()))),
+            last_single_input: AudioState::default().input_channels == 1,
+            last_sample_rate: AudioState::default().sample_rate,
+            shared_state,
+        }
+    }
+    fn update_config(&mut self, single_input: bool, sample_rate: f32) {
+        let mut analysis_chain = self.analysis_chain.lock();
+
+        let analysis_config = match &*analysis_chain {
+            Some(old_chain) => old_chain.config(),
+            None => AnalysisChainConfig::default(),
+        };
+
+        *analysis_chain = Some(AnalysisChain::new(
+            &analysis_config,
+            sample_rate,
+            single_input,
+            self.analysis_frequencies.clone(),
+        ));
+
+        *self.analysis_output.lock() = (
+            BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
+            AnalysisMetrics {
+                processing: Duration::ZERO,
+                finished: Instant::now(),
+            },
+        );
+
+        *self.state_info.write() = Some(AudioState {
+            input_channels: if single_input { 1 } else { 2 },
+            sample_rate,
+            ..Default::default()
+        });
+        self.last_single_input = single_input;
+        self.last_sample_rate = sample_rate;
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl eframe::App for WasmApp {
+    fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+        drain_buffers(|single_input, sample_rate, mut buffer| {
+            if sample_rate != self.last_sample_rate || single_input != self.last_single_input {
+                self.update_config(false, sample_rate);
+            }
+
+            let mut lock = self.analysis_chain.lock();
+
+            let mut analysis_chain = lock.as_mut().unwrap();
+
+            analysis_chain.analyze(&mut buffer, &self.analysis_output);
+        });
+
+        render(
+            ctx,
+            &self.analysis_chain,
+            &self.analysis_output,
+            &self.analysis_frequencies,
+            &self.state_info,
+            &self.shared_state,
+            false,
+            |_| {},
+        )
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub struct MyPlugin {
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
@@ -78,6 +297,7 @@ pub struct MyPlugin {
 }
 
 #[derive(Params)]
+#[cfg(not(target_arch = "wasm32"))]
 pub struct PluginParams {
     #[persist = "editor-state"]
     editor_state: Arc<EguiState>,
@@ -86,6 +306,7 @@ pub struct PluginParams {
 const MAX_FREQUENCY_BINS: usize = 2048;
 const SPECTROGRAM_SLICES: usize = 8192;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for MyPlugin {
     fn default() -> Self {
         Self {
@@ -106,6 +327,7 @@ impl Default for MyPlugin {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for PluginParams {
     fn default() -> Self {
         Self {
@@ -114,6 +336,7 @@ impl Default for PluginParams {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Plugin for MyPlugin {
     const NAME: &'static str = "KatVisualizer";
     const VENDOR: &'static str = "transkatgirl";
@@ -179,11 +402,6 @@ impl Plugin for MyPlugin {
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
     const HARD_REALTIME_ONLY: bool = true;
     const MIDI_INPUT: MidiConfig = MidiConfig::None;
-
-    #[cfg(feature = "midi")]
-    const MIDI_OUTPUT: MidiConfig = MidiConfig::MidiCCs;
-
-    #[cfg(not(feature = "midi"))]
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
 
     type SysExMessage = ();
@@ -279,6 +497,7 @@ impl Plugin for MyPlugin {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ClapPlugin for MyPlugin {
     const CLAP_ID: &'static str = "com.transkatgirl.katvisualizer";
     const CLAP_DESCRIPTION: Option<&'static str> = None;
@@ -292,11 +511,15 @@ impl ClapPlugin for MyPlugin {
     ];
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Vst3Plugin for MyPlugin {
     const VST3_CLASS_ID: [u8; 16] = *b"transkatgirlVizu";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
         &[Vst3SubCategory::Fx, Vst3SubCategory::Analyzer];
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 nih_export_clap!(MyPlugin);
+
+#[cfg(not(target_arch = "wasm32"))]
 nih_export_vst3!(MyPlugin);
