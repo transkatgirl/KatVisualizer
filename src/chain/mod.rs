@@ -62,7 +62,7 @@ impl Default for AnalysisChainConfig {
             #[cfg(not(target_arch = "wasm32"))]
             resolution: 1024,
             #[cfg(target_arch = "wasm32")]
-            resolution: 320,
+            resolution: 384,
             latency_offset: Duration::ZERO,
 
             start_frequency: BetterAnalyzerConfiguration::default().start_frequency,
