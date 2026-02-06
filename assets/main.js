@@ -27,6 +27,12 @@ function init() {
 		}
 	});
 
+	audioElement.addEventListener("playing", () => {
+		if (audioContext.state === "suspended") {
+			audioContext.resume();
+		}
+	});
+
 	audioElement.addEventListener("pause", () => {
 		audioContext.suspend();
 	});
