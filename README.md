@@ -76,9 +76,9 @@ If you'd like to start improving the visualization's readability further, the se
 - Render Options -> Use signal-to-mask ratio when calculating spectrogram shading
 	- Enabling this makes timbre more readable at the expense of amplitude differences; Disabling this makes amplitude differences more readable at the expense of timbre
 		- This trade-off becomes more apparent as the spectrogram's dynamic range is reduced
+- Render Options -> Bargraph averaging (ideal value is 1s / {DISPLAY_REFRESH_RATE})
 - Render Options -> Range above masking mean
 - Render Options -> Range below masking mean
-- Render Options -> Bargraph averaging (ideal value is 1s / {DISPLAY_REFRESH_RATE})
 - Analysis Options -> ERB bandwidth divisor (ideal value depends on what you're trying to analyze; if in doubt, the default value of 2.0 is usually a good middle ground)
 - Analysis Options -> Frequency range (ideal value depends on what you're trying to analyze)
 - Analysis Options -> Resolution (increasing it may hurt performance)
