@@ -48,7 +48,7 @@ Compiling for web requires [trunk](https://github.com/trunk-rs/trunk) and [binar
 In order to build this program as a web application, run the following commands:
 
 ```bash
-trunk build --release -M
+trunk build --release
 wasm-opt -O4 -all dist/katvisualizer_wasm_bg.wasm -o dist/katvisualizer_wasm_bg.opt.wasm
 rm dist/katvisualizer_wasm_bg.wasm
 mv dist/katvisualizer_wasm_bg.opt.wasm dist/katvisualizer_wasm_bg.wasm
