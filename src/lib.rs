@@ -69,7 +69,7 @@ pub(crate) struct AudioState {
 impl Default for AudioState {
     fn default() -> Self {
         Self {
-            buffer_size_range: (0, 9600),
+            buffer_size_range: (0, 4800),
             sample_rate: 48000.0,
             process_mode_title: "Chunked".to_string(),
             realtime: false,
