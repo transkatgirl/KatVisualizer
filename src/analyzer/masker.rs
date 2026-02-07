@@ -158,6 +158,7 @@ impl Masker {
 
         masking_threshold.fill(0.0);
 
+        #[cfg(not(target_arch = "wasm32"))]
         if self.approximate {
             if self.average_width >= 128 {
                 /*if self.average_width >= 512 {
@@ -193,6 +194,17 @@ impl Masker {
                     masking_threshold,
                 );
             }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        if self.approximate {
+            self.calculate_masking_threshold_inner_approx::<8>(spectrum, masking_threshold);
+        } else {
+            self.calculate_masking_threshold_inner_exact::<8>(
+                spectrum,
+                listening_volume,
+                masking_threshold,
+            );
         }
     }
     fn calculate_masking_threshold_inner_approx<const N: usize>(
