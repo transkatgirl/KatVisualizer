@@ -161,11 +161,9 @@ impl Masker {
         if self.approximate {
             if self.average_width >= 128 {
                 /*if self.average_width >= 512 {
-                    self.calculate_masking_threshold_inner::<32>(
+                    self.calculate_masking_threshold_inner_approx::<32>(
                         spectrum,
-                        listening_volume,
                         masking_threshold,
-                        approximate,
                     );
                 } else {*/
                 self.calculate_masking_threshold_inner_approx::<16>(spectrum, masking_threshold);
@@ -176,11 +174,10 @@ impl Masker {
         } else {
             if self.average_width >= 256 {
                 /*if self.average_width >= 1024 {
-                    self.calculate_masking_threshold_inner::<32>(
+                    self.calculate_masking_threshold_inner_exact::<32>(
                         spectrum,
                         listening_volume,
                         masking_threshold,
-                        approximate,
                     );
                 } else {*/
                 self.calculate_masking_threshold_inner_exact::<16>(
@@ -290,19 +287,34 @@ impl Masker {
                 }
             }
 
-            unsafe { masking_threshold.get_unchecked_mut(i..=coeff.range.1) }
-                .iter_mut()
-                .zip(
-                    unsafe { self.bark_set.get_unchecked(i..=coeff.range.1) }
-                        .iter()
-                        .copied(),
-                )
-                .for_each(|(t, b)| {
+            {
+                let (masking_chunks, masking_rem) =
+                    unsafe { masking_threshold.get_unchecked_mut(i..=coeff.range.1) }
+                        .as_chunks_mut::<N>();
+                let (bark_chunks, bark_rem) =
+                    unsafe { self.bark_set.get_unchecked(i..=coeff.range.1) }.as_chunks::<N>();
+
+                assert_eq!(masking_chunks.len(), bark_chunks.len());
+                assert_eq!(masking_rem.len(), bark_rem.len());
+
+                for (masking_chunk, lookup_chunk) in masking_chunks.iter_mut().zip(bark_chunks) {
+                    for (t, b) in masking_chunk.iter_mut().zip(lookup_chunk) {
+                        *t = t.algebraic_add(
+                            dbfs_to_amplitude(
+                                upper_spread.algebraic_mul(b.algebraic_sub(coeff.bark)),
+                            )
+                            .algebraic_mul(adjusted_amplitude),
+                        );
+                    }
+                }
+
+                for (t, b) in masking_rem.iter_mut().zip(bark_rem) {
                     *t = t.algebraic_add(
                         dbfs_to_amplitude(upper_spread.algebraic_mul(b.algebraic_sub(coeff.bark)))
                             .algebraic_mul(adjusted_amplitude),
                     );
-                });
+                }
+            }
         }
     }
 }
