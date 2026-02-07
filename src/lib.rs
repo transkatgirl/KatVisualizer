@@ -166,7 +166,7 @@ pub fn set_rate(rate: f32) {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn set_mono(position: u16) {
+pub fn set_mono() {
     let mut lock = LazyLock::force(&SAMPLES).lock();
 
     lock.1 = true;
@@ -174,7 +174,7 @@ pub fn set_mono(position: u16) {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn set_stereo(position: u16) {
+pub fn set_stereo() {
     let mut lock = LazyLock::force(&SAMPLES).lock();
 
     lock.1 = false;
