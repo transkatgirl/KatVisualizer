@@ -14,7 +14,6 @@ function init() {
 	} else {
 		initialized = true;
 	}
-	console.log("application started - bindings:", window.wasmBindings);
 
 	const audioContext = new AudioContext();
 
@@ -35,6 +34,10 @@ function init() {
 
 	audioElement.addEventListener("pause", () => {
 		audioContext.suspend();
+	});
+
+	audioElement.addEventListener("loadstart", () => {
+		audioElement.play();
 	});
 
 	const scriptNode = audioContext.createScriptProcessor(256, 2, 2);
@@ -112,6 +115,7 @@ function buildElements() {
 
 		const urlObj = URL.createObjectURL(event.target.files[0]);
 
+		audioElement.pause();
 		audioElement.addEventListener("load", () => {
 			URL.revokeObjectURL(urlObj);
 		});
