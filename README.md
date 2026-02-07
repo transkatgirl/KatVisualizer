@@ -47,6 +47,8 @@ Default values can be found in the following locations:
 - [/src/editor.rs](/src/editor.rs), line 646
 - [/src/lib.rs](/src/lib.rs), line 344
 
+Most of these values *must* fit within certain constraints for the application to work properly; It is strongly recommended that you only set the defaults to values which are obtainable using the application's settings UI.
+
 #### Building for Web
 
 This program supports building as a WASM-based web application, similar to the standalone mode binary. However, not all of the application's features are supported when building for web, and performance will be significantly worse than a native binary.
