@@ -95,6 +95,14 @@ function buildElements() {
 
 	const audioElement = document.createElement("audio");
 	audioElement.controls = true;
+	audioElement.style.display = "none";
+
+	const message = document.createElement("p");
+	message.style.color = "white";
+	message.style.margin = "1em";
+	message.style.fontFamily = "system-ui,sans-serif";
+	message.innerText =
+		"Note: Output device latency compensation is not supported.";
 
 	const fileInput = document.createElement("input");
 	fileInput.style.color = "white";
@@ -108,9 +116,12 @@ function buildElements() {
 			URL.revokeObjectURL(urlObj);
 		});
 		audioElement.src = urlObj;
+		audioElement.style.display = "inherit";
+		message.style.display = "none";
 	});
 
 	leftControlDiv.appendChild(fileInput);
+	rightControlDiv.appendChild(message);
 	rightControlDiv.appendChild(audioElement);
 
 	document.body.appendChild(leftControlDiv);
