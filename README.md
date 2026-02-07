@@ -19,7 +19,7 @@ If you don't already have a host for the plugin, [Element](https://github.com/Ku
 
 ### Building from Source
 
-Building from source code allows hardware-specific optimizations to be applied and allows you to change the [default settings](https://github.com/transkatgirl/KatVisualizer/blob/eb719ba00199b7ad11a89d0bc20a209c1c71d969/src/lib.rs#L353).
+Building from source code allows hardware-specific optimizations to be applied and allows you to change the default settings.
 
 Compiling this program requires the [Rust Programming Language](https://rust-lang.org/tools/install/) to be installed.
 
@@ -38,6 +38,14 @@ RUSTFLAGS="-C target-cpu=native" cargo build --release --bin "katvisualizer" --f
 (`$channel_config` must be set to one of the following: `force-mono, force-mono-to-stereo, force-stereo`. Due to a limitation of nih-plug, channel configurations cannot be changed in standalone mode at runtime.)
 
 Usage information for the standalone binary can be found by running it with the `--help` command (keep in mind that not all available CLI flags are relevant to this program). You will likely want to use the `--input-device`, `--output-device`, and `--period-size` CLI flags.
+
+#### Updating defaults
+
+Default values can be found in the following locations:
+
+- [/src/chain/mod.rs](/src/chain/mod.rs), line 47
+- [/src/editor.rs](/src/editor.rs), line 646
+- [/src/lib.rs](/src/lib.rs), line 344
 
 #### Building for Web
 
