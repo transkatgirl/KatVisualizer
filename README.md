@@ -72,12 +72,13 @@ The compiled plugin can be loaded into a DAW like any other metering plugin. It'
 
 Once the program is running, the window will display a graphical representation of the input audio, along with additional information in the top corners. The parameters used to render this graphical representation can be adjusted in the dragable settings window.
 
-If you'd like to start improving the spectrogram's readability further, the settings with the largest impact are (in order of importance):
+If you'd like to start improving the visualization's readability further, the settings with the largest impact are (in order of importance):
 - Render Options -> Use signal-to-mask ratio when calculating spectrogram shading
 	- Enabling this makes timbre more readable at the expense of amplitude differences; Disabling this makes amplitude differences more readable at the expense of timbre
 		- This trade-off becomes more apparent as the spectrogram's dynamic range is reduced
 - Render Options -> Range above masking mean
 - Render Options -> Range below masking mean
+- Render Options -> Bargraph averaging (ideal value is 1s / {DISPLAY_REFRESH_RATE})
 - Analysis Options -> ERB bandwidth divisor (ideal value depends on what you're trying to analyze; if in doubt, the default value of 2.0 is usually a good middle ground)
 - Analysis Options -> Frequency range (ideal value depends on what you're trying to analyze)
 - Analysis Options -> Resolution (increasing it may hurt performance)
