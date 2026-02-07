@@ -104,7 +104,7 @@ impl AudioState {
 
 #[cfg(target_arch = "wasm32")]
 static SAMPLES: LazyLock<Mutex<(u16, bool, f32, Vec<f32>, Vec<f32>)>> =
-    LazyLock::new(|| Mutex::new((0, false, 48000.0, vec![0.0; 9600], vec![0.0; 9600]))); // The WASM module and the sample passer MUST be on the same thread
+    LazyLock::new(|| Mutex::new((0, false, 48000.0, vec![0.0; 4800], vec![0.0; 4800]))); // The WASM module and the sample passer MUST be on the same thread
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
@@ -304,8 +304,17 @@ pub struct PluginParams {
     editor_state: Arc<EguiState>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_FREQUENCY_BINS: usize = 2048;
+
+#[cfg(target_arch = "wasm32")]
+const MAX_FREQUENCY_BINS: usize = 1024;
+
+#[cfg(not(target_arch = "wasm32"))]
 const SPECTROGRAM_SLICES: usize = 8192;
+
+#[cfg(target_arch = "wasm32")]
+const SPECTROGRAM_SLICES: usize = 4096;
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Default for MyPlugin {

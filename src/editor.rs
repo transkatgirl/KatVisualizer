@@ -943,8 +943,8 @@ pub(crate) fn render(
         let last_size = *shared_state.last_size.lock();
 
         let mut bargraph_mesh = Mesh::default();
-        bargraph_mesh.reserve_triangles(MAX_FREQUENCY_BINS * 2 * 2);
-        bargraph_mesh.reserve_vertices(MAX_FREQUENCY_BINS * 4 * 2);
+        bargraph_mesh.reserve_triangles(last_size.0 * 2 * 2);
+        bargraph_mesh.reserve_vertices(last_size.0 * 4 * 2);
 
         let mut spectrogram_image_pixels = vec![Color32::TRANSPARENT; last_size.0 * last_size.1];
         let mut bargraph_buffer_1 = vec![(0.0, 0.0); last_size.0];
@@ -1897,7 +1897,7 @@ pub(crate) fn render(
                         .add(
                             egui::Slider::new(
                                 &mut analysis_settings.update_rate_hz,
-                                128.0..=4096.0,
+                                128.0..=(SPECTROGRAM_SLICES as f64 / 2.0),
                             )
                             .logarithmic(true)
                             .suffix("hz")
