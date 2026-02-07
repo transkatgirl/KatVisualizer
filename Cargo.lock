@@ -1203,7 +1203,7 @@ dependencies = [
 [[package]]
 name = "egui-baseview"
 version = "0.7.0"
-source = "git+https://github.com/transkatgirl/egui-baseview.git?rev=c45c3a5f71f0f377ea95df9cdfe1ae8a51e0d42b#c45c3a5f71f0f377ea95df9cdfe1ae8a51e0d42b"
+source = "git+https://github.com/transkatgirl/egui-baseview.git?rev=6f70371ed58de27ccb328710a2c1c43ce12ea450#6f70371ed58de27ccb328710a2c1c43ce12ea450"
 dependencies = [
  "baseview 0.1.0 (git+https://github.com/transkatgirl/baseview.git?rev=783fa9a8017af7d627d727e85a3a77a9b013bf39)",
  "copypasta",
@@ -2298,7 +2298,7 @@ dependencies = [
 [[package]]
 name = "nih_plug_egui"
 version = "0.1.0"
-source = "git+https://github.com/transkatgirl/egui-baseview.git?rev=c45c3a5f71f0f377ea95df9cdfe1ae8a51e0d42b#c45c3a5f71f0f377ea95df9cdfe1ae8a51e0d42b"
+source = "git+https://github.com/transkatgirl/egui-baseview.git?rev=6f70371ed58de27ccb328710a2c1c43ce12ea450#6f70371ed58de27ccb328710a2c1c43ce12ea450"
 dependencies = [
  "baseview 0.1.0 (git+https://github.com/transkatgirl/baseview.git?rev=783fa9a8017af7d627d727e85a3a77a9b013bf39)",
  "crossbeam",

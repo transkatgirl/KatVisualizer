@@ -12,12 +12,13 @@ use eframe::egui::{
 use nih_plug::editor::Editor;
 #[cfg(not(target_arch = "wasm32"))]
 use nih_plug_egui::{
-    EguiSettings, GlConfig, GraphicsConfig, create_egui_editor,
+    EguiSettings, EguiState, GlConfig, GraphicsConfig, create_egui_editor,
     egui::{
-        self, Align2, Color32, ColorImage, Context, FontId, ImageData, Mesh, Pos2, Rect, Shape,
-        TextureId, TextureOptions, ThemePreference, Vec2,
+        self, Align2, Color32, ColorImage, Context, FontId, Id, ImageData, Mesh, Pos2, Rect, Sense,
+        Shape, TextureId, TextureOptions, ThemePreference, UiBuilder, Vec2,
         epaint::{ImageDelta, Vertex, WHITE_UV},
     },
+    resizable_window::paint_resize_corner,
 };
 use parking_lot::{FairMutex, Mutex, RwLock};
 use std::sync::Arc;
@@ -888,7 +889,7 @@ pub fn create(
                 &audio_state,
                 &shared_state,
                 false,
-                |_| {},
+                &egui_state,
             );
         },
     )
@@ -924,7 +925,7 @@ pub(crate) fn build(egui_ctx: &Context, spectrogram_texture: &RwLock<Option<Text
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn render<F>(
+pub(crate) fn render(
     egui_ctx: &Context,
     analysis_chain: &Mutex<Option<AnalysisChain>>,
     analysis_output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
@@ -932,10 +933,8 @@ pub(crate) fn render<F>(
     audio_state: &RwLock<Option<AudioState>>,
     shared_state: &SharedState,
     mut paused: bool,
-    callback: F,
-) where
-    F: FnOnce(&Context),
-{
+    #[cfg(not(target_arch = "wasm32"))] egui_state: &EguiState,
+) {
     egui_ctx.request_repaint();
 
     let start = Instant::now();
@@ -1384,6 +1383,32 @@ pub(crate) fn render<F>(
                     Color32::from_rgb(224, 224, 224)
                 },
             );
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        // Copied from nih_plug_egui::resizable_window
+        {
+            let ui_rect = ui.clip_rect();
+            let content_ui = ui.new_child(UiBuilder::new().max_rect(ui_rect).layout(*ui.layout()));
+
+            let corner_size = Vec2::splat(ui.visuals().resize_corner_size);
+            let corner_rect = Rect::from_min_size(ui_rect.max - corner_size, corner_size);
+
+            let corner_response = ui.interact(corner_rect, Id::new("corner"), Sense::drag());
+
+            if let Some(pointer_pos) = corner_response.interact_pointer_pos() {
+                let desired_size = (pointer_pos - ui_rect.min + 0.5 * corner_response.rect.size())
+                    .max(Vec2 { x: 400.0, y: 200.0 });
+
+                if corner_response.dragged() {
+                    egui_state.set_requested_size((
+                        desired_size.x.round() as u32,
+                        desired_size.y.round() as u32,
+                    ));
+                }
+            }
+
+            paint_resize_corner(&content_ui, &corner_response);
         }
     });
     egui::Window::new("Settings")
@@ -2121,7 +2146,6 @@ pub(crate) fn render<F>(
                 }
             });
         });
-    callback(egui_ctx);
 
     let now = Instant::now();
     let mut frame_timing = shared_state.frame_timing.lock();

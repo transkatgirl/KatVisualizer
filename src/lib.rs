@@ -282,7 +282,6 @@ impl eframe::App for WasmApp {
             &self.state_info,
             &self.shared_state,
             false,
-            |_| {},
         )
     }
 }

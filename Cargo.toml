@@ -33,7 +33,9 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149e
 	"assert_process_allocs",
 	"standalone",
 ] }
-nih_plug_egui = { git = "https://github.com/transkatgirl/egui-baseview.git", rev = "c45c3a5f71f0f377ea95df9cdfe1ae8a51e0d42b" }
+nih_plug_egui = { git = "https://github.com/transkatgirl/egui-baseview.git", rev = "6f70371ed58de27ccb328710a2c1c43ce12ea450", features = [
+	"keyboard_focus_workaround",
+] }
 threadpool = "1.8.1"
 keepawake = "0.6.0"
 mimalloc = { version = "0.1.48", features = [
