@@ -43,7 +43,7 @@ impl Default for BetterAnalyzerConfiguration {
             //q_time_resolution: 14.0,
             q_time_resolution: 17.30993,
             erb_time_resolution: true,
-            erb_bandwidth_divisor: 2.0,
+            erb_bandwidth_divisor: 1.5,
             time_resolution_clamp: (0.0, 37.0),
             nc_method: true,
             strict_nc: false,
