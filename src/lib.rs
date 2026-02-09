@@ -264,7 +264,7 @@ impl eframe::App for WasmApp {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         drain_buffers(|single_input, sample_rate, mut buffer| {
             if sample_rate != self.last_sample_rate || single_input != self.last_single_input {
-                self.update_config(false, sample_rate);
+                self.update_config(single_input, sample_rate);
             }
 
             let mut lock = self.analysis_chain.lock();
