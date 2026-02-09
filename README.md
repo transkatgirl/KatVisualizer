@@ -45,7 +45,7 @@ Default values can be found in the following locations:
 
 - [/src/chain/mod.rs](/src/chain/mod.rs), line 47
 - [/src/editor.rs](/src/editor.rs), line 678
-- [/src/lib.rs](/src/lib.rs), line 354
+- [/src/lib.rs](/src/lib.rs), line 397
 
 Most of these values *must* fit within certain constraints for the application to work properly; It is strongly recommended that you only set the defaults to values which are obtainable using the application's settings UI.
 
