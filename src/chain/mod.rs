@@ -60,9 +60,9 @@ impl Default for AnalysisChainConfig {
             #[cfg(target_arch = "wasm32")]
             update_rate_hz: 256.0,
             #[cfg(not(target_arch = "wasm32"))]
-            resolution: 1024,
+            resolution: 1024, // MUST be a multiple of 64
             #[cfg(target_arch = "wasm32")]
-            resolution: 448,
+            resolution: 448, // MUST be a multiple of 64
             latency_offset: Duration::ZERO,
 
             start_frequency: BetterAnalyzerConfiguration::default().start_frequency,
