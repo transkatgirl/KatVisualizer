@@ -2,6 +2,7 @@ var cacheName = "katvisualizer-pwa";
 var filesToCache = [
 	"./",
 	"./main.js",
+	"./worklet.js",
 	"./index.html",
 	"./katvisualizer_wasm.js",
 	"./katvisualizer_wasm_bg.wasm",
