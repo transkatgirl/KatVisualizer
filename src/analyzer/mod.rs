@@ -647,8 +647,8 @@ impl PrecomputedNormalizer {
         )
 }*/
 
-/*const MIN_COMPLETE_NORM_PHON: f64 = 20.0;
-const MAX_COMPLETE_NORM_PHON: f64 = 80.0;*/
+pub const MIN_COMPLETE_NORM_PHON: f32 = 20.0;
+pub const MAX_COMPLETE_NORM_PHON: f32 = 80.0;
 pub const MIN_INFORMATIVE_NORM_PHON: f32 = 0.0;
 pub const MAX_INFORMATIVE_NORM_PHON: f32 = 100.0;
 #[allow(clippy::excessive_precision)]

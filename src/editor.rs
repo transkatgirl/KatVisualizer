@@ -36,8 +36,8 @@ use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, AudioState, MAX_FREQUENCY_BINS,
     SPECTROGRAM_SLICES,
     analyzer::{
-        BetterSpectrogram, FrequencyScale, HEARING_THRESHOLD_PHON, MAX_INFORMATIVE_NORM_PHON,
-        map_value,
+        BetterSpectrogram, FrequencyScale, HEARING_THRESHOLD_PHON, MAX_COMPLETE_NORM_PHON,
+        MAX_INFORMATIVE_NORM_PHON, MIN_COMPLETE_NORM_PHON, map_value,
     },
 };
 
@@ -693,8 +693,8 @@ impl Default for RenderSettings {
                 - AnalysisChainConfig::default().listening_volume,
             agc_maximum: MAX_INFORMATIVE_NORM_PHON
                 - AnalysisChainConfig::default().listening_volume,
-            min_db: 20.0 - AnalysisChainConfig::default().listening_volume,
-            max_db: 80.0 - AnalysisChainConfig::default().listening_volume,
+            min_db: MIN_COMPLETE_NORM_PHON - AnalysisChainConfig::default().listening_volume,
+            max_db: MAX_COMPLETE_NORM_PHON - AnalysisChainConfig::default().listening_volume,
             clamp_using_smr: false,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f32(1.0 - 0.33),
