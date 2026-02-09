@@ -69,7 +69,7 @@ pub(crate) struct AudioState {
 impl Default for AudioState {
     fn default() -> Self {
         Self {
-            buffer_size_range: (0, 4800),
+            buffer_size_range: (0, SAMPLE_BUFFER_SIZE as u32),
             sample_rate: 48000.0,
             process_mode_title: "Chunked".to_string(),
             realtime: false,
@@ -103,8 +103,18 @@ impl AudioState {
 }
 
 #[cfg(target_arch = "wasm32")]
-static SAMPLES: LazyLock<Mutex<(u16, bool, f32, Vec<f32>, Vec<f32>)>> =
-    LazyLock::new(|| Mutex::new((0, false, 48000.0, vec![0.0; 4800], vec![0.0; 4800]))); // The WASM module and the sample passer MUST be on the same thread
+const SAMPLE_BUFFER_SIZE: u16 = 4800;
+
+#[cfg(target_arch = "wasm32")]
+static SAMPLES: LazyLock<Mutex<(u16, bool, f32, Vec<f32>, Vec<f32>)>> = LazyLock::new(|| {
+    Mutex::new((
+        0,
+        false,
+        48000.0,
+        vec![0.0; SAMPLE_BUFFER_SIZE as usize],
+        vec![0.0; SAMPLE_BUFFER_SIZE as usize],
+    ))
+}); // The WASM module and the sample passer MUST be on the same thread
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
@@ -129,7 +139,7 @@ pub fn drain_buffers(callback: impl FnOnce(bool, f32, [&mut [f32]; 2])) {
     let (ref mut position, ref single_input, ref rate, ref mut left_samples, ref mut right_samples) =
         *lock;
 
-    let index = (*position).min(4800) as usize;
+    let index = (*position).min(SAMPLE_BUFFER_SIZE) as usize;
 
     callback(
         *single_input,
