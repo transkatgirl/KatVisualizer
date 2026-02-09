@@ -683,7 +683,7 @@ impl Default for RenderSettings {
             maximum_chroma: 0.09, // Picked using maximum values on https://oklch.com that fit in sRGB w/ all hues
             automatic_gain: true,
             #[cfg(not(target_arch = "wasm32"))]
-            lookup_size: 4, // (COLOR_TABLE_BASE_CHROMA_SIZE * 4) * (COLOR_TABLE_BASE_LIGHTNESS_SIZE * 4) * 3 bytes = ~393 kB
+            lookup_size: 6, // (COLOR_TABLE_BASE_CHROMA_SIZE * 6) * (COLOR_TABLE_BASE_LIGHTNESS_SIZE * 6) * 3 bytes = ~885 kB
             #[cfg(target_arch = "wasm32")]
             lookup_size: 2, // (COLOR_TABLE_BASE_CHROMA_SIZE * 2) * (COLOR_TABLE_BASE_LIGHTNESS_SIZE * 2) * 3 bytes = ~98 kB
             agc_duration: Duration::from_secs_f32(1.0),
