@@ -8,12 +8,16 @@ async function init() {
 		throw new Error("Webassembly bindings are undefined!");
 	}
 
-	const audioContext = new AudioContext();
+	const audioContext = new AudioContext({
+		latencyHint: 0,
+	});
 
 	await audioContext.audioWorklet.addModule("./worklet.js");
 	const workletNode = new AudioWorkletNode(audioContext, "copy-processor");
 
 	let maxPosition = wasm.left_sample_buffer().length;
+
+	// TODO: Latency compensation using audioContext.baseLatency + audioContext.outputLatency
 
 	workletNode.port.onmessage = (event) => {
 		let input = event.data;
