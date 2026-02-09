@@ -25,10 +25,17 @@ async function init() {
 		} else {
 			throw new Error("Unsupported channel count!");
 		}
-		wasm.set_rate_and_latency(
-			audioContext.sampleRate,
-			audioContext.baseLatency + audioContext.outputLatency
-		);
+		if ("outputLatency" in AudioContext.prototype) {
+			wasm.set_rate_and_latency(
+				audioContext.sampleRate,
+				audioContext.baseLatency + audioContext.outputLatency
+			);
+		} else {
+			wasm.set_rate_and_latency(
+				audioContext.sampleRate,
+				audioContext.baseLatency
+			);
+		}
 
 		let position = wasm.get_position();
 
