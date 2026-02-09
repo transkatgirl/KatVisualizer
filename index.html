@@ -17,7 +17,9 @@
 			data-bin="katvisualizer_wasm"
 		/>
 		<base data-trunk-public-url />
+		<link rel="preload" href="./worklet.js" as="script" />
 		<script data-trunk src="assets/main.js" defer></script>
+		<link data-trunk rel="copy-file" href="assets/worklet.js" />
 		<link data-trunk rel="copy-file" href="assets/sw.js" />
 		<meta name="theme-color" content="#404040" />
 

@@ -1,21 +1,51 @@
-addEventListener("TrunkApplicationStarted", (event) => {
-	init();
+addEventListener("TrunkApplicationStarted", async (event) => {
+	await init();
 });
 
-if (window.wasmBindings) {
-	init();
-}
-
-let initialized = false;
-
-function init() {
-	if (initialized) {
-		return;
-	} else {
-		initialized = true;
+async function init() {
+	let wasm = window.wasmBindings;
+	if (!wasm) {
+		throw new Error("Webassembly bindings are undefined!");
 	}
 
 	const audioContext = new AudioContext();
+
+	await audioContext.audioWorklet.addModule("./worklet.js");
+	const workletNode = new AudioWorkletNode(audioContext, "copy-processor");
+
+	let maxPosition = wasm.left_sample_buffer().length;
+
+	workletNode.port.onmessage = (event) => {
+		let input = event.data;
+
+		if (input.length == 2) {
+			wasm.set_stereo();
+		} else if (input.length == 1) {
+			wasm.set_mono();
+		} else {
+			throw new Error("Unsupported channel count!");
+		}
+		wasm.set_rate(audioContext.sampleRate);
+
+		let position = wasm.get_position();
+
+		for (let channel = 0; channel < input.length; ++channel) {
+			let inputChannel = input[channel];
+
+			let outputPosition = Math.min(
+				position,
+				Math.max(maxPosition - inputChannel.length, 0)
+			);
+
+			if (channel == 0) {
+				wasm.left_sample_buffer().set(inputChannel, outputPosition);
+			} else if (channel == 1) {
+				wasm.right_sample_buffer().set(inputChannel, outputPosition);
+			}
+		}
+
+		wasm.set_position(Math.min(position + input[0].length, maxPosition));
+	};
 
 	const audioElement = buildElements();
 	const track = audioContext.createMediaElementSource(audioElement);
@@ -40,45 +70,7 @@ function init() {
 		audioElement.play();
 	});
 
-	const scriptNode = audioContext.createScriptProcessor(256, 2, 2);
-	scriptNode.addEventListener("audioprocess", (audioProcessingEvent) => {
-		let inputBuffer = audioProcessingEvent.inputBuffer;
-		let outputBuffer = audioProcessingEvent.outputBuffer;
-
-		window.wasmBindings.set_rate(audioContext.sampleRate);
-
-		for (
-			let channel = 0;
-			channel < outputBuffer.numberOfChannels;
-			channel++
-		) {
-			let inputData = inputBuffer.getChannelData(channel);
-			let outputData = outputBuffer.getChannelData(channel);
-
-			let wasmPosition = window.wasmBindings.get_position();
-
-			let wasmBuffer;
-
-			if (channel == 0) {
-				wasmBuffer = window.wasmBindings.left_sample_buffer();
-			} else if (channel == 1) {
-				wasmBuffer = window.wasmBindings.right_sample_buffer();
-			}
-
-			for (let sample = 0; sample < inputBuffer.length; sample++) {
-				outputData[sample] = inputData[sample];
-				wasmBuffer[wasmPosition + sample] = inputData[sample];
-			}
-
-			if (channel == 1) {
-				window.wasmBindings.set_position(
-					wasmPosition + inputBuffer.length
-				);
-			}
-		}
-	});
-
-	track.connect(scriptNode).connect(audioContext.destination);
+	track.connect(workletNode).connect(audioContext.destination);
 
 	audioContext.suspend();
 }
