@@ -32,19 +32,19 @@ pub struct BetterAnalyzerConfiguration {
     pub approximate_masking: bool,
 }
 
+#[allow(clippy::excessive_precision)]
 impl Default for BetterAnalyzerConfiguration {
     fn default() -> Self {
         Self {
-            resolution: 512,
-            start_frequency: 20.0,
-            end_frequency: 20000.0,
+            resolution: 512,        // MUST be a multiple of 64
+            start_frequency: 20.0,  // Lower end of typical human hearing range
+            end_frequency: 20000.0, // Upper end of typical human hearing range
             erb_frequency_scale: true,
             sample_rate: 48000.0,
-            //q_time_resolution: 14.0,
-            q_time_resolution: 17.30993,
+            q_time_resolution: 17.30993405, // Determined using distances between MIDI notes
             erb_time_resolution: true,
             erb_bandwidth_divisor: 1.5,
-            time_resolution_clamp: (0.0, 37.0),
+            time_resolution_clamp: (0.0, 37.23177300), // Upper limit is determined using 1s / ERB(20 Hz)
             nc_method: true,
             strict_nc: false,
             masking: true,
@@ -76,7 +76,7 @@ impl BetterAnalyzer {
             config.end_frequency,
             |center| {
                 if config.erb_time_resolution {
-                    (24.7 + (0.108 * center)) / config.erb_bandwidth_divisor
+                    (24.7 * ((0.00437 * center) + 1.0)) / config.erb_bandwidth_divisor
                 } else {
                     center / config.q_time_resolution
                 }
@@ -649,10 +649,10 @@ impl PrecomputedNormalizer {
 
 /*const MIN_COMPLETE_NORM_PHON: f64 = 20.0;
 const MAX_COMPLETE_NORM_PHON: f64 = 80.0;*/
-const MIN_INFORMATIVE_NORM_PHON: f32 = 0.0;
-const MAX_INFORMATIVE_NORM_PHON: f32 = 100.0;
+pub const MIN_INFORMATIVE_NORM_PHON: f32 = 0.0;
+pub const MAX_INFORMATIVE_NORM_PHON: f32 = 100.0;
 #[allow(clippy::excessive_precision)]
-const HEARING_THRESHOLD_PHON: f32 = 2.4000000000000012;
+pub const HEARING_THRESHOLD_PHON: f32 = 2.4000000000000012;
 /* Calculated using:
 let mut hearing_threshold_phon: f64 = 0.0;
 for f in 20..=20000 {

@@ -35,7 +35,10 @@ use crate::PluginParams;
 use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, AudioState, MAX_FREQUENCY_BINS,
     SPECTROGRAM_SLICES,
-    analyzer::{BetterSpectrogram, FrequencyScale, map_value},
+    analyzer::{
+        BetterSpectrogram, FrequencyScale, HEARING_THRESHOLD_PHON, MAX_INFORMATIVE_NORM_PHON,
+        map_value,
+    },
 };
 
 fn calculate_volume_min_max(
@@ -676,24 +679,26 @@ impl Default for RenderSettings {
             left_hue: 195.0,
             right_hue: 328.0,
             minimum_lightness: 0.13,
-            maximum_lightness: 0.82,
-            maximum_chroma: 0.09,
+            maximum_lightness: 0.82, // Picked using maximum values on https://oklch.com that fit in sRGB w/ all hues
+            maximum_chroma: 0.09, // Picked using maximum values on https://oklch.com that fit in sRGB w/ all hues
             automatic_gain: true,
             #[cfg(not(target_arch = "wasm32"))]
-            lookup_size: 4,
+            lookup_size: 4, // (COLOR_TABLE_BASE_CHROMA_SIZE * 4) * (COLOR_TABLE_BASE_LIGHTNESS_SIZE * 4) * 3 bytes = ~393 kB
             #[cfg(target_arch = "wasm32")]
-            lookup_size: 2,
+            lookup_size: 2, // (COLOR_TABLE_BASE_CHROMA_SIZE * 2) * (COLOR_TABLE_BASE_LIGHTNESS_SIZE * 2) * 3 bytes = ~98 kB
             agc_duration: Duration::from_secs_f32(1.0),
-            agc_above_masking: 40.0,
-            agc_below_masking: 0.0,
-            agc_minimum: 3.0 - AnalysisChainConfig::default().listening_volume,
-            agc_maximum: 100.0 - AnalysisChainConfig::default().listening_volume,
+            agc_above_masking: 37.0, // Determined using peak of sawtooth wave @ 440hz
+            agc_below_masking: 37.0 - 40.0, // 40dB of dynamic range
+            agc_minimum: (HEARING_THRESHOLD_PHON + 0.1)
+                - AnalysisChainConfig::default().listening_volume,
+            agc_maximum: MAX_INFORMATIVE_NORM_PHON
+                - AnalysisChainConfig::default().listening_volume,
             min_db: 20.0 - AnalysisChainConfig::default().listening_volume,
             max_db: 80.0 - AnalysisChainConfig::default().listening_volume,
             clamp_using_smr: false,
             bargraph_height: 0.33,
-            spectrogram_duration: Duration::from_secs_f32(0.67),
-            bargraph_averaging: Duration::from_secs_f32(BASELINE_TARGET_FRAME_SECS),
+            spectrogram_duration: Duration::from_secs_f32(1.0 - 0.33),
+            bargraph_averaging: Duration::from_secs_f32(BASELINE_TARGET_FRAME_SECS), // Ideal value is 1s / display_refresh_rate
             #[cfg(not(target_arch = "wasm32"))]
             spectrogram_nearest_neighbor: false,
             #[cfg(target_arch = "wasm32")]
