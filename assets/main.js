@@ -8,16 +8,12 @@ async function init() {
 		throw new Error("Webassembly bindings are undefined!");
 	}
 
-	const audioContext = new AudioContext({
-		latencyHint: 0,
-	});
+	const audioContext = new AudioContext();
 
 	await audioContext.audioWorklet.addModule("./worklet.js");
 	const workletNode = new AudioWorkletNode(audioContext, "copy-processor");
 
 	let maxPosition = wasm.left_sample_buffer().length;
-
-	// TODO: Latency compensation using audioContext.baseLatency + audioContext.outputLatency
 
 	workletNode.port.onmessage = (event) => {
 		let input = event.data;
@@ -29,7 +25,10 @@ async function init() {
 		} else {
 			throw new Error("Unsupported channel count!");
 		}
-		wasm.set_rate(audioContext.sampleRate);
+		wasm.set_rate_and_latency(
+			audioContext.sampleRate,
+			audioContext.baseLatency + audioContext.outputLatency
+		);
 
 		let position = wasm.get_position();
 
@@ -68,6 +67,7 @@ async function init() {
 
 	audioElement.addEventListener("pause", () => {
 		audioContext.suspend();
+		wasm.set_position(0);
 	});
 
 	audioElement.addEventListener("loadstart", () => {
@@ -96,13 +96,6 @@ function buildElements() {
 	audioElement.controls = true;
 	audioElement.style.display = "none";
 
-	const message = document.createElement("p");
-	message.style.color = "white";
-	message.style.margin = "1em";
-	message.style.fontFamily = "system-ui,sans-serif";
-	message.innerText =
-		"Note: Output device latency compensation is not supported.";
-
 	const fileInput = document.createElement("input");
 	fileInput.style.color = "white";
 	fileInput.type = "file";
@@ -117,11 +110,9 @@ function buildElements() {
 		});
 		audioElement.src = urlObj;
 		audioElement.style.display = "inherit";
-		message.style.display = "none";
 	});
 
 	leftControlDiv.appendChild(fileInput);
-	rightControlDiv.appendChild(message);
 	rightControlDiv.appendChild(audioElement);
 
 	document.body.appendChild(leftControlDiv);

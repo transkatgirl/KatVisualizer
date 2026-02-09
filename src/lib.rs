@@ -69,7 +69,10 @@ pub(crate) struct AudioState {
 impl Default for AudioState {
     fn default() -> Self {
         Self {
-            buffer_size_range: (0, SAMPLE_BUFFER_SIZE as u32),
+            buffer_size_range: (
+                0,
+                (SAMPLE_BUFFER_SIZE as u32).min((BUFFER_LIMIT_SECS * 48000.0).floor() as u32),
+            ),
             sample_rate: 48000.0,
             process_mode_title: "Chunked".to_string(),
             realtime: false,
@@ -103,14 +106,18 @@ impl AudioState {
 }
 
 #[cfg(target_arch = "wasm32")]
-const SAMPLE_BUFFER_SIZE: u16 = 16384;
+const SAMPLE_BUFFER_SIZE: u16 = u16::MAX;
 
 #[cfg(target_arch = "wasm32")]
-static SAMPLES: LazyLock<Mutex<(u16, bool, f32, Vec<f32>, Vec<f32>)>> = LazyLock::new(|| {
+const BUFFER_LIMIT_SECS: f32 = 0.1;
+
+#[cfg(target_arch = "wasm32")]
+static SAMPLES: LazyLock<Mutex<(u16, bool, f32, u16, Vec<f32>, Vec<f32>)>> = LazyLock::new(|| {
     Mutex::new((
         0,
         false,
         48000.0,
+        0,
         vec![0.0; SAMPLE_BUFFER_SIZE as usize],
         vec![0.0; SAMPLE_BUFFER_SIZE as usize],
     ))
@@ -121,7 +128,7 @@ static SAMPLES: LazyLock<Mutex<(u16, bool, f32, Vec<f32>, Vec<f32>)>> = LazyLock
 pub fn left_sample_buffer() -> Float32Array {
     let lock = LazyLock::force(&SAMPLES).lock();
 
-    unsafe { Float32Array::view(&lock.3) }
+    unsafe { Float32Array::view(&lock.4) }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -129,25 +136,49 @@ pub fn left_sample_buffer() -> Float32Array {
 pub fn right_sample_buffer() -> Float32Array {
     let lock = LazyLock::force(&SAMPLES).lock();
 
-    unsafe { Float32Array::view(&lock.4) }
+    unsafe { Float32Array::view(&lock.5) }
 }
 
 #[cfg(target_arch = "wasm32")]
 pub fn drain_buffers(callback: impl FnOnce(bool, f32, [&mut [f32]; 2])) {
     let mut lock = LazyLock::force(&SAMPLES).lock();
 
-    let (ref mut position, ref single_input, ref rate, ref mut left_samples, ref mut right_samples) =
-        *lock;
+    let (
+        ref mut position,
+        ref single_input,
+        ref rate,
+        ref latency,
+        ref mut left_samples,
+        ref mut right_samples,
+    ) = *lock;
 
-    let index = (*position).min(SAMPLE_BUFFER_SIZE) as usize;
+    if *latency >= *position {
+        return;
+    }
+
+    let index = *position as usize;
+    let latency_usize = *latency as usize;
+    let compensated_index = index - latency_usize;
+
+    let compensated_limited_index =
+        compensated_index.min((rate * BUFFER_LIMIT_SECS).floor() as usize);
 
     callback(
         *single_input,
         *rate,
-        [&mut left_samples[0..index], &mut right_samples[0..index]],
+        [
+            unsafe { left_samples.get_unchecked_mut(0..compensated_limited_index) },
+            unsafe { right_samples.get_unchecked_mut(0..compensated_limited_index) },
+        ],
     );
 
-    *position = 0;
+    if compensated_index != index {
+        left_samples.copy_within(compensated_index..index, 0);
+        right_samples.copy_within(compensated_index..index, 0);
+        *position = *latency;
+    } else {
+        *position = 0;
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -163,15 +194,23 @@ pub fn get_position() -> u16 {
 pub fn set_position(position: u16) {
     let mut lock = LazyLock::force(&SAMPLES).lock();
 
-    lock.0 = position;
+    lock.0 = position.min(SAMPLE_BUFFER_SIZE);
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn set_rate(rate: f32) {
+pub fn set_rate_and_latency(rate: f32, latency: f32) {
     let mut lock = LazyLock::force(&SAMPLES).lock();
 
+    assert!(rate.is_normal() && rate > 0.0 && latency.is_finite() && latency >= 0.0);
+
     lock.2 = rate;
+    lock.3 =
+        if ((latency + BUFFER_LIMIT_SECS) * rate).ceil() as usize >= SAMPLE_BUFFER_SIZE as usize {
+            0
+        } else {
+            (latency * rate).round() as u16
+        };
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -262,6 +301,10 @@ impl WasmApp {
         *self.state_info.write() = Some(AudioState {
             input_channels: if single_input { 1 } else { 2 },
             sample_rate,
+            buffer_size_range: (
+                0,
+                (SAMPLE_BUFFER_SIZE as u32).min((sample_rate * BUFFER_LIMIT_SECS).floor() as u32),
+            ),
             ..Default::default()
         });
         self.last_single_input = single_input;

@@ -64,7 +64,7 @@ rm dist/katvisualizer_wasm_bg.wasm
 mv dist/katvisualizer_wasm_bg.opt.wasm dist/katvisualizer_wasm_bg.wasm
 ```
 
-The web application uses an audio file as input (but can be [easily modified](./assets/main.js) to take in any stream of samples), and does not currently support compensating for output device latency.
+The web application uses an audio file as input, but can be [easily modified](./assets/main.js) to take in any stream of samples.
 
 ## Usage
 
