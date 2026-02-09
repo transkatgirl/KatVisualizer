@@ -103,7 +103,7 @@ impl AudioState {
 }
 
 #[cfg(target_arch = "wasm32")]
-const SAMPLE_BUFFER_SIZE: u16 = 9600;
+const SAMPLE_BUFFER_SIZE: u16 = 16384;
 
 #[cfg(target_arch = "wasm32")]
 static SAMPLES: LazyLock<Mutex<(u16, bool, f32, Vec<f32>, Vec<f32>)>> = LazyLock::new(|| {
