@@ -6,7 +6,7 @@
 #[cfg(all(not(debug_assertions), not(target_arch = "wasm32")))]
 use mimalloc::MiMalloc;
 
-use parking_lot::{FairMutex, Mutex, RwLock};
+use parking_lot::{FairMutex, RwLock};
 use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -14,6 +14,9 @@ use std::{
     num::NonZero,
     time::{Duration, Instant},
 };
+
+#[cfg(target_arch = "wasm32")]
+use parking_lot::Mutex;
 
 #[cfg(target_arch = "wasm32")]
 use web_time::{Duration, Instant};
@@ -231,7 +234,7 @@ pub fn set_stereo() {
 
 #[cfg(target_arch = "wasm32")]
 pub struct WasmApp {
-    analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
+    analysis_chain: Arc<FairMutex<Option<AnalysisChain>>>,
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
     analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
     state_info: Arc<RwLock<Option<AudioState>>>,
@@ -260,7 +263,7 @@ impl WasmApp {
         );
 
         Self {
-            analysis_chain: Arc::new(Mutex::new(Some(analysis_chain))),
+            analysis_chain: Arc::new(FairMutex::new(Some(analysis_chain))),
             analysis_output: Arc::new(FairMutex::new((
                 BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
                 AnalysisMetrics {
@@ -342,7 +345,7 @@ impl eframe::App for WasmApp {
 #[cfg(not(target_arch = "wasm32"))]
 pub struct MyPlugin {
     params: Arc<PluginParams>,
-    analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
+    analysis_chain: Arc<FairMutex<Option<AnalysisChain>>>,
     latency_samples: u32,
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
     analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
@@ -374,7 +377,7 @@ impl Default for MyPlugin {
     fn default() -> Self {
         Self {
             params: Arc::new(PluginParams::default()),
-            analysis_chain: Arc::new(Mutex::new(None)),
+            analysis_chain: Arc::new(FairMutex::new(None)),
             latency_samples: 0,
             analysis_output: Arc::new(FairMutex::new((
                 BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),

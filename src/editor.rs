@@ -679,7 +679,7 @@ impl Default for RenderSettings {
             left_hue: 195.0,
             right_hue: 328.0,
             minimum_lightness: 0.13,
-            maximum_lightness: 0.82, // Picked using maximum values on https://oklch.com that fit in sRGB w/ all hues
+            maximum_lightness: 0.818, // Picked using maximum values on https://oklch.com that fit in sRGB w/ all hues
             maximum_chroma: 0.09, // Picked using maximum values on https://oklch.com that fit in sRGB w/ all hues
             automatic_gain: true,
             #[cfg(not(target_arch = "wasm32"))]
@@ -857,7 +857,7 @@ const BASELINE_TARGET_FRAME_SECS: f32 = 1.0 / BASELINE_TARGET_FPS;
 #[cfg(not(target_arch = "wasm32"))]
 pub fn create(
     params: Arc<PluginParams>,
-    analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
+    analysis_chain: Arc<FairMutex<Option<AnalysisChain>>>,
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
     analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
     audio_state: Arc<RwLock<Option<AudioState>>>,
@@ -932,7 +932,7 @@ pub(crate) fn build(egui_ctx: &Context, spectrogram_texture: &RwLock<Option<Text
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render(
     egui_ctx: &Context,
-    analysis_chain: &Mutex<Option<AnalysisChain>>,
+    analysis_chain: &FairMutex<Option<AnalysisChain>>,
     analysis_output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
     analysis_frequencies: &RwLock<Vec<(f32, f32, f32)>>,
     audio_state: &RwLock<Option<AudioState>>,
@@ -1433,7 +1433,6 @@ pub(crate) fn render(
                         egui::Slider::new(&mut render_settings.left_hue, 0.0..=360.0)
                             .suffix("°")
                             .step_by(1.0)
-                            .fixed_decimals(0)
                             .text("Left channel hue"),
                     )
                     .changed()
@@ -1452,7 +1451,6 @@ pub(crate) fn render(
                         egui::Slider::new(&mut render_settings.right_hue, 0.0..=360.0)
                             .suffix("°")
                             .step_by(1.0)
-                            .fixed_decimals(0)
                             .text("Right channel hue"),
                     )
                     .changed()
@@ -1564,7 +1562,6 @@ pub(crate) fn render(
                             .clamping(egui::SliderClamping::Never)
                             .suffix("dB")
                             .step_by(1.0)
-                            .fixed_decimals(0)
                             .text("Range above masking mean"),
                     );
 
@@ -1573,7 +1570,6 @@ pub(crate) fn render(
                             .clamping(egui::SliderClamping::Never)
                             .suffix("dB")
                             .step_by(1.0)
-                            .fixed_decimals(0)
                             .text("Range below masking mean"),
                     );
                 } else {
@@ -1587,7 +1583,6 @@ pub(crate) fn render(
                             egui::Slider::new(&mut max_phon, 0.0..=100.0)
                                 .suffix(" phon")
                                 .step_by(1.0)
-                                .fixed_decimals(0)
                                 .text("Maximum amplitude"),
                         ).changed() {
                             render_settings.max_db =
@@ -1598,7 +1593,6 @@ pub(crate) fn render(
                             egui::Slider::new(&mut min_phon, 0.0..=100.0)
                                 .suffix(" phon")
                                 .step_by(1.0)
-                                .fixed_decimals(0)
                                 .text("Minimum amplitude"),
                         ).changed() {
                             render_settings.min_db =
@@ -1610,7 +1604,6 @@ pub(crate) fn render(
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix("dB")
                                 .step_by(1.0)
-                                .fixed_decimals(0)
                                 .text("Maximum amplitude"),
                         );
 
@@ -1619,7 +1612,6 @@ pub(crate) fn render(
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix("dB")
                                 .step_by(1.0)
-                                .fixed_decimals(0)
                                 .text("Minimum amplitude"),
                         );
                     }
@@ -1651,8 +1643,7 @@ pub(crate) fn render(
                             .logarithmic(true)
                             .clamping(egui::SliderClamping::Never)
                             .suffix("ms")
-                            .step_by(1.0)
-                            .fixed_decimals(0)
+                            .fixed_decimals(2)
                             .text("Bargraph averaging"),
                     )
                     .changed()
@@ -1738,7 +1729,6 @@ pub(crate) fn render(
                             .clamping(egui::SliderClamping::Never)
                             .suffix("dB")
                             .step_by(1.0)
-                            .fixed_decimals(0)
                             .text("Analysis gain"),
                     )
                     .on_hover_text("This setting adjusts the amplitude of the incoming signal before it is processed (but does not affect the plugin's output channels; audio is always passed through unmodified).\n\nAll internal audio processing is done using 32-bit floating point, so this can be adjusted freely without concern for clipping.")
@@ -1758,7 +1748,6 @@ pub(crate) fn render(
                             .clamping(egui::SliderClamping::Never)
                             .suffix("ms")
                             .step_by(1.0)
-                            .fixed_decimals(0)
                             .text("Latency offset"),
                     )
                     .on_hover_text("This setting allows you to manually increase the processing latency reported to the plugin's host.\n\nBy default (when this is set to 0ms), the latency incurred by internal buffering is already accounted for.")
@@ -1807,7 +1796,6 @@ pub(crate) fn render(
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix(" dB SPL")
                                 .step_by(1.0)
-                                .fixed_decimals(0)
                                 .text("0dbFS output volume"),
                         )
                         .on_hover_text("When normalizing amplitude values using an equal-loudness contour, a reference value is necessary to convert dBFS into dB SPL.\nIn order to improve the accuracy of amplitude normalization and receive accurate phon values, this value should be set to the dB SPL value corresponding to 0 dBFS on your system.")
@@ -1904,6 +1892,7 @@ pub(crate) fn render(
                                 &mut analysis_settings.update_rate_hz,
                                 128.0..=(SPECTROGRAM_SLICES as f64 / 2.0),
                             )
+                            .clamping(egui::SliderClamping::Always)
                             .logarithmic(true)
                             .suffix("hz")
                             .step_by(128.0)
@@ -1925,6 +1914,7 @@ pub(crate) fn render(
                             &mut analysis_settings.resolution,
                             128..=MAX_FREQUENCY_BINS,
                         )
+                        .clamping(egui::SliderClamping::Always)
                         .suffix(" bins")
                         .step_by(64.0)
                         .fixed_decimals(0)
@@ -2051,7 +2041,7 @@ pub(crate) fn render(
                                 .logarithmic(true)
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix(" Q")
-                                .fixed_decimals(1)
+                                .fixed_decimals(2)
                                 .text("Time resolution"),
                         )
                         .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.")
@@ -2071,7 +2061,6 @@ pub(crate) fn render(
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix("ms")
                                 .step_by(1.0)
-                                .fixed_decimals(0)
                                 .text("Minimum time resolution"),
                         )
                         .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen determining this tradeoff, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
@@ -2093,7 +2082,6 @@ pub(crate) fn render(
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix("ms")
                                 .step_by(1.0)
-                                .fixed_decimals(0)
                                 .text("Maximum time resolution"),
                         )
                         .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen determining this tradeoff, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
