@@ -241,17 +241,15 @@ pub struct WasmApp {
     last_single_input: bool,
     last_sample_rate: f32,
 
-    shared_state: SharedState,
+    shared_state: Mutex<SharedState>,
 }
 
 #[cfg(target_arch = "wasm32")]
 impl WasmApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let shared_state = SharedState::new();
+        let mut shared_state = SharedState::new();
 
-        let spectrogram_texture = shared_state.spectrogram_texture.clone();
-
-        build(&cc.egui_ctx, &spectrogram_texture);
+        build(&cc.egui_ctx, &mut shared_state.spectrogram_texture);
 
         let analysis_frequencies = Arc::new(FairMutex::new(Vec::with_capacity(MAX_FREQUENCY_BINS)));
 
@@ -275,7 +273,7 @@ impl WasmApp {
             state_info: Arc::new(FairMutex::new(Some(AudioState::default()))),
             last_single_input: AudioState::default().input_channels == 1,
             last_sample_rate: AudioState::default().sample_rate,
-            shared_state,
+            shared_state: Mutex::new(shared_state),
         }
     }
     fn update_config(&mut self, single_input: bool, sample_rate: f32) {

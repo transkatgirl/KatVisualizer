@@ -20,7 +20,7 @@ use nih_plug_egui::{
     },
     resizable_window::paint_resize_corner,
 };
-use parking_lot::{FairMutex, Mutex, RwLock};
+use parking_lot::{FairMutex, Mutex};
 use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -817,12 +817,11 @@ impl ColorTable {
 }
 
 pub(crate) struct SharedState {
-    settings: RwLock<RenderSettings>,
-    last_size: Mutex<(usize, usize)>,
-    frame_timing: Mutex<(Instant, Duration, Duration)>,
-    color_table: RwLock<ColorTable>,
-    cached_analysis_settings: Mutex<AnalysisChainConfig>,
-    pub(crate) spectrogram_texture: Arc<RwLock<Option<TextureId>>>,
+    settings: Arc<Mutex<RenderSettings>>,
+    frame_timing: (Instant, Duration, Duration),
+    color_table: ColorTable,
+    cached_analysis_settings: Arc<Mutex<AnalysisChainConfig>>,
+    pub(crate) spectrogram_texture: Option<TextureId>,
 }
 
 impl SharedState {
@@ -841,12 +840,11 @@ impl SharedState {
         );
 
         Self {
-            settings: RwLock::new(settings),
-            last_size: Mutex::new((MAX_FREQUENCY_BINS, SPECTROGRAM_SLICES)),
-            frame_timing: Mutex::new((Instant::now(), Duration::ZERO, Duration::ZERO)),
-            color_table: RwLock::new(color_table),
-            cached_analysis_settings: Mutex::new(AnalysisChainConfig::default()),
-            spectrogram_texture: Arc::new(RwLock::new(None)),
+            settings: Arc::new(Mutex::new(settings)),
+            frame_timing: (Instant::now(), Duration::ZERO, Duration::ZERO),
+            color_table,
+            cached_analysis_settings: Arc::new(Mutex::new(AnalysisChainConfig::default())),
+            spectrogram_texture: None,
         }
     }
 }
@@ -864,9 +862,8 @@ pub fn create(
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
 
-    let shared_state = SharedState::new();
-
-    let spectrogram_texture = shared_state.spectrogram_texture.clone();
+    let shared_state = Arc::new(Mutex::new(SharedState::new()));
+    let second_shared_state = shared_state.clone();
 
     create_egui_editor(
         egui_state.clone(),
@@ -883,7 +880,10 @@ pub fn create(
             },
         },
         move |egui_ctx, _, _| {
-            build(egui_ctx, &spectrogram_texture);
+            build(
+                egui_ctx,
+                &mut second_shared_state.lock().spectrogram_texture,
+            );
         },
         move |egui_ctx, _setter, _, _| {
             render(
@@ -900,10 +900,9 @@ pub fn create(
     )
 }
 
-pub(crate) fn build(egui_ctx: &Context, spectrogram_texture: &RwLock<Option<TextureId>>) {
+pub(crate) fn build(egui_ctx: &Context, spectrogram_texture: &mut Option<TextureId>) {
     let manager = egui_ctx.tex_manager();
     let mut manager = manager.write();
-    let mut spectrogram_texture = spectrogram_texture.write();
 
     if let Some(ref id) = *spectrogram_texture {
         if manager.meta(*id).is_some() {
@@ -936,7 +935,7 @@ pub(crate) fn render(
     analysis_output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
     analysis_frequencies: &FairMutex<Vec<(f32, f32, f32)>>,
     audio_state: &FairMutex<Option<AudioState>>,
-    shared_state: &SharedState,
+    shared_state: &Mutex<SharedState>,
     mut paused: bool,
     #[cfg(not(target_arch = "wasm32"))] egui_state: &EguiState,
 ) {
@@ -944,22 +943,14 @@ pub(crate) fn render(
 
     let start = Instant::now();
 
+    let mut shared_state = shared_state.lock();
+
     egui::CentralPanel::default().show(egui_ctx, |ui| {
-        let last_size = *shared_state.last_size.lock();
-
-        let mut bargraph_mesh = Mesh::default();
-        bargraph_mesh.reserve_triangles(last_size.0 * 2 * 2);
-        bargraph_mesh.reserve_vertices(last_size.0 * 4 * 2);
-
-        let mut spectrogram_image_pixels = vec![Color32::TRANSPARENT; last_size.0 * last_size.1];
-        let mut bargraph_buffer_1 = vec![(0.0, 0.0); last_size.0];
-        let mut bargraph_buffer_2 = vec![0.0; last_size.0];
-
         let painter = ui.painter();
         let max_x = painter.clip_rect().max.x;
         let max_y = painter.clip_rect().max.y;
 
-        let settings = *shared_state.settings.read();
+        let settings = *shared_state.settings.lock();
 
         let bargraph_bounds = Rect {
             min: Pos2 { x: 0.0, y: 0.0 },
@@ -990,26 +981,9 @@ pub(crate) fn render(
             / front.duration.as_secs_f32())
         .round() as usize;
 
-        *shared_state.last_size.lock() = (spectrogram_width, spectrogram_height);
-
-        if (last_size.0 * last_size.1) > (spectrogram_width * spectrogram_height) {
-            spectrogram_image_pixels.truncate(spectrogram_width * spectrogram_height);
-        } else if (last_size.0 * last_size.1) < (spectrogram_width * spectrogram_height) {
-            spectrogram_image_pixels
-                .resize(spectrogram_width * spectrogram_height, Color32::TRANSPARENT);
-        }
-
-        if last_size.0 > spectrogram_width {
-            bargraph_buffer_1.truncate(spectrogram_width);
-            bargraph_buffer_2.truncate(spectrogram_width);
-        } else if last_size.0 < spectrogram_width {
-            bargraph_buffer_1.resize(spectrogram_width, (0.0, 0.0));
-            bargraph_buffer_2.resize(spectrogram_width, 0.0);
-
-            let additional = spectrogram_width - last_size.0;
-            bargraph_mesh.reserve_triangles(additional * 2 * 2);
-            bargraph_mesh.reserve_vertices(additional * 4 * 2);
-        }
+        let mut bargraph_mesh = Mesh::default();
+        bargraph_mesh.reserve_triangles(spectrogram_width * 2 * 2);
+        bargraph_mesh.reserve_vertices(spectrogram_width * 4 * 2);
 
         let mut spectrogram_image = ColorImage {
             size: [spectrogram_width, spectrogram_height],
@@ -1017,8 +991,11 @@ pub(crate) fn render(
                 x: spectrogram_width as f32,
                 y: spectrogram_height as f32,
             },
-            pixels: spectrogram_image_pixels,
+            pixels: vec![Color32::TRANSPARENT; spectrogram_width * spectrogram_height],
         };
+
+        let bargraph_buffer_1 = vec![(0.0, 0.0); spectrogram_width];
+        let bargraph_buffer_2 = vec![0.0; spectrogram_width];
 
         #[cfg(not(target_arch = "wasm32"))]
         let buffering_duration = metrics.finished.elapsed();
@@ -1031,8 +1008,6 @@ pub(crate) fn render(
         let frequencies = analysis_frequencies.lock();
 
         {
-            let color_table = &shared_state.color_table.read();
-
             if settings.bargraph_height != 0.0 {
                 if settings.show_masking {
                     draw_bargraph(
@@ -1040,7 +1015,7 @@ pub(crate) fn render(
                         &spectrogram,
                         (bargraph_buffer_1, bargraph_buffer_2),
                         bargraph_bounds,
-                        color_table,
+                        &shared_state.color_table,
                         Some(settings.masking_color),
                         (max_db, min_db),
                         settings.bargraph_averaging,
@@ -1051,7 +1026,7 @@ pub(crate) fn render(
                         &spectrogram,
                         (bargraph_buffer_1, bargraph_buffer_2),
                         bargraph_bounds,
-                        color_table,
+                        &shared_state.color_table,
                         None,
                         (max_db, min_db),
                         settings.bargraph_averaging,
@@ -1064,7 +1039,7 @@ pub(crate) fn render(
                     &mut spectrogram_image,
                     &spectrogram,
                     &frequencies,
-                    color_table,
+                    &shared_state.color_table,
                     (max_db, min_db),
                     settings.clamp_using_smr,
                 );
@@ -1092,7 +1067,7 @@ pub(crate) fn render(
         drop(spectrogram);
 
         {
-            let spectrogram_texture = shared_state.spectrogram_texture.read().unwrap();
+            let spectrogram_texture = shared_state.spectrogram_texture.unwrap();
 
             egui_ctx.tex_manager().write().set(
                 spectrogram_texture,
@@ -1241,12 +1216,8 @@ pub(crate) fn render(
         drop(frequencies);
 
         if settings.show_performance {
-            let frame_timing = shared_state.frame_timing.lock();
-
-            let frame_elapsed = frame_timing.1;
-            let rasterize_elapsed = frame_timing.2;
-
-            drop(frame_timing);
+            let frame_elapsed = shared_state.frame_timing.1;
+            let rasterize_elapsed = shared_state.frame_timing.2;
 
             #[cfg(not(target_arch = "wasm32"))]
             let buffering_secs = buffering_duration.as_secs_f32();
@@ -1424,8 +1395,10 @@ pub(crate) fn render(
         })
         .default_open(false)
         .show(egui_ctx, |ui| {
-            let mut render_settings = shared_state.settings.write();
-            let mut analysis_settings = shared_state.cached_analysis_settings.lock();
+            let analysis_settings = shared_state.cached_analysis_settings.clone();
+            let render_settings = shared_state.settings.clone();
+            let mut analysis_settings = analysis_settings.lock();
+            let mut render_settings = render_settings.lock();
 
             ui.collapsing("Render Options", |ui| {
                 if ui
@@ -1437,7 +1410,7 @@ pub(crate) fn render(
                     )
                     .changed()
                 {
-                    shared_state.color_table.write().build(
+                    shared_state.color_table.build(
                         render_settings.left_hue,
                         render_settings.right_hue,
                         render_settings.minimum_lightness,
@@ -1455,7 +1428,7 @@ pub(crate) fn render(
                     )
                     .changed()
                 {
-                    shared_state.color_table.write().build(
+                    shared_state.color_table.build(
                         render_settings.left_hue,
                         render_settings.right_hue,
                         render_settings.minimum_lightness,
@@ -1471,7 +1444,7 @@ pub(crate) fn render(
                     )
                     .changed()
                 {
-                    shared_state.color_table.write().build(
+                    shared_state.color_table.build(
                         render_settings.left_hue,
                         render_settings.right_hue,
                         render_settings.minimum_lightness,
@@ -1487,7 +1460,7 @@ pub(crate) fn render(
                     )
                     .changed()
                 {
-                    shared_state.color_table.write().build(
+                    shared_state.color_table.build(
                         render_settings.left_hue,
                         render_settings.right_hue,
                         render_settings.minimum_lightness,
@@ -1503,7 +1476,7 @@ pub(crate) fn render(
                     )
                     .changed()
                 {
-                    shared_state.color_table.write().build(
+                    shared_state.color_table.build(
                         render_settings.left_hue,
                         render_settings.right_hue,
                         render_settings.minimum_lightness,
@@ -1521,13 +1494,11 @@ pub(crate) fn render(
                     )
                     .changed()
                 {
-                    let mut color_table = shared_state.color_table.write();
-
-                    *color_table = ColorTable::new(
+                    shared_state.color_table = ColorTable::new(
                         COLOR_TABLE_BASE_CHROMA_SIZE * render_settings.lookup_size,
                         COLOR_TABLE_BASE_LIGHTNESS_SIZE * render_settings.lookup_size,
                     );
-                    color_table.build(
+                    shared_state.color_table.build(
                         render_settings.left_hue,
                         render_settings.right_hue,
                         render_settings.minimum_lightness,
@@ -1580,7 +1551,6 @@ pub(crate) fn render(
                         if ui.add(
                             egui::Slider::new(&mut max_phon, 0.0..=100.0)
                                 .suffix(" phon")
-                                .step_by(1.0)
                                 .text("Maximum amplitude"),
                         ).changed() {
                             render_settings.max_db =
@@ -1590,7 +1560,6 @@ pub(crate) fn render(
                         if ui.add(
                             egui::Slider::new(&mut min_phon, 0.0..=100.0)
                                 .suffix(" phon")
-                                .step_by(1.0)
                                 .text("Minimum amplitude"),
                         ).changed() {
                             render_settings.min_db =
@@ -1601,7 +1570,6 @@ pub(crate) fn render(
                             egui::Slider::new(&mut render_settings.max_db, -100.0..=0.0)
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix("dB")
-                                .step_by(1.0)
                                 .text("Maximum amplitude"),
                         );
 
@@ -1609,7 +1577,6 @@ pub(crate) fn render(
                             egui::Slider::new(&mut render_settings.min_db, -100.0..=0.0)
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix("dB")
-                                .step_by(1.0)
                                 .text("Minimum amplitude"),
                         );
                     }
@@ -1693,7 +1660,7 @@ pub(crate) fn render(
                             f32::NEG_INFINITY;
                         render_settings.agc_maximum = f32::INFINITY;
                     }
-                    shared_state.color_table.write().build(
+                    shared_state.color_table.build(
                         render_settings.left_hue,
                         render_settings.right_hue,
                         render_settings.minimum_lightness,
@@ -1731,7 +1698,6 @@ pub(crate) fn render(
                         egui::Slider::new(&mut analysis_settings.gain, -20.0..=40.0)
                             .clamping(egui::SliderClamping::Never)
                             .suffix("dB")
-                            .step_by(1.0)
                             .text("Analysis gain"),
                     )
                     .on_hover_text("This setting adjusts the amplitude of the incoming signal before it is processed (but does not affect the plugin's output channels; audio is always passed through unmodified).\n\nAll internal audio processing is done using 32-bit floating point, so this can be adjusted freely without concern for clipping.")
@@ -1750,7 +1716,6 @@ pub(crate) fn render(
                         egui::Slider::new(&mut latency_offset, 0.0..=500.0)
                             .clamping(egui::SliderClamping::Never)
                             .suffix("ms")
-                            .step_by(1.0)
                             .text("Latency offset"),
                     )
                     .on_hover_text("This setting allows you to manually increase the processing latency reported to the plugin's host.\n\nBy default (when this is set to 0ms), the latency incurred by internal buffering is already accounted for.")
@@ -1798,7 +1763,6 @@ pub(crate) fn render(
                             egui::Slider::new(&mut analysis_settings.listening_volume, 20.0..=120.0)
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix(" dB SPL")
-                                .step_by(1.0)
                                 .text("0dbFS output volume"),
                         )
                         .on_hover_text("When normalizing amplitude values using an equal-loudness contour, a reference value is necessary to convert dBFS into dB SPL.\nIn order to improve the accuracy of amplitude normalization and receive accurate phon values, this value should be set to the dB SPL value corresponding to 0 dBFS on your system.")
@@ -2062,7 +2026,6 @@ pub(crate) fn render(
                             egui::Slider::new(&mut analysis_settings.time_resolution_clamp.0, 0.0..=200.0)
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix("ms")
-                                .step_by(1.0)
                                 .text("Minimum time resolution"),
                         )
                         .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen determining this tradeoff, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
@@ -2083,7 +2046,6 @@ pub(crate) fn render(
                             egui::Slider::new(&mut analysis_settings.time_resolution_clamp.1, 0.0..=200.0)
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix("ms")
-                                .step_by(1.0)
                                 .text("Maximum time resolution"),
                         )
                         .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nWhen determining this tradeoff, bounding the time resolution may be useful to improve visualization readability. This setting allows you to adjust this bound.")
@@ -2143,11 +2105,10 @@ pub(crate) fn render(
         });
 
     let now = Instant::now();
-    let mut frame_timing = shared_state.frame_timing.lock();
 
-    *frame_timing = (
+    shared_state.frame_timing = (
         now,
-        now.duration_since(frame_timing.0),
+        now.duration_since(shared_state.frame_timing.0),
         now.duration_since(start),
     )
 }
