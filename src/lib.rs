@@ -6,7 +6,7 @@
 #[cfg(all(not(debug_assertions), not(target_arch = "wasm32")))]
 use mimalloc::MiMalloc;
 
-use parking_lot::{FairMutex, RwLock};
+use parking_lot::FairMutex;
 use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -236,8 +236,8 @@ pub fn set_stereo() {
 pub struct WasmApp {
     analysis_chain: Arc<FairMutex<Option<AnalysisChain>>>,
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
-    analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
-    state_info: Arc<RwLock<Option<AudioState>>>,
+    analysis_frequencies: Arc<FairMutex<Vec<(f32, f32, f32)>>>,
+    state_info: Arc<FairMutex<Option<AudioState>>>,
     last_single_input: bool,
     last_sample_rate: f32,
 
@@ -253,7 +253,7 @@ impl WasmApp {
 
         build(&cc.egui_ctx, &spectrogram_texture);
 
-        let analysis_frequencies = Arc::new(RwLock::new(Vec::with_capacity(MAX_FREQUENCY_BINS)));
+        let analysis_frequencies = Arc::new(FairMutex::new(Vec::with_capacity(MAX_FREQUENCY_BINS)));
 
         let analysis_chain = AnalysisChain::new(
             &AnalysisChainConfig::default(),
@@ -272,7 +272,7 @@ impl WasmApp {
                 },
             ))),
             analysis_frequencies,
-            state_info: Arc::new(RwLock::new(Some(AudioState::default()))),
+            state_info: Arc::new(FairMutex::new(Some(AudioState::default()))),
             last_single_input: AudioState::default().input_channels == 1,
             last_sample_rate: AudioState::default().sample_rate,
             shared_state,
@@ -301,7 +301,7 @@ impl WasmApp {
             },
         );
 
-        *self.state_info.write() = Some(AudioState {
+        *self.state_info.lock() = Some(AudioState {
             input_channels: if single_input { 1 } else { 2 },
             sample_rate,
             buffer_size_range: (
@@ -348,8 +348,8 @@ pub struct MyPlugin {
     analysis_chain: Arc<FairMutex<Option<AnalysisChain>>>,
     latency_samples: u32,
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
-    analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
-    state_info: Arc<RwLock<Option<AudioState>>>,
+    analysis_frequencies: Arc<FairMutex<Vec<(f32, f32, f32)>>>,
+    state_info: Arc<FairMutex<Option<AudioState>>>,
     keepawake: Option<KeepAwake>,
 }
 
@@ -386,8 +386,8 @@ impl Default for MyPlugin {
                     finished: Instant::now(),
                 },
             ))),
-            analysis_frequencies: Arc::new(RwLock::new(Vec::with_capacity(MAX_FREQUENCY_BINS))),
-            state_info: Arc::new(RwLock::new(None)),
+            analysis_frequencies: Arc::new(FairMutex::new(Vec::with_capacity(MAX_FREQUENCY_BINS))),
+            state_info: Arc::new(FairMutex::new(None)),
             keepawake: None,
         }
     }
@@ -519,7 +519,7 @@ impl Plugin for MyPlugin {
             },
         );
 
-        *self.state_info.write() = Some(AudioState::new(*audio_io_layout, *buffer_config));
+        *self.state_info.lock() = Some(AudioState::new(*audio_io_layout, *buffer_config));
 
         self.keepawake = keepawake::Builder::default()
             .app_name("KatVisualizer")

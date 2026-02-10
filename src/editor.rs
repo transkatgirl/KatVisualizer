@@ -859,8 +859,8 @@ pub fn create(
     params: Arc<PluginParams>,
     analysis_chain: Arc<FairMutex<Option<AnalysisChain>>>,
     analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
-    analysis_frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
-    audio_state: Arc<RwLock<Option<AudioState>>>,
+    analysis_frequencies: Arc<FairMutex<Vec<(f32, f32, f32)>>>,
+    audio_state: Arc<FairMutex<Option<AudioState>>>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
 
@@ -934,8 +934,8 @@ pub(crate) fn render(
     egui_ctx: &Context,
     analysis_chain: &FairMutex<Option<AnalysisChain>>,
     analysis_output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
-    analysis_frequencies: &RwLock<Vec<(f32, f32, f32)>>,
-    audio_state: &RwLock<Option<AudioState>>,
+    analysis_frequencies: &FairMutex<Vec<(f32, f32, f32)>>,
+    audio_state: &FairMutex<Option<AudioState>>,
     shared_state: &SharedState,
     mut paused: bool,
     #[cfg(not(target_arch = "wasm32"))] egui_state: &EguiState,
@@ -960,8 +960,6 @@ pub(crate) fn render(
         let max_y = painter.clip_rect().max.y;
 
         let settings = *shared_state.settings.read();
-
-        let frequencies = analysis_frequencies.read();
 
         let bargraph_bounds = Rect {
             min: Pos2 { x: 0.0, y: 0.0 },
@@ -1029,6 +1027,8 @@ pub(crate) fn render(
         let chunk_duration = front.duration;
 
         let (min_db, max_db) = calculate_volume_min_max(&settings, &spectrogram);
+
+        let frequencies = analysis_frequencies.lock();
 
         {
             let color_table = &shared_state.color_table.read();
@@ -1200,7 +1200,7 @@ pub(crate) fn render(
         }
 
         if settings.show_format {
-            if let Some(audio_state) = audio_state.read().as_ref() {
+            if let Some(audio_state) = audio_state.lock().as_ref() {
                 let min_buffer_size_s =
                     audio_state.buffer_size_range.0 as f32 / audio_state.sample_rate;
                 let max_buffer_size_s =
@@ -1431,8 +1431,8 @@ pub(crate) fn render(
                 if ui
                     .add(
                         egui::Slider::new(&mut render_settings.left_hue, 0.0..=360.0)
+                            .clamping(egui::SliderClamping::Always)
                             .suffix("°")
-                            .step_by(1.0)
                             .text("Left channel hue"),
                     )
                     .changed()
@@ -1449,8 +1449,8 @@ pub(crate) fn render(
                 if ui
                     .add(
                         egui::Slider::new(&mut render_settings.right_hue, 0.0..=360.0)
+                            .clamping(egui::SliderClamping::Always)
                             .suffix("°")
-                            .step_by(1.0)
                             .text("Right channel hue"),
                     )
                     .changed()
@@ -1551,7 +1551,7 @@ pub(crate) fn render(
                         )
                         .changed()
                     {
-                        if agc_duration > 0.0 {
+                        if agc_duration >= 0.0 {
                             render_settings.agc_duration =
                                 Duration::from_secs_f64(agc_duration);
                         }
@@ -1561,7 +1561,6 @@ pub(crate) fn render(
                         egui::Slider::new(&mut render_settings.agc_above_masking, 0.0..=100.0)
                             .clamping(egui::SliderClamping::Never)
                             .suffix("dB")
-                            .step_by(1.0)
                             .text("Range above masking mean"),
                     );
 
@@ -1569,7 +1568,6 @@ pub(crate) fn render(
                         egui::Slider::new(&mut render_settings.agc_below_masking, -50.0..=50.0)
                             .clamping(egui::SliderClamping::Never)
                             .suffix("dB")
-                            .step_by(1.0)
                             .text("Range below masking mean"),
                     );
                 } else {
@@ -1632,8 +1630,10 @@ pub(crate) fn render(
                     )
                     .changed()
                 {
-                    render_settings.spectrogram_duration =
-                        Duration::from_secs_f64(spectrogram_duration);
+                    if spectrogram_duration >= 0.0 {
+                        render_settings.spectrogram_duration =
+                            Duration::from_secs_f64(spectrogram_duration);
+                    }
                 };
 
                 let mut bargraph_averaging = render_settings.bargraph_averaging.as_secs_f64() * 1000.0;
@@ -1643,17 +1643,20 @@ pub(crate) fn render(
                             .logarithmic(true)
                             .clamping(egui::SliderClamping::Never)
                             .suffix("ms")
-                            .fixed_decimals(2)
+                            .smallest_positive(0.1)
                             .text("Bargraph averaging"),
                     )
                     .changed()
                 {
-                    render_settings.bargraph_averaging =
-                        Duration::from_secs_f64(bargraph_averaging / 1000.0);
+                    if bargraph_averaging >= 0.0 {
+                        render_settings.bargraph_averaging =
+                            Duration::from_secs_f64(bargraph_averaging / 1000.0);
+                    }
                 };
 
                 ui.add(
                     egui::Slider::new(&mut render_settings.bargraph_height, 0.0..=1.0)
+                        .clamping(egui::SliderClamping::Always)
                         .text("Bargraph height"),
                 );
 
@@ -2041,7 +2044,6 @@ pub(crate) fn render(
                                 .logarithmic(true)
                                 .clamping(egui::SliderClamping::Never)
                                 .suffix(" Q")
-                                .fixed_decimals(2)
                                 .text("Time resolution"),
                         )
                         .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution. This setting allows you to adjust this tradeoff.")

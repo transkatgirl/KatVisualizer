@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 #[cfg(target_arch = "wasm32")]
 use web_time::{Duration, Instant};
 
-use parking_lot::{FairMutex, Mutex, RwLock};
+use parking_lot::{FairMutex, Mutex};
 #[cfg(not(target_arch = "wasm32"))]
 use threadpool::ThreadPool;
 
@@ -97,7 +97,7 @@ pub(crate) struct AnalysisChain {
     single_input: bool,
     #[cfg(not(target_arch = "wasm32"))]
     analyzer_pool: ThreadPool,
-    pub(crate) frequencies: Arc<RwLock<Vec<(f32, f32, f32)>>>,
+    pub(crate) frequencies: Arc<FairMutex<Vec<(f32, f32, f32)>>>,
 }
 
 impl AnalysisChain {
@@ -105,7 +105,7 @@ impl AnalysisChain {
         config: &AnalysisChainConfig,
         sample_rate: f32,
         single_input: bool,
-        frequency_list_container: Arc<RwLock<Vec<(f32, f32, f32)>>>,
+        frequency_list_container: Arc<FairMutex<Vec<(f32, f32, f32)>>>,
     ) -> Self {
         let analyzer_config = BetterAnalyzerConfiguration {
             resolution: config.resolution,
@@ -131,7 +131,7 @@ impl AnalysisChain {
         chunker.set_block_size(chunk_size);
 
         {
-            let mut frequencies = frequency_list_container.write();
+            let mut frequencies = frequency_list_container.lock();
             frequencies.clear();
             frequencies.extend(
                 left_analyzer
@@ -489,7 +489,7 @@ impl AnalysisChain {
             let left_analyzer = BetterAnalyzer::new(analyzer_config.clone());
             let right_analyzer = BetterAnalyzer::new(analyzer_config);
 
-            let mut frequencies = self.frequencies.write();
+            let mut frequencies = self.frequencies.lock();
             frequencies.clear();
             frequencies.extend(
                 left_analyzer
