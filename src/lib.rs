@@ -368,7 +368,7 @@ const MAX_FREQUENCY_BINS: usize = 1024;
 const SPECTROGRAM_SLICES: usize = 8192;
 
 #[cfg(target_arch = "wasm32")]
-const SPECTROGRAM_SLICES: usize = 4096;
+const SPECTROGRAM_SLICES: usize = 2048;
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Default for MyPlugin {

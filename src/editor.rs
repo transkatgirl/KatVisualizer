@@ -1880,7 +1880,7 @@ pub(crate) fn render(
                         .add(
                             egui::Slider::new(
                                 &mut analysis_settings.update_rate_hz,
-                                128.0..=(SPECTROGRAM_SLICES as f64 / 2.0),
+                                128.0..=SPECTROGRAM_SLICES as f64,
                             )
                             .clamping(egui::SliderClamping::Always)
                             .logarithmic(true)
