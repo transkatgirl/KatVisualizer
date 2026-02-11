@@ -698,7 +698,7 @@ impl Default for RenderSettings {
             clamp_using_smr: false,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f32(1.0 - 0.33),
-            bargraph_averaging: Duration::from_secs_f32(BASELINE_TARGET_FRAME_SECS), // Ideal value is 1s / display_refresh_rate
+            bargraph_averaging: Duration::from_secs_f32(BASELINE_TARGET_FRAME_SECS), // Ideal value is 1s / display_refresh_rate, up until the critical flicker frequency (in humans, this typically ranges about 50-90Hz (equivalent to 100-180fps) depending on intensity & contrast)
             #[cfg(not(target_arch = "wasm32"))]
             spectrogram_nearest_neighbor: false,
             #[cfg(target_arch = "wasm32")]
