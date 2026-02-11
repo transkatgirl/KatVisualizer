@@ -1610,7 +1610,7 @@ pub(crate) fn render(
                             .logarithmic(true)
                             .clamping(egui::SliderClamping::Never)
                             .suffix("ms")
-                            .smallest_positive(0.1)
+                            .smallest_positive(1.0)
                             .text("Bargraph averaging"),
                     )
                     .changed()
