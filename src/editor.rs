@@ -687,8 +687,8 @@ impl Default for RenderSettings {
             #[cfg(target_arch = "wasm32")]
             lookup_size: 2, // (COLOR_TABLE_BASE_CHROMA_SIZE * 2) * (COLOR_TABLE_BASE_LIGHTNESS_SIZE * 2) * 3 bytes = ~98 kB
             agc_duration: Duration::from_secs_f32(1.0),
-            agc_above_masking: 37.0, // Determined using peak of sawtooth wave @ 440hz
-            agc_below_masking: 40.0 - 37.0, // 40dB of dynamic range
+            agc_above_masking: 36.0, // Determined using peak of sawtooth wave @ 440hz
+            agc_below_masking: 40.0 - 36.0, // 40dB of dynamic range
             agc_minimum: (HEARING_THRESHOLD_PHON + 0.1)
                 - AnalysisChainConfig::default().listening_volume,
             agc_maximum: MAX_INFORMATIVE_NORM_PHON

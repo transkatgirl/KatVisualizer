@@ -80,7 +80,7 @@ If you'd like to start improving the visualization's readability further, the se
 - Render Options -> Bargraph averaging (ideal value is 16.67ms for a 60Hz monitor or 8.33ms for a 120Hz monitor; avoid setting this below 5ms)
 - Render Options -> Range above masking mean
 - Render Options -> Range below masking mean
-- Analysis Options -> ERB bandwidth divisor (ideal value depends on what you're trying to analyze; if in doubt, the default value of 1.5 is usually a good middle ground)
+- Analysis Options -> ERB bandwidth divisor (ideal value depends on what you're trying to analyze; if in doubt, the default value is usually a good middle ground)
 - Analysis Options -> Frequency range (ideal value depends on what you're trying to analyze)
 - Analysis Options -> Resolution (increasing it may hurt performance)
 - Analysis Options -> Update rate (increasing it may hurt performance)
