@@ -43,7 +43,7 @@ impl Default for BetterAnalyzerConfiguration {
             sample_rate: 48000.0,
             q_time_resolution: 17.30993405, // Determined using distances between MIDI notes
             erb_time_resolution: true,
-            erb_bandwidth_divisor: 1.35,
+            erb_bandwidth_divisor: 1.35, // Critical bands are asymmetrical, and this is taken into account by the ERB formula. However, we want our bandwidth to be based on the *narrowest side* of the critical band, so we need to adjust the formula accordingly. TODO: This constant is a rough approximation and should be replaced with a more exact value.
             time_resolution_clamp: (0.0, 37.23177300), // Upper limit is determined using 1s / ERB(20 Hz)
             nc_method: true,
             strict_nc: false,
