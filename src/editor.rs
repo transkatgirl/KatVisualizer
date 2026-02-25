@@ -36,8 +36,8 @@ use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, AudioState, MAX_FREQUENCY_BINS,
     SPECTROGRAM_SLICES,
     analyzer::{
-        BetterSpectrogram, FrequencyScale, HEARING_THRESHOLD_PHON, MAX_COMPLETE_NORM_PHON,
-        MAX_INFORMATIVE_NORM_PHON, MIN_COMPLETE_NORM_PHON, map_value,
+        BetterAnalysis, BetterSpectrogram, FrequencyScale, HEARING_THRESHOLD_PHON,
+        MAX_COMPLETE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON, MIN_COMPLETE_NORM_PHON, map_value,
     },
 };
 
@@ -79,7 +79,7 @@ fn calculate_volume_min_max(
 fn draw_bargraph(
     mesh: &mut Mesh,
     spectrogram: &BetterSpectrogram,
-    mut buffer: (Vec<(f32, f32)>, Vec<f32>),
+    buffer: (Vec<(f32, f32)>, Vec<f32>),
     bounds: Rect,
     color_table: &ColorTable,
     masking_color: Option<Color32>,
@@ -108,66 +108,17 @@ fn draw_bargraph(
             .unwrap_or(1);
 
         if max_index > 1 {
-            let count = max_index as f32 + 1.0;
-
-            for i in 0..=max_index {
-                for (spectrogram_chunk, output_chunk) in unsafe {
-                    spectrogram
-                        .data
-                        .get(i)
-                        .unwrap_unchecked()
-                        .data
-                        .as_chunks_unchecked::<64>()
-                }
-                .iter()
-                .zip(unsafe { buffer.0.as_chunks_unchecked_mut::<64>() })
-                {
-                    for (data, output) in spectrogram_chunk.iter().zip(output_chunk) {
-                        *output = (
-                            output.0.algebraic_add(data.0),
-                            output.1.algebraic_add(data.1),
-                        )
-                    }
-                }
-            }
-
-            for chunk in unsafe { buffer.0.as_chunks_unchecked_mut::<64>() } {
-                for item in chunk {
-                    *item = (item.0.algebraic_div(count), item.1.algebraic_div(count));
-                }
-            }
-
-            draw_bargraph_from(mesh, &buffer.0, bounds, color_table, (max_db, min_db));
-
-            if let Some(masking_color) = masking_color {
-                assert_eq!(front.masking.len(), buffer.1.len());
-
-                for i in 0..=max_index {
-                    for (spectrogram_chunk, output_chunk) in unsafe {
-                        spectrogram
-                            .data
-                            .get(i)
-                            .unwrap_unchecked()
-                            .masking
-                            .as_chunks_unchecked::<64>()
-                    }
-                    .iter()
-                    .zip(unsafe { buffer.1.as_chunks_unchecked_mut::<64>() })
-                    {
-                        for (data, output) in spectrogram_chunk.iter().zip(output_chunk) {
-                            *output = output.algebraic_add(data.1);
-                        }
-                    }
-                }
-
-                for chunk in unsafe { buffer.1.as_chunks_unchecked_mut::<64>() } {
-                    for item in chunk {
-                        *item = item.algebraic_div(count);
-                    }
-                }
-
-                draw_secondary_bargraph(mesh, &buffer.1, bounds, masking_color, (max_db, min_db));
-            }
+            draw_averaged_bargraph(
+                mesh,
+                spectrogram,
+                buffer,
+                bounds,
+                color_table,
+                masking_color,
+                (max_db, min_db),
+                front,
+                max_index,
+            );
 
             return;
         }
@@ -182,6 +133,81 @@ fn draw_bargraph(
             masking_color,
             (max_db, min_db),
         );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+fn draw_averaged_bargraph(
+    mesh: &mut Mesh,
+    spectrogram: &BetterSpectrogram,
+    mut buffer: (Vec<(f32, f32)>, Vec<f32>),
+    bounds: Rect,
+    color_table: &ColorTable,
+    masking_color: Option<Color32>,
+    (max_db, min_db): (f32, f32),
+    front: &BetterAnalysis,
+    max_index: usize,
+) {
+    let count = max_index as f32 + 1.0;
+
+    for i in 0..=max_index {
+        for (spectrogram_chunk, output_chunk) in unsafe {
+            spectrogram
+                .data
+                .get(i)
+                .unwrap_unchecked()
+                .data
+                .as_chunks_unchecked::<64>()
+        }
+        .iter()
+        .zip(unsafe { buffer.0.as_chunks_unchecked_mut::<64>() })
+        {
+            for (data, output) in spectrogram_chunk.iter().zip(output_chunk) {
+                *output = (
+                    output.0.algebraic_add(data.0),
+                    output.1.algebraic_add(data.1),
+                )
+            }
+        }
+    }
+
+    for chunk in unsafe { buffer.0.as_chunks_unchecked_mut::<64>() } {
+        for item in chunk {
+            *item = (item.0.algebraic_div(count), item.1.algebraic_div(count));
+        }
+    }
+
+    draw_bargraph_from(mesh, &buffer.0, bounds, color_table, (max_db, min_db));
+
+    if let Some(masking_color) = masking_color {
+        assert_eq!(front.masking.len(), buffer.1.len());
+
+        for i in 0..=max_index {
+            for (spectrogram_chunk, output_chunk) in unsafe {
+                spectrogram
+                    .data
+                    .get(i)
+                    .unwrap_unchecked()
+                    .masking
+                    .as_chunks_unchecked::<64>()
+            }
+            .iter()
+            .zip(unsafe { buffer.1.as_chunks_unchecked_mut::<64>() })
+            {
+                for (data, output) in spectrogram_chunk.iter().zip(output_chunk) {
+                    *output = output.algebraic_add(data.1);
+                }
+            }
+        }
+
+        for chunk in unsafe { buffer.1.as_chunks_unchecked_mut::<64>() } {
+            for item in chunk {
+                *item = item.algebraic_div(count);
+            }
+        }
+
+        draw_secondary_bargraph(mesh, &buffer.1, bounds, masking_color, (max_db, min_db));
     }
 }
 
@@ -457,8 +483,6 @@ fn draw_spectrogram_image(
 
     assert!(image_width.is_multiple_of(64));
 
-    let mut buffer = [0; 64];
-
     if clamp_using_smr && blending_proportion < 1.0 {
         let masking_ranges: Vec<f32> =
             unsafe { frequencies.as_chunks_unchecked::<64>() }
@@ -475,146 +499,210 @@ fn draw_spectrogram_image(
         assert!(masking_ranges.len().is_multiple_of(64));
 
         if blending_proportion > 0.0 {
-            let blending_inv = 1.0 - blending_proportion;
-
-            for (y, analysis) in spectrogram.data.iter().enumerate() {
-                if analysis.data.len() != image_width
-                    || y == image_height
-                    || analysis.duration != target_duration
-                {
-                    break;
-                }
-
-                for (analysis_chunk, (masking_chunk, (masking_range_chunk, pixel_chunk))) in
-                    unsafe { analysis.data.as_chunks_unchecked::<64>() }
-                        .iter()
-                        .zip(
-                            unsafe { analysis.masking.as_chunks_unchecked::<64>() }
-                                .iter()
-                                .zip(
-                                    unsafe { masking_ranges.as_chunks_unchecked::<64>() }
-                                        .iter()
-                                        .zip(unsafe {
-                                            image
-                                                .pixels
-                                                .get_unchecked_mut(
-                                                    (image_width * y)..(image_width * (y + 1)),
-                                                )
-                                                .as_chunks_unchecked_mut::<64>()
-                                        }),
-                                ),
-                        )
-                {
-                    for ((pan, volume), (((_, masking), range), output)) in
-                        analysis_chunk.iter().copied().zip(
-                            masking_chunk
-                                .iter()
-                                .copied()
-                                .zip(masking_range_chunk.iter().copied())
-                                .zip(buffer.iter_mut()),
-                        )
-                    {
-                        let volume_intensity = map_value(volume, min_db, max_db, 0.0, 1.0);
-                        let clamp_intensity =
-                            map_value(volume.algebraic_sub(masking), 0.0, range, 0.0, 1.0);
-
-                        let intensity = volume_intensity.min(
-                            clamp_intensity
-                                .algebraic_mul(blending_inv)
-                                .algebraic_add(volume_intensity.algebraic_mul(blending_proportion)),
-                        );
-
-                        *output = color_table.calculate_index(pan, intensity);
-                    }
-
-                    for (index, pixel) in buffer.into_iter().zip(pixel_chunk) {
-                        *pixel = unsafe { color_table.get_unchecked(index) };
-                    }
-                }
-            }
+            draw_spectrogram_smr_blended(
+                image,
+                spectrogram,
+                color_table,
+                (max_db, min_db),
+                (image_width, image_height),
+                target_duration,
+                &masking_ranges,
+                blending_proportion,
+            );
         } else {
-            for (y, analysis) in spectrogram.data.iter().enumerate() {
-                if analysis.data.len() != image_width
-                    || y == image_height
-                    || analysis.duration != target_duration
-                {
-                    break;
-                }
-
-                for (analysis_chunk, (masking_chunk, (masking_range_chunk, pixel_chunk))) in
-                    unsafe { analysis.data.as_chunks_unchecked::<64>() }
-                        .iter()
-                        .zip(
-                            unsafe { analysis.masking.as_chunks_unchecked::<64>() }
-                                .iter()
-                                .zip(
-                                    unsafe { masking_ranges.as_chunks_unchecked::<64>() }
-                                        .iter()
-                                        .zip(unsafe {
-                                            image
-                                                .pixels
-                                                .get_unchecked_mut(
-                                                    (image_width * y)..(image_width * (y + 1)),
-                                                )
-                                                .as_chunks_unchecked_mut::<64>()
-                                        }),
-                                ),
-                        )
-                {
-                    for ((pan, volume), (((_, masking), range), output)) in
-                        analysis_chunk.iter().copied().zip(
-                            masking_chunk
-                                .iter()
-                                .copied()
-                                .zip(masking_range_chunk.iter().copied())
-                                .zip(buffer.iter_mut()),
-                        )
-                    {
-                        let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).min(map_value(
-                            volume.algebraic_sub(masking),
-                            0.0,
-                            range,
-                            0.0,
-                            1.0,
-                        ));
-
-                        *output = color_table.calculate_index(pan, intensity);
-                    }
-
-                    for (index, pixel) in buffer.into_iter().zip(pixel_chunk) {
-                        *pixel = unsafe { color_table.get_unchecked(index) };
-                    }
-                }
-            }
+            draw_spectrogram_smr_unblended(
+                image,
+                spectrogram,
+                color_table,
+                (max_db, min_db),
+                (image_width, image_height),
+                target_duration,
+                &masking_ranges,
+            );
         }
     } else {
-        for (y, analysis) in spectrogram.data.iter().enumerate() {
-            if analysis.data.len() != image_width
-                || y == image_height
-                || analysis.duration != target_duration
+        draw_spectrogram_nosmr(
+            image,
+            spectrogram,
+            color_table,
+            (max_db, min_db),
+            (image_width, image_height),
+            target_duration,
+        );
+    }
+}
+
+fn draw_spectrogram_smr_unblended(
+    image: &mut ColorImage,
+    spectrogram: &BetterSpectrogram,
+    color_table: &ColorTable,
+    (max_db, min_db): (f32, f32),
+    (image_width, image_height): (usize, usize),
+    target_duration: Duration,
+    masking_ranges: &[f32],
+) {
+    let mut buffer = [0; 64];
+
+    for (y, analysis) in spectrogram.data.iter().enumerate() {
+        if analysis.data.len() != image_width
+            || y == image_height
+            || analysis.duration != target_duration
+        {
+            break;
+        }
+
+        for (analysis_chunk, (masking_chunk, (masking_range_chunk, pixel_chunk))) in
+            unsafe { analysis.data.as_chunks_unchecked::<64>() }
+                .iter()
+                .zip(
+                    unsafe { analysis.masking.as_chunks_unchecked::<64>() }
+                        .iter()
+                        .zip(
+                            unsafe { masking_ranges.as_chunks_unchecked::<64>() }
+                                .iter()
+                                .zip(unsafe {
+                                    image
+                                        .pixels
+                                        .get_unchecked_mut(
+                                            (image_width * y)..(image_width * (y + 1)),
+                                        )
+                                        .as_chunks_unchecked_mut::<64>()
+                                }),
+                        ),
+                )
+        {
+            for ((pan, volume), (((_, masking), range), output)) in
+                analysis_chunk.iter().copied().zip(
+                    masking_chunk
+                        .iter()
+                        .copied()
+                        .zip(masking_range_chunk.iter().copied())
+                        .zip(buffer.iter_mut()),
+                )
             {
-                break;
+                let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).min(map_value(
+                    volume.algebraic_sub(masking),
+                    0.0,
+                    range,
+                    0.0,
+                    1.0,
+                ));
+
+                *output = color_table.calculate_index(pan, intensity);
             }
 
-            for (analysis_chunk, pixel_chunk) in
-                unsafe { analysis.data.as_chunks_unchecked::<64>() }
-                    .iter()
-                    .zip(unsafe {
-                        image
-                            .pixels
-                            .get_unchecked_mut((image_width * y)..(image_width * (y + 1)))
-                            .as_chunks_unchecked_mut::<64>()
-                    })
-            {
-                for ((pan, volume), output) in analysis_chunk.iter().copied().zip(buffer.iter_mut())
-                {
-                    let intensity = map_value(volume, min_db, max_db, 0.0, 1.0);
-                    *output = color_table.calculate_index(pan, intensity);
-                }
+            for (index, pixel) in buffer.into_iter().zip(pixel_chunk) {
+                *pixel = unsafe { color_table.get_unchecked(index) };
+            }
+        }
+    }
+}
 
-                for (index, pixel) in buffer.into_iter().zip(pixel_chunk) {
-                    *pixel = unsafe { color_table.get_unchecked(index) };
-                }
+#[allow(clippy::too_many_arguments)]
+fn draw_spectrogram_smr_blended(
+    image: &mut ColorImage,
+    spectrogram: &BetterSpectrogram,
+    color_table: &ColorTable,
+    (max_db, min_db): (f32, f32),
+    (image_width, image_height): (usize, usize),
+    target_duration: Duration,
+    masking_ranges: &[f32],
+    blending_proportion: f32,
+) {
+    let mut buffer = [0; 64];
+    let blending_inv = 1.0 - blending_proportion;
+
+    for (y, analysis) in spectrogram.data.iter().enumerate() {
+        if analysis.data.len() != image_width
+            || y == image_height
+            || analysis.duration != target_duration
+        {
+            break;
+        }
+
+        for (analysis_chunk, (masking_chunk, (masking_range_chunk, pixel_chunk))) in
+            unsafe { analysis.data.as_chunks_unchecked::<64>() }
+                .iter()
+                .zip(
+                    unsafe { analysis.masking.as_chunks_unchecked::<64>() }
+                        .iter()
+                        .zip(
+                            unsafe { masking_ranges.as_chunks_unchecked::<64>() }
+                                .iter()
+                                .zip(unsafe {
+                                    image
+                                        .pixels
+                                        .get_unchecked_mut(
+                                            (image_width * y)..(image_width * (y + 1)),
+                                        )
+                                        .as_chunks_unchecked_mut::<64>()
+                                }),
+                        ),
+                )
+        {
+            for ((pan, volume), (((_, masking), range), output)) in
+                analysis_chunk.iter().copied().zip(
+                    masking_chunk
+                        .iter()
+                        .copied()
+                        .zip(masking_range_chunk.iter().copied())
+                        .zip(buffer.iter_mut()),
+                )
+            {
+                let volume_intensity = map_value(volume, min_db, max_db, 0.0, 1.0);
+                let clamp_intensity =
+                    map_value(volume.algebraic_sub(masking), 0.0, range, 0.0, 1.0);
+
+                let intensity = volume_intensity.min(
+                    clamp_intensity
+                        .algebraic_mul(blending_inv)
+                        .algebraic_add(volume_intensity.algebraic_mul(blending_proportion)),
+                );
+
+                *output = color_table.calculate_index(pan, intensity);
+            }
+
+            for (index, pixel) in buffer.into_iter().zip(pixel_chunk) {
+                *pixel = unsafe { color_table.get_unchecked(index) };
+            }
+        }
+    }
+}
+
+fn draw_spectrogram_nosmr(
+    image: &mut ColorImage,
+    spectrogram: &BetterSpectrogram,
+    color_table: &ColorTable,
+    (max_db, min_db): (f32, f32),
+    (image_width, image_height): (usize, usize),
+    target_duration: Duration,
+) {
+    let mut buffer = [0; 64];
+
+    for (y, analysis) in spectrogram.data.iter().enumerate() {
+        if analysis.data.len() != image_width
+            || y == image_height
+            || analysis.duration != target_duration
+        {
+            break;
+        }
+
+        for (analysis_chunk, pixel_chunk) in unsafe { analysis.data.as_chunks_unchecked::<64>() }
+            .iter()
+            .zip(unsafe {
+                image
+                    .pixels
+                    .get_unchecked_mut((image_width * y)..(image_width * (y + 1)))
+                    .as_chunks_unchecked_mut::<64>()
+            })
+        {
+            for ((pan, volume), output) in analysis_chunk.iter().copied().zip(buffer.iter_mut()) {
+                let intensity = map_value(volume, min_db, max_db, 0.0, 1.0);
+                *output = color_table.calculate_index(pan, intensity);
+            }
+
+            for (index, pixel) in buffer.into_iter().zip(pixel_chunk) {
+                *pixel = unsafe { color_table.get_unchecked(index) };
             }
         }
     }
