@@ -9,7 +9,7 @@ The current processing chain consists of the following:
 - ISO 226:2023 equal loudness contour
 - Extraction of panning information
 
-During rendering, color information is processed in the OkLCH color space.
+Rendering is perceptually aware, with color information processed in the OkLCH color space and a novel spectrogram rendering method used to make changes more visually distinct.
 
 ## Installation
 
@@ -74,9 +74,6 @@ The compiled plugin can be loaded into a DAW like any other metering plugin. It'
 Once the program is running, the window will display a graphical representation of the input audio, along with additional information in the top corners. The parameters used to render this graphical representation can be adjusted in the dragable settings window.
 
 If you'd like to start improving the visualization's readability further, the settings with the largest impact are (in order of importance):
-- Render Options -> Use signal-to-mask ratio when calculating spectrogram shading
-	- Enabling this makes timbre more readable at the expense of amplitude differences; Disabling this makes amplitude differences more readable at the expense of timbre
-		- This trade-off becomes more apparent as the spectrogram's dynamic range is reduced
 - Render Options -> Bargraph averaging (ideal value is 16.67ms for a 60Hz monitor or 8.33ms for a 120Hz monitor; avoid setting this below 5ms)
 - Render Options -> Range above masking mean
 - Render Options -> Range below masking mean
@@ -84,6 +81,13 @@ If you'd like to start improving the visualization's readability further, the se
 - Analysis Options -> Frequency range (ideal value depends on what you're trying to analyze)
 - Analysis Options -> Resolution (increasing it may hurt performance)
 - Analysis Options -> Update rate (increasing it may hurt performance)
+
+If you'd like to start improving this visualization's psychoacoustic accuracy further, the settings with the largest impact are:
+- Render Options -> Use signal-to-mask ratio to clamp spectrogram shading +
+  Render Options -> Blend SMR rendering with normal spectrogram rendering
+	- Although blended rendering makes the spectrogram significantly easier to read, it does result in the rendered brightness not being directly linked to the amplitude of each bin. Disabling both settings is recommended if you are using the spectrogram for analysis where small changes in amplitude matter.
+- Analysis Options -> Approximate spreading function (disabled by default in desktop version)
+	- Although approximating the spreading function can significantly improve the performance of calculating the masking threshold, it does significantly reduce the psychoacoustic accuracy of the calculated threshold
 
 If you experience performance issues out of the box, the settings with the largest impact are:
 - Analysis Options -> Approximate spreading function (enabling it will hurt psychoacoustic accuracy)
