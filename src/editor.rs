@@ -448,6 +448,7 @@ fn draw_spectrogram_image(
     color_table: &ColorTable,
     (max_db, min_db): (f32, f32),
     clamp_using_smr: bool,
+    blend_clamping: bool,
 ) {
     let target_duration = spectrogram.data.front().unwrap().duration;
 
@@ -473,56 +474,112 @@ fn draw_spectrogram_image(
 
         assert!(masking_ranges.len().is_multiple_of(64));
 
-        for (y, analysis) in spectrogram.data.iter().enumerate() {
-            if analysis.data.len() != image_width
-                || y == image_height
-                || analysis.duration != target_duration
-            {
-                break;
-            }
-
-            for (analysis_chunk, (masking_chunk, (masking_range_chunk, pixel_chunk))) in
-                unsafe { analysis.data.as_chunks_unchecked::<64>() }
-                    .iter()
-                    .zip(
-                        unsafe { analysis.masking.as_chunks_unchecked::<64>() }
-                            .iter()
-                            .zip(
-                                unsafe { masking_ranges.as_chunks_unchecked::<64>() }
-                                    .iter()
-                                    .zip(unsafe {
-                                        image
-                                            .pixels
-                                            .get_unchecked_mut(
-                                                (image_width * y)..(image_width * (y + 1)),
-                                            )
-                                            .as_chunks_unchecked_mut::<64>()
-                                    }),
-                            ),
-                    )
-            {
-                for ((pan, volume), (((_, masking), range), output)) in
-                    analysis_chunk.iter().copied().zip(
-                        masking_chunk
-                            .iter()
-                            .copied()
-                            .zip(masking_range_chunk.iter().copied())
-                            .zip(buffer.iter_mut()),
-                    )
+        if blend_clamping {
+            for (y, analysis) in spectrogram.data.iter().enumerate() {
+                if analysis.data.len() != image_width
+                    || y == image_height
+                    || analysis.duration != target_duration
                 {
-                    let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).min(map_value(
-                        volume.algebraic_sub(masking),
-                        0.0,
-                        range,
-                        0.0,
-                        1.0,
-                    ));
-
-                    *output = color_table.calculate_index(pan, intensity);
+                    break;
                 }
 
-                for (index, pixel) in buffer.into_iter().zip(pixel_chunk) {
-                    *pixel = unsafe { color_table.get_unchecked(index) };
+                for (analysis_chunk, (masking_chunk, (masking_range_chunk, pixel_chunk))) in
+                    unsafe { analysis.data.as_chunks_unchecked::<64>() }
+                        .iter()
+                        .zip(
+                            unsafe { analysis.masking.as_chunks_unchecked::<64>() }
+                                .iter()
+                                .zip(
+                                    unsafe { masking_ranges.as_chunks_unchecked::<64>() }
+                                        .iter()
+                                        .zip(unsafe {
+                                            image
+                                                .pixels
+                                                .get_unchecked_mut(
+                                                    (image_width * y)..(image_width * (y + 1)),
+                                                )
+                                                .as_chunks_unchecked_mut::<64>()
+                                        }),
+                                ),
+                        )
+                {
+                    for ((pan, volume), (((_, masking), range), output)) in
+                        analysis_chunk.iter().copied().zip(
+                            masking_chunk
+                                .iter()
+                                .copied()
+                                .zip(masking_range_chunk.iter().copied())
+                                .zip(buffer.iter_mut()),
+                        )
+                    {
+                        let volume_intensity = map_value(volume, min_db, max_db, 0.0, 1.0);
+                        let clamp_intensity =
+                            map_value(volume.algebraic_sub(masking), 0.0, range, 0.0, 1.0);
+
+                        let intensity = volume_intensity.min(
+                            (clamp_intensity.algebraic_add(volume_intensity)).algebraic_div(2.0),
+                        );
+
+                        *output = color_table.calculate_index(pan, intensity);
+                    }
+
+                    for (index, pixel) in buffer.into_iter().zip(pixel_chunk) {
+                        *pixel = unsafe { color_table.get_unchecked(index) };
+                    }
+                }
+            }
+        } else {
+            for (y, analysis) in spectrogram.data.iter().enumerate() {
+                if analysis.data.len() != image_width
+                    || y == image_height
+                    || analysis.duration != target_duration
+                {
+                    break;
+                }
+
+                for (analysis_chunk, (masking_chunk, (masking_range_chunk, pixel_chunk))) in
+                    unsafe { analysis.data.as_chunks_unchecked::<64>() }
+                        .iter()
+                        .zip(
+                            unsafe { analysis.masking.as_chunks_unchecked::<64>() }
+                                .iter()
+                                .zip(
+                                    unsafe { masking_ranges.as_chunks_unchecked::<64>() }
+                                        .iter()
+                                        .zip(unsafe {
+                                            image
+                                                .pixels
+                                                .get_unchecked_mut(
+                                                    (image_width * y)..(image_width * (y + 1)),
+                                                )
+                                                .as_chunks_unchecked_mut::<64>()
+                                        }),
+                                ),
+                        )
+                {
+                    for ((pan, volume), (((_, masking), range), output)) in
+                        analysis_chunk.iter().copied().zip(
+                            masking_chunk
+                                .iter()
+                                .copied()
+                                .zip(masking_range_chunk.iter().copied())
+                                .zip(buffer.iter_mut()),
+                        )
+                    {
+                        let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).min(map_value(
+                            volume.algebraic_sub(masking),
+                            0.0,
+                            range,
+                            0.0,
+                            1.0,
+                        ));
+
+                        *output = color_table.calculate_index(pan, intensity);
+                    }
+
+                    for (index, pixel) in buffer.into_iter().zip(pixel_chunk) {
+                        *pixel = unsafe { color_table.get_unchecked(index) };
+                    }
                 }
             }
         }
@@ -662,6 +719,7 @@ struct RenderSettings {
     min_db: f32,
     max_db: f32,
     clamp_using_smr: bool,
+    blend_clamping: bool,
     bargraph_height: f32,
     spectrogram_duration: Duration,
     bargraph_averaging: Duration,
@@ -695,7 +753,8 @@ impl Default for RenderSettings {
                 - AnalysisChainConfig::default().listening_volume,
             min_db: MIN_COMPLETE_NORM_PHON - AnalysisChainConfig::default().listening_volume,
             max_db: MAX_COMPLETE_NORM_PHON - AnalysisChainConfig::default().listening_volume,
-            clamp_using_smr: false,
+            clamp_using_smr: true,
+            blend_clamping: true,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f32(1.0 - 0.33),
             bargraph_averaging: Duration::from_secs_f32(BASELINE_TARGET_FRAME_SECS), // Ideal value is 1s / display_refresh_rate, up until the critical flicker frequency (in humans, this typically ranges about 50-90Hz (equivalent to 100-180fps) depending on intensity & contrast). alternatively, a different bound for this value could be the critical flutter frequency, which is ~100Hz
@@ -1042,6 +1101,7 @@ pub(crate) fn render(
                     &shared_state.color_table,
                     (max_db, min_db),
                     settings.clamp_using_smr,
+                    settings.blend_clamping,
                 );
             }
         }
@@ -1583,7 +1643,11 @@ pub(crate) fn render(
                 }
 
                 if analysis_settings.masking {
-                    ui.checkbox(&mut render_settings.clamp_using_smr, "Use signal-to-mask ratio when calculating spectrogram shading");
+                    ui.checkbox(&mut render_settings.clamp_using_smr, "Use signal-to-mask ratio to clamp spectrogram shading");
+
+                    if render_settings.clamp_using_smr {
+                        ui.checkbox(&mut render_settings.blend_clamping, "Blend SMR rendering with normal spectrogram rendering");
+                    }
                 }
 
                 let mut spectrogram_duration = render_settings.spectrogram_duration.as_secs_f64();
