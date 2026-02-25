@@ -448,7 +448,7 @@ fn draw_spectrogram_image(
     color_table: &ColorTable,
     (max_db, min_db): (f32, f32),
     clamp_using_smr: bool,
-    blend_clamping: bool,
+    blending_proportion: f32,
 ) {
     let target_duration = spectrogram.data.front().unwrap().duration;
 
@@ -459,7 +459,7 @@ fn draw_spectrogram_image(
 
     let mut buffer = [0; 64];
 
-    if clamp_using_smr {
+    if clamp_using_smr && blending_proportion < 1.0 {
         let masking_ranges: Vec<f32> =
             unsafe { frequencies.as_chunks_unchecked::<64>() }
                 .iter()
@@ -474,7 +474,9 @@ fn draw_spectrogram_image(
 
         assert!(masking_ranges.len().is_multiple_of(64));
 
-        if blend_clamping {
+        if blending_proportion > 0.0 {
+            let blending_inv = 1.0 - blending_proportion;
+
             for (y, analysis) in spectrogram.data.iter().enumerate() {
                 if analysis.data.len() != image_width
                     || y == image_height
@@ -517,7 +519,9 @@ fn draw_spectrogram_image(
                             map_value(volume.algebraic_sub(masking), 0.0, range, 0.0, 1.0);
 
                         let intensity = volume_intensity.min(
-                            (clamp_intensity.algebraic_add(volume_intensity)).algebraic_div(2.0),
+                            clamp_intensity
+                                .algebraic_mul(blending_inv)
+                                .algebraic_add(volume_intensity.algebraic_mul(blending_proportion)),
                         );
 
                         *output = color_table.calculate_index(pan, intensity);
@@ -719,7 +723,7 @@ struct RenderSettings {
     min_db: f32,
     max_db: f32,
     clamp_using_smr: bool,
-    blend_clamping: bool,
+    clamp_strength: f32,
     bargraph_height: f32,
     spectrogram_duration: Duration,
     bargraph_averaging: Duration,
@@ -754,7 +758,7 @@ impl Default for RenderSettings {
             min_db: MIN_COMPLETE_NORM_PHON - AnalysisChainConfig::default().listening_volume,
             max_db: MAX_COMPLETE_NORM_PHON - AnalysisChainConfig::default().listening_volume,
             clamp_using_smr: true,
-            blend_clamping: true,
+            clamp_strength: 0.35,
             bargraph_height: 0.33,
             spectrogram_duration: Duration::from_secs_f32(1.0 - 0.33),
             bargraph_averaging: Duration::from_secs_f32(BASELINE_TARGET_FRAME_SECS), // Ideal value is 1s / display_refresh_rate, up until the critical flicker frequency (in humans, this typically ranges about 50-90Hz (equivalent to 100-180fps) depending on intensity & contrast). alternatively, a different bound for this value could be the critical flutter frequency, which is ~100Hz
@@ -1101,7 +1105,7 @@ pub(crate) fn render(
                     &shared_state.color_table,
                     (max_db, min_db),
                     settings.clamp_using_smr,
-                    settings.blend_clamping,
+                    1.0 - settings.clamp_strength,
                 );
             }
         }
@@ -1646,7 +1650,11 @@ pub(crate) fn render(
                     ui.checkbox(&mut render_settings.clamp_using_smr, "Use signal-to-mask ratio to clamp spectrogram shading");
 
                     if render_settings.clamp_using_smr {
-                        ui.checkbox(&mut render_settings.blend_clamping, "Blend SMR rendering with normal spectrogram rendering");
+                        ui.add(
+                            egui::Slider::new(&mut render_settings.clamp_strength, 0.0..=1.0)
+                                .clamping(egui::SliderClamping::Always)
+                                .text("SMR clamping strength"),
+                        );
                     }
                 }
 

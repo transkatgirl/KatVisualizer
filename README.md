@@ -83,9 +83,8 @@ If you'd like to start improving the visualization's readability further, the se
 - Analysis Options -> Update rate (increasing it may hurt performance)
 
 If you'd like to start improving this visualization's psychoacoustic accuracy further, the settings with the largest impact are:
-- Render Options -> Use signal-to-mask ratio to clamp spectrogram shading +
-  Render Options -> Blend SMR rendering with normal spectrogram rendering
-	- Although blended rendering makes the spectrogram significantly easier to read, it does result in the rendered brightness not being directly linked to the amplitude of each bin. Disabling both settings is recommended if you are using the spectrogram for analysis where small changes in amplitude matter.
+- Render Options -> Use signal-to-mask ratio to clamp spectrogram shading
+	- Although clamped rendering makes the spectrogram significantly easier to read, it does result in the rendered brightness not being directly linked to the amplitude of each bin. Disabling both settings is recommended if you are using the spectrogram for analysis where small changes in amplitude matter.
 - Analysis Options -> Approximate spreading function (disabled by default in desktop version)
 	- Although approximating the spreading function can significantly improve the performance of calculating the masking threshold, it does significantly reduce the psychoacoustic accuracy of the calculated threshold
 
