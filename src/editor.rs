@@ -36,8 +36,8 @@ use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, AudioState, MAX_FREQUENCY_BINS,
     SPECTROGRAM_SLICES,
     analyzer::{
-        BetterAnalysis, BetterSpectrogram, FrequencyScale, HEARING_THRESHOLD_PHON,
-        MAX_COMPLETE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON, MIN_COMPLETE_NORM_PHON, map_value,
+        BetterAnalysis, BetterSpectrogram, HEARING_THRESHOLD_PHON, MAX_COMPLETE_NORM_PHON,
+        MAX_INFORMATIVE_NORM_PHON, MIN_COMPLETE_NORM_PHON, map_value, scale_bark,
     },
 };
 
@@ -484,17 +484,16 @@ fn draw_spectrogram_image(
     assert!(image_width.is_multiple_of(64));
 
     if clamp_using_smr && blending_proportion < 1.0 {
-        let masking_ranges: Vec<f32> =
-            unsafe { frequencies.as_chunks_unchecked::<64>() }
-                .iter()
-                .flat_map(|chunk| {
-                    chunk.iter().copied().map(|(_, center, _)| {
-                        27.0_f32.algebraic_sub(6.025_f32.algebraic_sub(
-                            0.275_f32.algebraic_mul(FrequencyScale::Bark.scale(center)),
-                        ))
-                    })
+        let masking_ranges: Vec<f32> = unsafe { frequencies.as_chunks_unchecked::<64>() }
+            .iter()
+            .flat_map(|chunk| {
+                chunk.iter().copied().map(|(_, center, _)| {
+                    27.0_f32.algebraic_sub(
+                        6.025_f32.algebraic_sub(0.275_f32.algebraic_mul(scale_bark(center))),
+                    )
                 })
-                .collect();
+            })
+            .collect();
 
         assert!(masking_ranges.len().is_multiple_of(64));
 

@@ -764,14 +764,17 @@ pub enum FrequencyScale {
     Mel,
 }
 
+// Used by render thread
+pub fn scale_bark(x: f32) -> f32 {
+    (26.81_f32.algebraic_mul(x)).algebraic_div((1960.0_f32.algebraic_add(x)).algebraic_sub(0.53))
+}
+
 impl FrequencyScale {
     pub fn scale(&self, x: f32) -> f32 {
         match self {
             Self::Logarithmic => x.log2(),
             Self::Erb => (1.0 + 0.00437 * x).log2(),
-            Self::Bark => (26.81_f32.algebraic_mul(x))
-                .algebraic_div((1960.0_f32.algebraic_add(x)).algebraic_sub(0.53)), // Used by render thread
-            //Self::Bark => (26.81 * x) / (1960.0 + x) - 0.53,
+            Self::Bark => (26.81 * x) / (1960.0 + x) - 0.53,
             Self::Mel => (1.0 + x / 700.0).log2(),
         }
     }
