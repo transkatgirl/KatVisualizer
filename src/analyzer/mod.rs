@@ -264,52 +264,73 @@ impl BetterAnalysis {
         gain: f32,
         normalization_volume: Option<f32>,
     ) {
+        if let Some(listening_volume) = normalization_volume {
+            self.update_stereo_data_normalized(left, right, gain, listening_volume);
+        } else {
+            self.update_stereo_data_unnormalized(left, right, gain);
+        }
+    }
+    fn update_stereo_data_normalized(
+        &mut self,
+        left: &BetterAnalyzer,
+        right: &BetterAnalyzer,
+        gain: f32,
+        listening_volume: f32,
+    ) {
         let left_analysis_chunks = unsafe { left.raw_analysis().as_chunks_unchecked::<64>() };
         let right_analysis_chunks = unsafe { right.raw_analysis().as_chunks_unchecked::<64>() };
         let output_chunks = unsafe { self.data.as_chunks_unchecked_mut::<64>() };
 
-        if let Some(listening_volume) = normalization_volume {
-            let normalizer_chunks = unsafe { left.normalizers.as_chunks_unchecked::<64>() };
+        let normalizer_chunks = unsafe { left.normalizers.as_chunks_unchecked::<64>() };
 
-            let total_gain = gain.algebraic_add(listening_volume);
+        let total_gain = gain.algebraic_add(listening_volume);
 
-            for (output_chunk, (normalizer_chunk, (left_chunk, right_chunk))) in
-                output_chunks.iter_mut().zip(
-                    normalizer_chunks
-                        .iter()
-                        .zip(left_analysis_chunks.iter().zip(right_analysis_chunks)),
-                )
-            {
-                for (output, (normalizer, (left, right))) in output_chunk.iter_mut().zip(
-                    normalizer_chunk
-                        .iter()
-                        .zip(left_chunk.iter().copied().zip(right_chunk.iter().copied())),
-                ) {
-                    let (pan, volume) =
-                        calculate_pan_and_volume_from_amplitude(left as f32, right as f32);
+        for (output_chunk, (normalizer_chunk, (left_chunk, right_chunk))) in
+            output_chunks.iter_mut().zip(
+                normalizer_chunks
+                    .iter()
+                    .zip(left_analysis_chunks.iter().zip(right_analysis_chunks)),
+            )
+        {
+            for (output, (normalizer, (left, right))) in output_chunk.iter_mut().zip(
+                normalizer_chunk
+                    .iter()
+                    .zip(left_chunk.iter().copied().zip(right_chunk.iter().copied())),
+            ) {
+                let (pan, volume) =
+                    calculate_pan_and_volume_from_amplitude(left as f32, right as f32);
 
-                    let volume = normalizer
-                        .spl_to_phon(volume.algebraic_add(total_gain))
-                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                        .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                        .algebraic_sub(listening_volume);
+                let volume = normalizer
+                    .spl_to_phon(volume.algebraic_add(total_gain))
+                    //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                    .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                    .algebraic_sub(listening_volume);
 
-                    *output = (pan, volume);
-                }
+                *output = (pan, volume);
             }
-        } else {
-            for (output_chunk, (left_chunk, right_chunk)) in output_chunks
+        }
+    }
+    fn update_stereo_data_unnormalized(
+        &mut self,
+        left: &BetterAnalyzer,
+        right: &BetterAnalyzer,
+        gain: f32,
+    ) {
+        let left_analysis_chunks = unsafe { left.raw_analysis().as_chunks_unchecked::<64>() };
+        let right_analysis_chunks = unsafe { right.raw_analysis().as_chunks_unchecked::<64>() };
+        let output_chunks = unsafe { self.data.as_chunks_unchecked_mut::<64>() };
+
+        for (output_chunk, (left_chunk, right_chunk)) in output_chunks
+            .iter_mut()
+            .zip(left_analysis_chunks.iter().zip(right_analysis_chunks))
+        {
+            for (output, (left, right)) in output_chunk
                 .iter_mut()
-                .zip(left_analysis_chunks.iter().zip(right_analysis_chunks))
+                .zip(left_chunk.iter().copied().zip(right_chunk.iter().copied()))
             {
-                for (output, (left, right)) in output_chunk
-                    .iter_mut()
-                    .zip(left_chunk.iter().copied().zip(right_chunk.iter().copied()))
-                {
-                    let (pan, volume) =
-                        calculate_pan_and_volume_from_amplitude(left as f32, right as f32);
-                    *output = (pan, volume.algebraic_add(gain));
-                }
+                let (pan, volume) =
+                    calculate_pan_and_volume_from_amplitude(left as f32, right as f32);
+                *output = (pan, volume.algebraic_add(gain));
             }
         }
     }
@@ -320,61 +341,85 @@ impl BetterAnalysis {
         gain: f32,
         normalization_volume: Option<f32>,
     ) {
+        if let Some(listening_volume) = normalization_volume {
+            self.update_stereo_masking_normalized(left, right, gain, listening_volume);
+        } else {
+            self.update_stereo_masking_unnormalized(left, right, gain);
+        }
+    }
+    fn update_stereo_masking_normalized(
+        &mut self,
+        left: &BetterAnalyzer,
+        right: &BetterAnalyzer,
+        gain: f32,
+        listening_volume: f32,
+    ) {
         let left_masking_chunks = unsafe { left.raw_masking().as_chunks_unchecked::<64>() };
         let right_masking_chunks = unsafe { right.raw_masking().as_chunks_unchecked::<64>() };
         let output_chunks = unsafe { self.masking.as_chunks_unchecked_mut::<64>() };
 
         let mut sum: f32 = 0.0;
 
-        if let Some(listening_volume) = normalization_volume {
-            let normalizer_chunks = unsafe { left.normalizers.as_chunks_unchecked::<64>() };
+        let normalizer_chunks = unsafe { left.normalizers.as_chunks_unchecked::<64>() };
 
-            let total_gain = gain.algebraic_add(listening_volume);
+        let total_gain = gain.algebraic_add(listening_volume);
 
-            for (output_chunk, (normalizer_chunk, (left_chunk, right_chunk))) in
-                output_chunks.iter_mut().zip(
-                    normalizer_chunks
-                        .iter()
-                        .zip(left_masking_chunks.iter().zip(right_masking_chunks)),
-                )
-            {
-                for (output, (normalizer, (left, right))) in output_chunk.iter_mut().zip(
-                    normalizer_chunk
-                        .iter()
-                        .zip(left_chunk.iter().copied().zip(right_chunk.iter().copied())),
-                ) {
-                    let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
+        for (output_chunk, (normalizer_chunk, (left_chunk, right_chunk))) in
+            output_chunks.iter_mut().zip(
+                normalizer_chunks
+                    .iter()
+                    .zip(left_masking_chunks.iter().zip(right_masking_chunks)),
+            )
+        {
+            for (output, (normalizer, (left, right))) in output_chunk.iter_mut().zip(
+                normalizer_chunk
+                    .iter()
+                    .zip(left_chunk.iter().copied().zip(right_chunk.iter().copied())),
+            ) {
+                let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
 
-                    let volume = normalizer
-                        .spl_to_phon(volume.algebraic_add(total_gain))
-                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                        .clamp(HEARING_THRESHOLD_PHON, MAX_INFORMATIVE_NORM_PHON)
-                        .algebraic_sub(listening_volume);
+                let volume = normalizer
+                    .spl_to_phon(volume.algebraic_add(total_gain))
+                    //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                    .clamp(HEARING_THRESHOLD_PHON, MAX_INFORMATIVE_NORM_PHON)
+                    .algebraic_sub(listening_volume);
 
-                    sum = sum.algebraic_add(dbfs_to_amplitude(volume));
-                    *output = (pan, volume);
-                }
+                sum = sum.algebraic_add(dbfs_to_amplitude(volume));
+                *output = (pan, volume);
             }
-        } else {
-            let gain_amplitude = dbfs_to_amplitude(gain);
+        }
 
-            for (output_chunk, (left_chunk, right_chunk)) in output_chunks
+        self.masking_mean = amplitude_to_dbfs(sum.algebraic_div(self.masking.len() as f32));
+    }
+    fn update_stereo_masking_unnormalized(
+        &mut self,
+        left: &BetterAnalyzer,
+        right: &BetterAnalyzer,
+        gain: f32,
+    ) {
+        let left_masking_chunks = unsafe { left.raw_masking().as_chunks_unchecked::<64>() };
+        let right_masking_chunks = unsafe { right.raw_masking().as_chunks_unchecked::<64>() };
+        let output_chunks = unsafe { self.masking.as_chunks_unchecked_mut::<64>() };
+
+        let mut sum: f32 = 0.0;
+
+        let gain_amplitude = dbfs_to_amplitude(gain);
+
+        for (output_chunk, (left_chunk, right_chunk)) in output_chunks
+            .iter_mut()
+            .zip(left_masking_chunks.iter().zip(right_masking_chunks))
+        {
+            for (output, (left, right)) in output_chunk
                 .iter_mut()
-                .zip(left_masking_chunks.iter().zip(right_masking_chunks))
+                .zip(left_chunk.iter().copied().zip(right_chunk.iter().copied()))
             {
-                for (output, (left, right)) in output_chunk
-                    .iter_mut()
-                    .zip(left_chunk.iter().copied().zip(right_chunk.iter().copied()))
-                {
-                    let adjusted_amplitude =
-                        left.algebraic_add(right).algebraic_mul(gain_amplitude);
+                let adjusted_amplitude = left.algebraic_add(right).algebraic_mul(gain_amplitude);
 
-                    sum = sum.algebraic_add(adjusted_amplitude);
-                    *output = (
-                        calculate_pan_from_amplitude(left, right),
-                        amplitude_to_dbfs(adjusted_amplitude),
-                    );
-                }
+                sum = sum.algebraic_add(adjusted_amplitude);
+                *output = (
+                    calculate_pan_from_amplitude(left, right),
+                    amplitude_to_dbfs(adjusted_amplitude),
+                );
             }
         }
 
@@ -386,47 +431,63 @@ impl BetterAnalysis {
         gain: f32,
         normalization_volume: Option<f32>,
     ) {
+        if let Some(listening_volume) = normalization_volume {
+            self.update_mono_masking_normalized(center, gain, listening_volume);
+        } else {
+            self.update_mono_masking_unnormalized(center, gain);
+        }
+    }
+    fn update_mono_masking_normalized(
+        &mut self,
+        center: &BetterAnalyzer,
+        gain: f32,
+        listening_volume: f32,
+    ) {
         let masking_chunks = unsafe { center.raw_masking().as_chunks_unchecked::<64>() };
         let output_chunks = unsafe { self.masking.as_chunks_unchecked_mut::<64>() };
 
         let mut sum: f32 = 0.0;
 
-        if let Some(listening_volume) = normalization_volume {
-            let normalizer_chunks = unsafe { center.normalizers.as_chunks_unchecked::<64>() };
+        let normalizer_chunks = unsafe { center.normalizers.as_chunks_unchecked::<64>() };
 
-            let gain_amplitude =
-                dbfs_to_amplitude(gain.algebraic_add(listening_volume)).algebraic_mul(2.0);
+        let gain_amplitude =
+            dbfs_to_amplitude(gain.algebraic_add(listening_volume)).algebraic_mul(2.0);
 
-            for (output_chunk, (normalizer_chunk, masking_chunk)) in output_chunks
+        for (output_chunk, (normalizer_chunk, masking_chunk)) in output_chunks
+            .iter_mut()
+            .zip(normalizer_chunks.iter().zip(masking_chunks))
+        {
+            for (output, (normalizer, amplitude)) in output_chunk
                 .iter_mut()
-                .zip(normalizer_chunks.iter().zip(masking_chunks))
+                .zip(normalizer_chunk.iter().zip(masking_chunk.iter().copied()))
             {
-                for (output, (normalizer, amplitude)) in output_chunk
-                    .iter_mut()
-                    .zip(normalizer_chunk.iter().zip(masking_chunk.iter().copied()))
-                {
-                    let volume = normalizer
-                        .spl_to_phon(amplitude_to_dbfs(amplitude.algebraic_mul(gain_amplitude)))
-                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                        .clamp(HEARING_THRESHOLD_PHON, MAX_INFORMATIVE_NORM_PHON)
-                        .algebraic_sub(listening_volume);
+                let volume = normalizer
+                    .spl_to_phon(amplitude_to_dbfs(amplitude.algebraic_mul(gain_amplitude)))
+                    //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                    .clamp(HEARING_THRESHOLD_PHON, MAX_INFORMATIVE_NORM_PHON)
+                    .algebraic_sub(listening_volume);
 
-                    sum = sum.algebraic_add(dbfs_to_amplitude(volume));
-                    *output = (0.0, volume);
-                }
+                sum = sum.algebraic_add(dbfs_to_amplitude(volume));
+                *output = (0.0, volume);
             }
-        } else {
-            let gain_amplitude = dbfs_to_amplitude(gain).algebraic_mul(2.0);
+        }
 
-            for (output_chunk, masking_chunk) in output_chunks.iter_mut().zip(masking_chunks) {
-                for (output, amplitude) in
-                    output_chunk.iter_mut().zip(masking_chunk.iter().copied())
-                {
-                    let adjusted_amplitude = amplitude.algebraic_mul(gain_amplitude);
+        self.masking_mean = amplitude_to_dbfs(sum.algebraic_div(self.masking.len() as f32));
+    }
+    fn update_mono_masking_unnormalized(&mut self, center: &BetterAnalyzer, gain: f32) {
+        let masking_chunks = unsafe { center.raw_masking().as_chunks_unchecked::<64>() };
+        let output_chunks = unsafe { self.masking.as_chunks_unchecked_mut::<64>() };
 
-                    sum = sum.algebraic_add(adjusted_amplitude);
-                    *output = (0.0, amplitude_to_dbfs(adjusted_amplitude));
-                }
+        let mut sum: f32 = 0.0;
+
+        let gain_amplitude = dbfs_to_amplitude(gain).algebraic_mul(2.0);
+
+        for (output_chunk, masking_chunk) in output_chunks.iter_mut().zip(masking_chunks) {
+            for (output, amplitude) in output_chunk.iter_mut().zip(masking_chunk.iter().copied()) {
+                let adjusted_amplitude = amplitude.algebraic_mul(gain_amplitude);
+
+                sum = sum.algebraic_add(adjusted_amplitude);
+                *output = (0.0, amplitude_to_dbfs(adjusted_amplitude));
             }
         }
 
@@ -438,46 +499,58 @@ impl BetterAnalysis {
         gain: f32,
         normalization_volume: Option<f32>,
     ) {
+        if let Some(listening_volume) = normalization_volume {
+            self.update_mono_data_normalized(center, gain, listening_volume);
+        } else {
+            self.update_mono_data_unnormalized(center, gain);
+        }
+    }
+    fn update_mono_data_normalized(
+        &mut self,
+        center: &BetterAnalyzer,
+        gain: f32,
+        listening_volume: f32,
+    ) {
         let analysis_chunks = unsafe { center.raw_analysis().as_chunks_unchecked::<64>() };
         let output_chunks = unsafe { self.data.as_chunks_unchecked_mut::<64>() };
 
-        if let Some(listening_volume) = normalization_volume {
-            let normalizer_chunks = unsafe { center.normalizers.as_chunks_unchecked::<64>() };
+        let normalizer_chunks = unsafe { center.normalizers.as_chunks_unchecked::<64>() };
 
-            let gain_amplitude =
-                dbfs_to_amplitude(gain.algebraic_add(listening_volume)).algebraic_mul(2.0);
+        let gain_amplitude =
+            dbfs_to_amplitude(gain.algebraic_add(listening_volume)).algebraic_mul(2.0);
 
-            for (output_chunk, (normalizer_chunk, analysis_chunk)) in output_chunks
+        for (output_chunk, (normalizer_chunk, analysis_chunk)) in output_chunks
+            .iter_mut()
+            .zip(normalizer_chunks.iter().zip(analysis_chunks))
+        {
+            for (output, (normalizer, amplitude)) in output_chunk
                 .iter_mut()
-                .zip(normalizer_chunks.iter().zip(analysis_chunks))
+                .zip(normalizer_chunk.iter().zip(analysis_chunk.iter().copied()))
             {
-                for (output, (normalizer, amplitude)) in output_chunk
-                    .iter_mut()
-                    .zip(normalizer_chunk.iter().zip(analysis_chunk.iter().copied()))
-                {
-                    let volume = normalizer
-                        .spl_to_phon(amplitude_to_dbfs(
-                            (amplitude as f32).algebraic_mul(gain_amplitude),
-                        ))
-                        //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                        .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                        .algebraic_sub(listening_volume);
+                let volume = normalizer
+                    .spl_to_phon(amplitude_to_dbfs(
+                        (amplitude as f32).algebraic_mul(gain_amplitude),
+                    ))
+                    //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                    .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                    .algebraic_sub(listening_volume);
 
-                    *output = (0.0, volume);
-                }
+                *output = (0.0, volume);
             }
-        } else {
-            let gain_amplitude = dbfs_to_amplitude(gain).algebraic_mul(2.0);
+        }
+    }
+    fn update_mono_data_unnormalized(&mut self, center: &BetterAnalyzer, gain: f32) {
+        let analysis_chunks = unsafe { center.raw_analysis().as_chunks_unchecked::<64>() };
+        let output_chunks = unsafe { self.data.as_chunks_unchecked_mut::<64>() };
 
-            for (output_chunk, analysis_chunk) in output_chunks.iter_mut().zip(analysis_chunks) {
-                for (output, amplitude) in
-                    output_chunk.iter_mut().zip(analysis_chunk.iter().copied())
-                {
-                    *output = (
-                        0.0,
-                        amplitude_to_dbfs((amplitude as f32).algebraic_mul(gain_amplitude)),
-                    );
-                }
+        let gain_amplitude = dbfs_to_amplitude(gain).algebraic_mul(2.0);
+
+        for (output_chunk, analysis_chunk) in output_chunks.iter_mut().zip(analysis_chunks) {
+            for (output, amplitude) in output_chunk.iter_mut().zip(analysis_chunk.iter().copied()) {
+                *output = (
+                    0.0,
+                    amplitude_to_dbfs((amplitude as f32).algebraic_mul(gain_amplitude)),
+                );
             }
         }
     }
