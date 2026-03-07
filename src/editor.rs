@@ -80,6 +80,7 @@ fn draw_bargraph(
     mesh: &mut Mesh,
     spectrogram: &BetterSpectrogram,
     buffer: (Vec<(f32, f32)>, Vec<f32>),
+    horizontal: bool,
     bounds: Rect,
     color_table: &ColorTable,
     masking_color: Option<Color32>,
@@ -112,6 +113,7 @@ fn draw_bargraph(
                 mesh,
                 spectrogram,
                 buffer,
+                horizontal,
                 bounds,
                 color_table,
                 masking_color,
@@ -124,11 +126,19 @@ fn draw_bargraph(
         }
     }
 
-    draw_bargraph_from(mesh, &front.data, bounds, color_table, (max_db, min_db));
+    draw_bargraph_from(
+        mesh,
+        &front.data,
+        horizontal,
+        bounds,
+        color_table,
+        (max_db, min_db),
+    );
     if let Some(masking_color) = masking_color {
         draw_secondary_bargraph_from_pairs(
             mesh,
             &front.masking,
+            horizontal,
             bounds,
             masking_color,
             (max_db, min_db),
@@ -142,6 +152,7 @@ fn draw_averaged_bargraph(
     mesh: &mut Mesh,
     spectrogram: &BetterSpectrogram,
     mut buffer: (Vec<(f32, f32)>, Vec<f32>),
+    horizontal: bool,
     bounds: Rect,
     color_table: &ColorTable,
     masking_color: Option<Color32>,
@@ -178,7 +189,14 @@ fn draw_averaged_bargraph(
         }
     }
 
-    draw_bargraph_from(mesh, &buffer.0, bounds, color_table, (max_db, min_db));
+    draw_bargraph_from(
+        mesh,
+        &buffer.0,
+        horizontal,
+        bounds,
+        color_table,
+        (max_db, min_db),
+    );
 
     if let Some(masking_color) = masking_color {
         assert_eq!(front.masking.len(), buffer.1.len());
@@ -207,11 +225,122 @@ fn draw_averaged_bargraph(
             }
         }
 
-        draw_secondary_bargraph(mesh, &buffer.1, bounds, masking_color, (max_db, min_db));
+        draw_secondary_bargraph(
+            mesh,
+            &buffer.1,
+            horizontal,
+            bounds,
+            masking_color,
+            (max_db, min_db),
+        );
     }
 }
 
 fn draw_bargraph_from(
+    mesh: &mut Mesh,
+    analysis: &[(f32, f32)],
+    horizontal: bool,
+    bounds: Rect,
+    color_table: &ColorTable,
+    (max_db, min_db): (f32, f32),
+) {
+    if !horizontal {
+        draw_vertical_bargraph_from(mesh, analysis, bounds, color_table, (max_db, min_db));
+    } else {
+        draw_horizontal_bargraph_from(mesh, analysis, bounds, color_table, (max_db, min_db));
+    }
+}
+
+fn draw_horizontal_bargraph_from(
+    mesh: &mut Mesh,
+    analysis: &[(f32, f32)],
+    bounds: Rect,
+    color_table: &ColorTable,
+    (max_db, min_db): (f32, f32),
+) {
+    let width = bounds.max.x - bounds.min.x;
+    let height = bounds.max.y - bounds.min.y;
+
+    let mut vertices = mesh.vertices.len() as u32;
+
+    let band_height = height / analysis.len() as f32;
+
+    let mut buffer = [(0, Rect::ZERO); 64];
+
+    for (ci, chunk) in unsafe { analysis.as_chunks_unchecked::<64>() }
+        .iter()
+        .enumerate()
+    {
+        let offset = ci * 64;
+
+        for (ii, ((pan, volume), output)) in
+            chunk.iter().copied().zip(buffer.iter_mut()).enumerate()
+        {
+            let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+
+            let end_y = bounds
+                .max
+                .y
+                .algebraic_sub(((offset + ii) as f32).algebraic_mul(band_height));
+
+            let rect = Rect {
+                min: Pos2 {
+                    x: bounds.max.x.algebraic_sub(intensity.algebraic_mul(width)),
+                    y: end_y,
+                },
+                max: Pos2 {
+                    x: bounds.max.x,
+                    y: end_y.algebraic_sub(band_height),
+                },
+            };
+
+            let index = color_table.calculate_index(pan, intensity);
+
+            *output = (index, rect);
+        }
+
+        for _ in 0..64 {
+            mesh.indices.extend_from_slice(&[
+                vertices,
+                vertices + 1,
+                vertices + 2,
+                vertices + 2,
+                vertices + 1,
+                vertices + 3,
+            ]);
+            vertices += 4;
+        }
+
+        for (index, rect) in buffer {
+            let color = unsafe { color_table.get_unchecked(index) };
+
+            mesh.vertices.extend_from_slice(&[
+                Vertex {
+                    pos: rect.left_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.left_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+            ]);
+        }
+    }
+}
+
+fn draw_vertical_bargraph_from(
     mesh: &mut Mesh,
     analysis: &[(f32, f32)],
     bounds: Rect,
@@ -303,6 +432,104 @@ fn draw_bargraph_from(
 fn draw_secondary_bargraph(
     mesh: &mut Mesh,
     analysis: &[f32],
+    horizontal: bool,
+    bounds: Rect,
+    color: Color32,
+    (max_db, min_db): (f32, f32),
+) {
+    if !horizontal {
+        draw_vertical_secondary_bargraph(mesh, analysis, bounds, color, (max_db, min_db));
+    } else {
+        draw_horizontal_secondary_bargraph(mesh, analysis, bounds, color, (max_db, min_db));
+    }
+}
+
+fn draw_horizontal_secondary_bargraph(
+    mesh: &mut Mesh,
+    analysis: &[f32],
+    bounds: Rect,
+    color: Color32,
+    (max_db, min_db): (f32, f32),
+) {
+    let width = bounds.max.x - bounds.min.x;
+    let height = bounds.max.y - bounds.min.y;
+
+    let mut vertices = mesh.vertices.len() as u32;
+
+    let band_height = height / analysis.len() as f32;
+
+    let mut buffer = [Rect::ZERO; 64];
+
+    for (ci, chunk) in unsafe { analysis.as_chunks_unchecked::<64>() }
+        .iter()
+        .enumerate()
+    {
+        let offset = ci * 64;
+
+        for (ii, (volume, output)) in chunk.iter().copied().zip(buffer.iter_mut()).enumerate() {
+            let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+
+            let end_y = bounds
+                .max
+                .y
+                .algebraic_sub(((offset + ii) as f32).algebraic_mul(band_height));
+
+            let rect = Rect {
+                min: Pos2 {
+                    x: bounds.max.x.algebraic_sub(intensity.algebraic_mul(width)),
+                    y: end_y,
+                },
+                max: Pos2 {
+                    x: bounds.max.x,
+                    y: end_y.algebraic_sub(band_height),
+                },
+            };
+
+            *output = rect;
+        }
+
+        for _ in 0..64 {
+            mesh.indices.extend_from_slice(&[
+                vertices,
+                vertices + 1,
+                vertices + 2,
+                vertices + 2,
+                vertices + 1,
+                vertices + 3,
+            ]);
+            vertices += 4;
+        }
+
+        for rect in buffer {
+            mesh.vertices.extend_from_slice(&[
+                Vertex {
+                    pos: rect.left_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.left_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+            ]);
+        }
+    }
+}
+
+fn draw_vertical_secondary_bargraph(
+    mesh: &mut Mesh,
+    analysis: &[f32],
     bounds: Rect,
     color: Color32,
     (max_db, min_db): (f32, f32),
@@ -384,6 +611,117 @@ fn draw_secondary_bargraph(
 }
 
 fn draw_secondary_bargraph_from_pairs(
+    mesh: &mut Mesh,
+    analysis: &[(f32, f32)],
+    horizontal: bool,
+    bounds: Rect,
+    color: Color32,
+    (max_db, min_db): (f32, f32),
+) {
+    if !horizontal {
+        draw_vertical_secondary_bargraph_from_pairs(
+            mesh,
+            analysis,
+            bounds,
+            color,
+            (max_db, min_db),
+        );
+    } else {
+        draw_horizontal_secondary_bargraph_from_pairs(
+            mesh,
+            analysis,
+            bounds,
+            color,
+            (max_db, min_db),
+        );
+    }
+}
+
+fn draw_horizontal_secondary_bargraph_from_pairs(
+    mesh: &mut Mesh,
+    analysis: &[(f32, f32)],
+    bounds: Rect,
+    color: Color32,
+    (max_db, min_db): (f32, f32),
+) {
+    let width = bounds.max.x - bounds.min.x;
+    let height = bounds.max.y - bounds.min.y;
+
+    let mut vertices = mesh.vertices.len() as u32;
+
+    let band_height = height / analysis.len() as f32;
+
+    let mut buffer = [Rect::ZERO; 64];
+
+    for (ci, chunk) in unsafe { analysis.as_chunks_unchecked::<64>() }
+        .iter()
+        .enumerate()
+    {
+        let offset = ci * 64;
+
+        for (ii, ((_, volume), output)) in chunk.iter().copied().zip(buffer.iter_mut()).enumerate()
+        {
+            let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
+
+            let end_y = bounds
+                .max
+                .y
+                .algebraic_sub(((offset + ii) as f32).algebraic_mul(band_height));
+
+            let rect = Rect {
+                min: Pos2 {
+                    x: bounds.max.x.algebraic_sub(intensity.algebraic_mul(width)),
+                    y: end_y,
+                },
+                max: Pos2 {
+                    x: bounds.max.x,
+                    y: end_y.algebraic_sub(band_height),
+                },
+            };
+
+            *output = rect;
+        }
+
+        for _ in 0..64 {
+            mesh.indices.extend_from_slice(&[
+                vertices,
+                vertices + 1,
+                vertices + 2,
+                vertices + 2,
+                vertices + 1,
+                vertices + 3,
+            ]);
+            vertices += 4;
+        }
+
+        for rect in buffer {
+            mesh.vertices.extend_from_slice(&[
+                Vertex {
+                    pos: rect.left_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_top(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.left_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+                Vertex {
+                    pos: rect.right_bottom(),
+                    uv: WHITE_UV,
+                    color,
+                },
+            ]);
+        }
+    }
+}
+
+fn draw_vertical_secondary_bargraph_from_pairs(
     mesh: &mut Mesh,
     analysis: &[(f32, f32)],
     bounds: Rect,
@@ -714,10 +1052,12 @@ struct UnderCursor {
     pub time: Option<Duration>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn get_under_cursor(
     cursor: Pos2,
     spectrogram: &BetterSpectrogram,
     frequencies: &[(f32, f32, f32)],
+    horizontal: bool,
     bargraph_bounds: Rect,
     spectrogram_bounds: Rect,
     (bargraph_max_db, bargraph_min_db): (f32, f32),
@@ -726,21 +1066,42 @@ fn get_under_cursor(
     let max_frequency = (frequencies.len() - 1) as f32;
 
     if bargraph_bounds.contains(cursor) {
-        let frequency = frequencies[map_value(
-            cursor.x,
-            bargraph_bounds.min.x,
-            bargraph_bounds.max.x,
-            0.0,
-            max_frequency,
-        )
-        .floor() as usize];
-        let amplitude = map_value(
-            bargraph_bounds.max.y - cursor.y,
-            bargraph_bounds.min.y,
-            bargraph_bounds.max.y,
-            bargraph_min_db,
-            bargraph_max_db,
-        );
+        let frequency = frequencies[if !horizontal {
+            map_value(
+                cursor.x,
+                bargraph_bounds.min.x,
+                bargraph_bounds.max.x,
+                0.0,
+                max_frequency,
+            )
+            .floor() as usize
+        } else {
+            map_value(
+                cursor.y,
+                bargraph_bounds.max.y,
+                bargraph_bounds.min.x,
+                0.0,
+                max_frequency,
+            )
+            .floor() as usize
+        }];
+        let amplitude = if !horizontal {
+            map_value(
+                bargraph_bounds.max.y - cursor.y,
+                bargraph_bounds.min.y,
+                bargraph_bounds.max.y,
+                bargraph_min_db,
+                bargraph_max_db,
+            )
+        } else {
+            map_value(
+                bargraph_bounds.max.x - cursor.x,
+                bargraph_bounds.min.x,
+                bargraph_bounds.max.x,
+                bargraph_min_db,
+                bargraph_max_db,
+            )
+        };
 
         Some(UnderCursor {
             frequency,
@@ -749,22 +1110,45 @@ fn get_under_cursor(
             time: None,
         })
     } else if spectrogram_bounds.contains(cursor) {
-        let x = map_value(
-            cursor.x,
-            spectrogram_bounds.min.x,
-            spectrogram_bounds.max.x,
-            0.0,
-            max_frequency,
-        )
-        .floor() as usize;
-        let y = map_value(
-            cursor.y,
-            spectrogram_bounds.min.y,
-            spectrogram_bounds.max.y,
-            0.0,
-            (spectrogram_height - 1) as f32,
-        )
-        .floor() as usize;
+        let (x, y) = if !horizontal {
+            (
+                map_value(
+                    cursor.x,
+                    spectrogram_bounds.min.x,
+                    spectrogram_bounds.max.x,
+                    0.0,
+                    max_frequency,
+                )
+                .floor() as usize,
+                map_value(
+                    cursor.y,
+                    spectrogram_bounds.min.y,
+                    spectrogram_bounds.max.y,
+                    0.0,
+                    (spectrogram_height - 1) as f32,
+                )
+                .floor() as usize,
+            )
+        } else {
+            (
+                map_value(
+                    cursor.y,
+                    spectrogram_bounds.max.y,
+                    spectrogram_bounds.min.y,
+                    0.0,
+                    max_frequency,
+                )
+                .floor() as usize,
+                map_value(
+                    cursor.x,
+                    spectrogram_bounds.min.x,
+                    spectrogram_bounds.max.x,
+                    0.0,
+                    (spectrogram_height - 1) as f32,
+                )
+                .floor() as usize,
+            )
+        };
 
         let frequency = frequencies[x];
         let duration = spectrogram.data[0].duration;
@@ -795,6 +1179,7 @@ fn get_under_cursor(
 
 #[derive(Clone, Copy)]
 struct RenderSettings {
+    horizontal: bool,
     left_hue: f32,
     right_hue: f32,
     minimum_lightness: f32,
@@ -825,6 +1210,7 @@ struct RenderSettings {
 impl Default for RenderSettings {
     fn default() -> Self {
         Self {
+            horizontal: false,
             left_hue: 195.0,
             right_hue: 328.0,
             minimum_lightness: 0.13,
@@ -1102,19 +1488,40 @@ pub(crate) fn render(
 
         let settings = *shared_state.settings.lock();
 
-        let bargraph_bounds = Rect {
-            min: Pos2 { x: 0.0, y: 0.0 },
-            max: Pos2 {
-                x: max_x,
-                y: max_y * settings.bargraph_height,
-            },
-        };
-        let spectrogram_bounds = Rect {
-            min: Pos2 {
-                x: 0.0,
-                y: max_y * settings.bargraph_height,
-            },
-            max: Pos2 { x: max_x, y: max_y },
+        let (bargraph_bounds, spectrogram_bounds) = if !settings.horizontal {
+            (
+                Rect {
+                    min: Pos2 { x: 0.0, y: 0.0 },
+                    max: Pos2 {
+                        x: max_x,
+                        y: max_y * settings.bargraph_height,
+                    },
+                },
+                Rect {
+                    min: Pos2 {
+                        x: 0.0,
+                        y: max_y * settings.bargraph_height,
+                    },
+                    max: Pos2 { x: max_x, y: max_y },
+                },
+            )
+        } else {
+            (
+                Rect {
+                    min: Pos2 { x: 0.0, y: 0.0 },
+                    max: Pos2 {
+                        x: max_x * settings.bargraph_height,
+                        y: max_y,
+                    },
+                },
+                Rect {
+                    min: Pos2 {
+                        x: max_x * settings.bargraph_height,
+                        y: 0.0,
+                    },
+                    max: Pos2 { x: max_x, y: max_y },
+                },
+            )
         };
 
         let lock = analysis_output.lock();
@@ -1164,6 +1571,7 @@ pub(crate) fn render(
                         &mut bargraph_mesh,
                         &spectrogram,
                         (bargraph_buffer_1, bargraph_buffer_2),
+                        settings.horizontal,
                         bargraph_bounds,
                         &shared_state.color_table,
                         Some(settings.masking_color),
@@ -1175,6 +1583,7 @@ pub(crate) fn render(
                         &mut bargraph_mesh,
                         &spectrogram,
                         (bargraph_buffer_1, bargraph_buffer_2),
+                        settings.horizontal,
                         bargraph_bounds,
                         &shared_state.color_table,
                         None,
@@ -1203,6 +1612,7 @@ pub(crate) fn render(
                     pointer,
                     &spectrogram,
                     &frequencies,
+                    settings.horizontal,
                     bargraph_bounds,
                     spectrogram_bounds,
                     (max_db, min_db),
@@ -1247,28 +1657,53 @@ pub(crate) fn render(
                 Shape::Mesh(Arc::new(bargraph_mesh)),
                 Shape::Mesh(Arc::new(Mesh {
                     indices: vec![0, 1, 2, 2, 1, 3],
-                    vertices: vec![
-                        Vertex {
-                            pos: spectrogram_bounds.left_top(),
-                            uv: Pos2 { x: 0.0, y: 0.0 },
-                            color: Color32::WHITE,
-                        },
-                        Vertex {
-                            pos: spectrogram_bounds.right_top(),
-                            uv: Pos2 { x: 1.0, y: 0.0 },
-                            color: Color32::WHITE,
-                        },
-                        Vertex {
-                            pos: spectrogram_bounds.left_bottom(),
-                            uv: Pos2 { x: 0.0, y: 1.0 },
-                            color: Color32::WHITE,
-                        },
-                        Vertex {
-                            pos: spectrogram_bounds.right_bottom(),
-                            uv: Pos2 { x: 1.0, y: 1.0 },
-                            color: Color32::WHITE,
-                        },
-                    ],
+                    vertices: if !settings.horizontal {
+                        vec![
+                            Vertex {
+                                pos: spectrogram_bounds.left_top(),
+                                uv: Pos2 { x: 0.0, y: 0.0 },
+                                color: Color32::WHITE,
+                            },
+                            Vertex {
+                                pos: spectrogram_bounds.right_top(),
+                                uv: Pos2 { x: 1.0, y: 0.0 },
+                                color: Color32::WHITE,
+                            },
+                            Vertex {
+                                pos: spectrogram_bounds.left_bottom(),
+                                uv: Pos2 { x: 0.0, y: 1.0 },
+                                color: Color32::WHITE,
+                            },
+                            Vertex {
+                                pos: spectrogram_bounds.right_bottom(),
+                                uv: Pos2 { x: 1.0, y: 1.0 },
+                                color: Color32::WHITE,
+                            },
+                        ]
+                    } else {
+                        vec![
+                            Vertex {
+                                pos: spectrogram_bounds.left_top(),
+                                uv: Pos2 { x: 1.0, y: 0.0 },
+                                color: Color32::WHITE,
+                            },
+                            Vertex {
+                                pos: spectrogram_bounds.right_top(),
+                                uv: Pos2 { x: 1.0, y: 1.0 },
+                                color: Color32::WHITE,
+                            },
+                            Vertex {
+                                pos: spectrogram_bounds.left_bottom(),
+                                uv: Pos2 { x: 0.0, y: 0.0 },
+                                color: Color32::WHITE,
+                            },
+                            Vertex {
+                                pos: spectrogram_bounds.right_bottom(),
+                                uv: Pos2 { x: 0.0, y: 1.0 },
+                                color: Color32::WHITE,
+                            },
+                        ]
+                    },
                     texture_id: spectrogram_texture,
                 })),
             ]);
@@ -1552,6 +1987,8 @@ pub(crate) fn render(
             let mut render_settings = render_settings.lock();
 
             ui.collapsing("Render Options", |ui| {
+                ui.checkbox(&mut render_settings.horizontal, "Render horizontally");
+
                 if ui
                     .add(
                         egui::Slider::new(&mut render_settings.left_hue, 0.0..=360.0)
