@@ -58,7 +58,7 @@ impl Default for AnalysisChainConfig {
             #[cfg(not(target_arch = "wasm32"))]
             update_rate_hz: 2048.0,
             #[cfg(target_arch = "wasm32")]
-            update_rate_hz: 256.0,
+            update_rate_hz: 512.0,
             #[cfg(not(target_arch = "wasm32"))]
             resolution: 1024, // MUST be a multiple of 64
             #[cfg(target_arch = "wasm32")]
