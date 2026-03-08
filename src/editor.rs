@@ -1210,7 +1210,7 @@ struct RenderSettings {
 impl Default for RenderSettings {
     fn default() -> Self {
         Self {
-            horizontal: false,
+            horizontal: true,
             left_hue: 195.0,
             right_hue: 328.0,
             minimum_lightness: 0.13,
@@ -1232,7 +1232,7 @@ impl Default for RenderSettings {
             max_db: MAX_COMPLETE_NORM_PHON - AnalysisChainConfig::default().listening_volume,
             clamp_using_smr: true,
             clamp_strength: 0.3,
-            bargraph_height: 0.33,
+            bargraph_height: 0.2,
             spectrogram_duration: Duration::from_secs_f32(1.0 - 0.33),
             bargraph_averaging: Duration::from_secs_f32(BASELINE_TARGET_FRAME_SECS), // Ideal value is 1s / display_refresh_rate, up until the critical flicker frequency (in humans, this typically ranges about 50-90Hz (equivalent to 100-180fps) depending on intensity & contrast). alternatively, a different bound for this value could be the critical flutter frequency, which is ~100Hz
             #[cfg(not(target_arch = "wasm32"))]
@@ -1987,7 +1987,7 @@ pub(crate) fn render(
             let mut render_settings = render_settings.lock();
 
             ui.collapsing("Render Options", |ui| {
-                ui.checkbox(&mut render_settings.horizontal, "Render horizontally");
+                ui.checkbox(&mut render_settings.horizontal, "Use horizontal rendering mode");
 
                 if ui
                     .add(
