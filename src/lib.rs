@@ -1,4 +1,3 @@
-#![feature(portable_simd)]
 #![feature(float_algebraic)]
 
 // TODO: Go through https://nnethercote.github.io/perf-book/title-page.html and apply applicable optimizations
@@ -41,7 +40,7 @@ use wasm_bindgen::prelude::*;
 static GLOBAL: MiMalloc = MiMalloc;
 
 #[cfg(target_arch = "wasm32")]
-use crate::editor::{SharedState, build, render};
+use crate::editor::{build, render, SharedState};
 
 use crate::{
     analyzer::BetterSpectrogram,
