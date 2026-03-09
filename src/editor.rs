@@ -251,6 +251,7 @@ fn draw_bargraph_from(
     }
 }
 
+#[inline(never)]
 fn draw_horizontal_bargraph_from(
     mesh: &mut Mesh,
     analysis: &[(f32, f32)],
@@ -340,6 +341,7 @@ fn draw_horizontal_bargraph_from(
     }
 }
 
+#[inline(never)]
 fn draw_vertical_bargraph_from(
     mesh: &mut Mesh,
     analysis: &[(f32, f32)],
@@ -444,6 +446,7 @@ fn draw_secondary_bargraph(
     }
 }
 
+#[inline(never)]
 fn draw_horizontal_secondary_bargraph(
     mesh: &mut Mesh,
     analysis: &[f32],
@@ -527,6 +530,7 @@ fn draw_horizontal_secondary_bargraph(
     }
 }
 
+#[inline(never)]
 fn draw_vertical_secondary_bargraph(
     mesh: &mut Mesh,
     analysis: &[f32],
@@ -637,6 +641,7 @@ fn draw_secondary_bargraph_from_pairs(
     }
 }
 
+#[inline(never)]
 fn draw_horizontal_secondary_bargraph_from_pairs(
     mesh: &mut Mesh,
     analysis: &[(f32, f32)],
@@ -721,6 +726,7 @@ fn draw_horizontal_secondary_bargraph_from_pairs(
     }
 }
 
+#[inline(never)]
 fn draw_vertical_secondary_bargraph_from_pairs(
     mesh: &mut Mesh,
     analysis: &[(f32, f32)],
@@ -869,6 +875,7 @@ fn draw_spectrogram_image(
     }
 }
 
+#[inline(never)]
 fn draw_spectrogram_smr_unblended(
     image: &mut ColorImage,
     spectrogram: &BetterSpectrogram,
@@ -935,6 +942,7 @@ fn draw_spectrogram_smr_unblended(
     }
 }
 
+#[inline(never)]
 #[allow(clippy::too_many_arguments)]
 fn draw_spectrogram_smr_blended(
     image: &mut ColorImage,
@@ -1006,6 +1014,7 @@ fn draw_spectrogram_smr_blended(
     }
 }
 
+#[inline(never)]
 fn draw_spectrogram_nosmr(
     image: &mut ColorImage,
     spectrogram: &BetterSpectrogram,

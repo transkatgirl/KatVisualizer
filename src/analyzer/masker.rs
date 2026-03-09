@@ -207,6 +207,7 @@ impl Masker {
             );
         }
     }
+    #[inline(never)]
     fn calculate_masking_threshold_inner_approx<const N: usize>(
         &self,
         spectrum: impl Iterator<Item = f32>,
@@ -247,6 +248,7 @@ impl Masker {
             }
         }
     }
+    #[inline(never)]
     fn calculate_masking_threshold_inner_exact<const N: usize>(
         &self,
         spectrum: impl Iterator<Item = f32>,

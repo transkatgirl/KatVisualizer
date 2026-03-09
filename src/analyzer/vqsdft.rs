@@ -657,6 +657,7 @@ impl VQsDFT {
 
         &self.spectrum_data
     }
+    #[inline(never)]
     fn analyze_nc(
         &mut self,
         samples: impl ExactSizeIterator<Item = f64>,
@@ -706,6 +707,7 @@ impl VQsDFT {
             }
         }
     }
+    #[inline(never)]
     fn analyze_rect(
         &mut self,
         samples: impl ExactSizeIterator<Item = f64>,
@@ -752,6 +754,7 @@ impl VQsDFT {
             }
         }
     }
+    #[inline(never)]
     fn analyze_window_2(
         &mut self,
         samples: impl ExactSizeIterator<Item = f64>,
@@ -804,6 +807,7 @@ impl VQsDFT {
             }
         }
     }
+    #[inline(never)]
     fn analyze_window_3(
         &mut self,
         samples: impl ExactSizeIterator<Item = f64>,
@@ -856,6 +860,7 @@ impl VQsDFT {
             }
         }
     }
+    #[inline(never)]
     fn analyze_window_4(
         &mut self,
         samples: impl ExactSizeIterator<Item = f64>,
@@ -908,6 +913,7 @@ impl VQsDFT {
             }
         }
     }
+    #[inline(never)]
     fn analyze_window_5(
         &mut self,
         samples: impl ExactSizeIterator<Item = f64>,
@@ -960,6 +966,7 @@ impl VQsDFT {
             }
         }
     }
+    #[inline(never)]
     fn analyze_arbitrary(
         &mut self,
         samples: impl ExactSizeIterator<Item = f64>,
