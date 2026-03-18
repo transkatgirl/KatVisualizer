@@ -74,14 +74,14 @@ The compiled plugin can be loaded into a DAW like any other metering plugin. It'
 Once the program is running, the window will display a graphical representation of the input audio, along with additional information in the top corners. The parameters used to render this graphical representation can be adjusted in the dragable settings window.
 
 If you'd like to start improving the visualization's readability further, the settings with the largest impact are (in order of importance):
+- Analysis Options -> Frequency range (ideal value depends on what you're trying to analyze; 20Hz - 15kHz is recommended for music)
 - Render Options -> SMR clamping strength
 	- Increasing this makes timbre more readable at the expense of amplitude differences; Decreasing this makes amplitude differences more readable at the expense of timbre
 		- This trade-off becomes more apparent as the spectrogram's dynamic range is reduced
-- Render Options -> Bargraph averaging (ideal value is 16.67ms for a 60Hz monitor or 8.33ms for a 120Hz monitor; avoid setting this below 5ms)
+- Render Options -> Bargraph averaging (if you have a >=100Hz monitor, set this to 10ms)
 - Render Options -> Range above masking mean
 - Render Options -> Range below masking mean
 - Analysis Options -> ERB bandwidth divisor (ideal value depends on what you're trying to analyze; if in doubt, the default value is usually a good middle ground)
-- Analysis Options -> Frequency range (ideal value depends on what you're trying to analyze)
 - Analysis Options -> Resolution (increasing it may hurt performance)
 - Analysis Options -> Update rate (increasing it may hurt performance)
 

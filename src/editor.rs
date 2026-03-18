@@ -2730,6 +2730,8 @@ pub(crate) fn render(
                     update_and_clear(&analysis_settings);
                 }
             });
+
+            ui.label(format!("KatVisualizer v{}", env!("CARGO_PKG_VERSION")));
         });
 
     let now = Instant::now();

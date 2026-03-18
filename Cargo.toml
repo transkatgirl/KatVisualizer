@@ -1,6 +1,6 @@
 [package]
 name    = "katvisualizer"
-version = "0.17.2"
+version = "0.17.3"
 edition = "2024"
 
 [workspace]
@@ -33,7 +33,7 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149e
 	"assert_process_allocs",
 	"standalone",
 ] }
-nih_plug_egui = { git = "https://github.com/transkatgirl/egui-baseview.git", rev = "6f70371ed58de27ccb328710a2c1c43ce12ea450", features = [
+nih_plug_egui = { git = "https://github.com/transkatgirl/egui-baseview.git", rev = "a250ae11af0c963480149750b4c6f1da23e4017e", features = [
 	"keyboard_focus_workaround",
 ] }
 threadpool = "1.8.1"
