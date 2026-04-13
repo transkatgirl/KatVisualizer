@@ -46,7 +46,7 @@ impl Default for AnalysisChainConfig {
     fn default() -> Self {
         Self {
             gain: 0.0,
-            listening_volume: 90.0,
+            listening_volume: 100.0,
             normalize_amplitude: true,
             masking: true,
             #[cfg(not(target_arch = "wasm32"))]
