@@ -1,6 +1,6 @@
 [package]
 name    = "katvisualizer"
-version = "0.17.5"
+version = "0.17.6"
 edition = "2024"
 
 [workspace]
@@ -25,7 +25,7 @@ force-mono-to-stereo = [
 mute-output = [  ]
 
 [dependencies]
-color       = "0.3.2"
+color       = "0.3.3"
 parking_lot = "0.12.5"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -33,14 +33,12 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149e
 	"assert_process_allocs",
 	"standalone",
 ] }
-nih_plug_egui = { git = "https://github.com/transkatgirl/egui-baseview.git", rev = "a250ae11af0c963480149750b4c6f1da23e4017e", features = [
+nih_plug_egui = { git = "https://github.com/transkatgirl/egui-baseview.git", rev = "956484fa019cbdff6bd590300a3d04969bd4e0a8", features = [
 	"keyboard_focus_workaround",
 ] }
 threadpool = "1.8.1"
 keepawake = "0.6.0"
-mimalloc = { version = "0.1.48", features = [
-	"v3",
-] }
+mimalloc = { version = "0.1.50" }
 
 #nih_plug_egui = { git = "https://github.com/BillyDM/egui-baseview.git", rev = "e8a43d4c4029f9380206a52777d10c0ddbbb1d66" }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -48,10 +46,10 @@ eframe = { version = "0.33.3", default-features = false, features = [
 	"default_fonts",
 	"glow",
 ] }
-wasm-bindgen = "0.2.118"
-wasm-bindgen-futures = "0.4.68"
-js-sys = "0.3.95"
-web-sys = "0.3.95"
+wasm-bindgen = "0.2.121"
+wasm-bindgen-futures = "0.4.71"
+js-sys = "0.3.98"
+web-sys = "0.3.98"
 web-time = "1.1.0"
 
 [profile.dev]
