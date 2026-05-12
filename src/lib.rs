@@ -40,7 +40,7 @@ use wasm_bindgen::prelude::*;
 static GLOBAL: MiMalloc = MiMalloc;
 
 #[cfg(target_arch = "wasm32")]
-use crate::editor::{build, render, SharedState};
+use crate::editor::{SharedState, build, render};
 
 use crate::{
     analyzer::BetterSpectrogram,
