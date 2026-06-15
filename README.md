@@ -92,6 +92,8 @@ If you'd like to start improving this visualization's psychoacoustic accuracy fu
 - Analysis Options -> Approximate spreading function (disabled by default in desktop version)
 	- Although approximating the spreading function can significantly improve the performance of calculating the masking threshold, it does significantly reduce the psychoacoustic accuracy of the calculated threshold
 
+(Note: If you're having trouble parsing complex sounds using the spectrogram, treat the spectrogram like a top-down view of a moving 3D object where lightness indicates depth. You want to have a mental model of the shape of this object, or at the very least, the shape of the region you're looking at.)
+
 If you experience performance issues out of the box, the settings with the largest impact are:
 - Analysis Options -> Approximate spreading function (enabling it will hurt psychoacoustic accuracy)
 - Analysis Options -> Update rate (decreasing it may hurt readability)
