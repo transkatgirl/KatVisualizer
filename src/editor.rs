@@ -1730,8 +1730,6 @@ pub(crate) fn render(
                 format!("{:+.0}dBFS", under.amplitude)
             };
 
-            drop(analysis_settings);
-
             let text = if let (Some(pan), Some(elapsed)) = (under.pan, under.time) {
                 format!(
                     "{:.0}hz, -{:.3}s\n{}, {:+.2} pan",
@@ -1741,12 +1739,36 @@ pub(crate) fn render(
                     pan
                 )
             } else {
-                let resolution = (1.0 / (under.frequency.2 - under.frequency.0)) * 1000.0;
+                let width = if let Some(audio_state) = audio_state.lock().as_ref() {
+                    // Copied from vqsdft.rs line 175
+
+                    let q = under.frequency.1 as f64
+                        / (under.frequency.2 as f64 - under.frequency.0 as f64).abs();
+                    let period = if analysis_settings.nc_method && analysis_settings.strict_nc {
+                        (((under.frequency.1 as f64 * 2.0)
+                            / (under.frequency.1 as f64 * (1.0 / q)))
+                            .round()
+                            * (audio_state.sample_rate as f64 / (under.frequency.1 as f64 * 2.0)))
+                            .round()
+                            .max(1.0)
+                    } else {
+                        ((audio_state.sample_rate as f64 / under.frequency.1 as f64) * q).ceil()
+                    };
+
+                    let q = (under.frequency.1 as f64 * period) / audio_state.sample_rate as f64;
+
+                    (under.frequency.1 as f64 * (1.0 / q)) as f32
+                } else {
+                    under.frequency.2 - under.frequency.0
+                };
+
+                let resolution = (1.0 / width) * 1000.0;
+
                 let averaging = settings.bargraph_averaging.as_secs_f32() * 1000.0;
 
                 if averaging > 0.0 {
                     format!(
-                        "{:.0}hz, {}\n{:.0}ms res, {:.0} ms avg",
+                        "{:.0}hz, {}\n{:.1}ms res, {:.0} ms avg",
                         under.frequency.1, amplitude_text, resolution, averaging
                     )
                 } else {
@@ -1756,6 +1778,8 @@ pub(crate) fn render(
                     )
                 }
             };
+
+            drop(analysis_settings);
 
             painter.text(
                 Pos2 { x: 16.0, y: 16.0 },
