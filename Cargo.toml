@@ -1,6 +1,6 @@
 [package]
 name    = "katvisualizer"
-version = "0.17.7"
+version = "0.17.8"
 edition = "2024"
 
 [workspace]
@@ -38,7 +38,7 @@ nih_plug_egui = { git = "https://github.com/transkatgirl/egui-baseview.git", rev
 ] }
 threadpool = "1.8.1"
 keepawake = "0.6.0"
-mimalloc = { version = "0.1.50" }
+mimalloc = { version = "0.1.52" }
 
 #nih_plug_egui = { git = "https://github.com/BillyDM/egui-baseview.git", rev = "e8a43d4c4029f9380206a52777d10c0ddbbb1d66" }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -46,10 +46,10 @@ eframe = { version = "0.33.3", default-features = false, features = [
 	"default_fonts",
 	"glow",
 ] }
-wasm-bindgen = "0.2.121"
-wasm-bindgen-futures = "0.4.71"
-js-sys = "0.3.98"
-web-sys = "0.3.98"
+wasm-bindgen = "0.2.125"
+wasm-bindgen-futures = "0.4.75"
+js-sys = "0.3.102"
+web-sys = "0.3.102"
 web-time = "1.1.0"
 
 [profile.dev]
