@@ -172,7 +172,7 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let q = x.center as f64 / (x.high - x.low).abs() as f64;
+                            let q = x.center as f64 / (x.high as f64 - x.low as f64).abs();
                             let period = if strict_nc {
                                 (((x.center as f64 * 2.0) / (x.center as f64 * (1.0 / q))).round()
                                     * (sample_rate as f64 / (x.center as f64 * 2.0)))
@@ -231,7 +231,7 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let q = x.center as f64 / (x.high - x.low).abs() as f64;
+                            let q = x.center as f64 / (x.high as f64 - x.low as f64).abs();
                             let period = (sample_rate as f64 / x.center as f64) * q;
 
                             let period = period.ceil();
@@ -264,7 +264,7 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let q = x.center as f64 / (x.high - x.low).abs() as f64;
+                            let q = x.center as f64 / (x.high as f64 - x.low as f64).abs();
                             let period = (sample_rate as f64 / x.center as f64) * q;
 
                             let period = period.ceil();
@@ -324,7 +324,7 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let q = x.center as f64 / (x.high - x.low).abs() as f64;
+                            let q = x.center as f64 / (x.high as f64 - x.low as f64).abs();
                             let period = (sample_rate as f64 / x.center as f64) * q;
 
                             let period = period.ceil();
@@ -384,7 +384,7 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let q = x.center as f64 / (x.high - x.low).abs() as f64;
+                            let q = x.center as f64 / (x.high as f64 - x.low as f64).abs();
                             let period = (sample_rate as f64 / x.center as f64) * q;
 
                             let period = period.ceil();
@@ -444,7 +444,7 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let q = x.center as f64 / (x.high - x.low).abs() as f64;
+                            let q = x.center as f64 / (x.high as f64 - x.low as f64).abs();
                             let period = (sample_rate as f64 / x.center as f64) * q;
 
                             let period = period.ceil();
@@ -504,7 +504,7 @@ impl VQsDFT {
                     freq_bands
                         .iter()
                         .map(|x| {
-                            let q = x.center as f64 / (x.high - x.low).abs() as f64;
+                            let q = x.center as f64 / (x.high as f64 - x.low as f64).abs();
                             let period = (sample_rate as f64 / x.center as f64) * q;
 
                             let period = period.ceil();
