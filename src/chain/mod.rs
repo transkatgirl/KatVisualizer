@@ -60,7 +60,8 @@ impl Default for AnalysisChainConfig {
             #[cfg(target_arch = "wasm32")]
             update_rate_hz: 512.0,
             #[cfg(not(target_arch = "wasm32"))]
-            resolution: 1024, // MUST be a multiple of 64
+            resolution: 1408, // MUST be a multiple of 64
+            // Total perceptible pitch steps in human hearing = ~1,400
             #[cfg(target_arch = "wasm32")]
             resolution: 448, // MUST be a multiple of 64
             latency_offset: Duration::ZERO,
