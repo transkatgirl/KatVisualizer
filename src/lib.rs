@@ -1,5 +1,3 @@
-#![feature(float_algebraic)]
-
 // TODO: Go through https://nnethercote.github.io/perf-book/title-page.html and apply applicable optimizations
 
 #[cfg(all(not(debug_assertions), not(target_arch = "wasm32")))]
