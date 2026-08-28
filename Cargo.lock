@@ -2019,7 +2019,7 @@ dependencies = [
 
 [[package]]
 name = "katvisualizer"
-version = "0.17.8"
+version = "0.17.9"
 dependencies = [
  "color",
  "eframe",
