@@ -52,8 +52,9 @@ pub struct BetterAnalyzer {
     transform: VQsDFT,
     masker: Masker,
     masking: Vec<f32>,
+    processed_spectrum: Vec<f32>,
     frequency_bands: Vec<(f32, f32, f32)>,
-    normalizers: Vec<PrecomputedNormalizer>,
+    normalizers: PrecomputedNormalizers,
 }
 
 impl BetterAnalyzer {
@@ -83,10 +84,7 @@ impl BetterAnalyzer {
 
         assert!(band_count.is_multiple_of(64));
 
-        let normalizers: Vec<_> = frequency_bands
-            .iter()
-            .map(|band| PrecomputedNormalizer::new(band.center))
-            .collect();
+        let normalizers = PrecomputedNormalizers::new(&frequency_bands);
 
         let transform = VQsDFT::new(
             &frequency_bands,
@@ -109,6 +107,7 @@ impl BetterAnalyzer {
             config,
             masker,
             masking: vec![0.0; frequency_bands.len()],
+            processed_spectrum: vec![0.0; frequency_bands.len()],
             transform,
             frequency_bands,
             normalizers,
@@ -131,7 +130,7 @@ impl BetterAnalyzer {
         samples: impl ExactSizeIterator<Item = f32>,
         listening_volume: Option<f32>,
     ) {
-        self.transform.analyze(samples.map(|s| s as f64));
+        let spectrum = self.transform.analyze(samples.map(|s| s as f64));
 
         /*let flatness = if spectrum.len() > 128 {
             0.0
@@ -141,25 +140,37 @@ impl BetterAnalyzer {
 
         if self.config.masking {
             self.masker.calculate_masking_threshold(
-                &self.transform.spectrum_data,
+                spectrum,
                 listening_volume,
                 //0.0,
                 &mut self.masking,
             );
 
-            unsafe { self.transform.spectrum_data.as_chunks_unchecked_mut::<64>() }
-                .iter_mut()
+            unsafe { spectrum.as_chunks_unchecked::<64>() }
+                .iter()
+                .zip(unsafe { self.processed_spectrum.as_chunks_unchecked_mut::<64>() })
                 .zip(unsafe { self.masking.as_chunks_unchecked::<64>() })
-                .for_each(|(spectrum_chunk, masking_chunk)| {
-                    for (spectrum, masking) in spectrum_chunk.iter_mut().zip(masking_chunk) {
-                        *spectrum = spectrum.max(*masking as f64);
+                .for_each(|((source_chunk, spectrum_chunk), masking_chunk)| {
+                    for ((source, spectrum), masking) in
+                        source_chunk.iter().zip(spectrum_chunk).zip(masking_chunk)
+                    {
+                        *spectrum = (*source as f32).max(*masking);
+                    }
+                });
+        } else {
+            unsafe { spectrum.as_chunks_unchecked::<64>() }
+                .iter()
+                .zip(unsafe { self.processed_spectrum.as_chunks_unchecked_mut::<64>() })
+                .for_each(|(source_chunk, spectrum_chunk)| {
+                    for (source, spectrum) in source_chunk.iter().zip(spectrum_chunk) {
+                        *spectrum = *source as f32;
                     }
                 });
         }
     }
     #[inline(always)]
-    pub fn raw_analysis(&self) -> &[f64] {
-        &self.transform.spectrum_data
+    pub fn raw_analysis(&self) -> &[f32] {
+        &self.processed_spectrum
     }
     #[inline(always)]
     pub fn raw_masking(&self) -> &[f32] {
@@ -202,8 +213,11 @@ impl BetterAnalysis {
         if center.config.masking {
             self.update_mono_masking_and_data(center, gain, normalization_volume);
         } else {
+            if self.masking_mean != f32::NEG_INFINITY {
+                self.masking.fill((0.0, f32::NEG_INFINITY));
+                self.masking_mean = f32::NEG_INFINITY;
+            }
             self.update_mono_data(center, gain, normalization_volume);
-            self.masking_mean = f32::NEG_INFINITY;
         }
 
         self.duration = duration;
@@ -229,8 +243,11 @@ impl BetterAnalysis {
         if left.config.masking {
             self.update_stereo_masking_and_data(left, right, gain, normalization_volume);
         } else {
+            if self.masking_mean != f32::NEG_INFINITY {
+                self.masking.fill((0.0, f32::NEG_INFINITY));
+                self.masking_mean = f32::NEG_INFINITY;
+            }
             self.update_stereo_data(left, right, gain, normalization_volume);
-            self.masking_mean = f32::NEG_INFINITY;
         }
 
         self.duration = duration;
@@ -258,37 +275,47 @@ impl BetterAnalysis {
         let left_analysis_chunks = unsafe { left.raw_analysis().as_chunks_unchecked::<64>() };
         let right_analysis_chunks = unsafe { right.raw_analysis().as_chunks_unchecked::<64>() };
         let output_chunks = unsafe { self.data.as_chunks_unchecked_mut::<64>() };
-        let masking_output_chunks = unsafe { self.masking.as_chunks_unchecked_mut::<64>() };
-
-        let normalizer_chunks = unsafe { left.normalizers.as_chunks_unchecked::<64>() };
 
         let total_gain = gain.algebraic_add(listening_volume);
 
-        for (output_chunk, (masking_output_chunk, (normalizer_chunk, (left_chunk, right_chunk)))) in
-            output_chunks.iter_mut().zip(
-                masking_output_chunks.iter_mut().zip(
-                    normalizer_chunks
-                        .iter()
-                        .zip(left_analysis_chunks.iter().zip(right_analysis_chunks)),
-                ),
-            )
-        {
+        let exponent_scale_chunks =
+            unsafe { left.normalizers.exponent_scales.as_chunks_unchecked::<64>() };
+        let exponent_bias_chunks =
+            unsafe { left.normalizers.exponent_biases.as_chunks_unchecked::<64>() };
+        let param_1_chunks = unsafe { left.normalizers.params_1.as_chunks_unchecked::<64>() };
+        let inverse_param_2_chunks = unsafe {
+            left.normalizers
+                .inverse_params_2
+                .as_chunks_unchecked::<64>()
+        };
+
+        for chunk in 0..output_chunks.len() {
+            let output_chunk = unsafe { output_chunks.get_unchecked_mut(chunk) };
+            let left_chunk = unsafe { left_analysis_chunks.get_unchecked(chunk) };
+            let right_chunk = unsafe { right_analysis_chunks.get_unchecked(chunk) };
+            let exponent_scale_chunk = unsafe { exponent_scale_chunks.get_unchecked(chunk) };
+            let exponent_bias_chunk = unsafe { exponent_bias_chunks.get_unchecked(chunk) };
+            let param_1_chunk = unsafe { param_1_chunks.get_unchecked(chunk) };
+            let inverse_param_2_chunk = unsafe { inverse_param_2_chunks.get_unchecked(chunk) };
+
             for lane in 0..64 {
                 let output = unsafe { output_chunk.get_unchecked_mut(lane) };
-                let normalizer = unsafe { normalizer_chunk.get_unchecked(lane) };
                 let left = unsafe { *left_chunk.get_unchecked(lane) };
                 let right = unsafe { *right_chunk.get_unchecked(lane) };
-                let (pan, volume) =
-                    calculate_pan_and_volume_from_amplitude(left as f32, right as f32);
+                let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
 
-                let volume = normalizer
-                    .spl_to_phon(volume.algebraic_add(total_gain))
-                    //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                    .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                    .algebraic_sub(listening_volume);
+                let volume = spl_to_phon(
+                    volume.algebraic_add(total_gain),
+                    unsafe { *exponent_scale_chunk.get_unchecked(lane) },
+                    unsafe { *exponent_bias_chunk.get_unchecked(lane) },
+                    unsafe { *param_1_chunk.get_unchecked(lane) },
+                    unsafe { *inverse_param_2_chunk.get_unchecked(lane) },
+                )
+                //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                .algebraic_sub(listening_volume);
 
                 *output = (pan, volume);
-                *unsafe { masking_output_chunk.get_unchecked_mut(lane) } = (0.0, f32::NEG_INFINITY);
             }
         }
     }
@@ -301,23 +328,17 @@ impl BetterAnalysis {
         let left_analysis_chunks = unsafe { left.raw_analysis().as_chunks_unchecked::<64>() };
         let right_analysis_chunks = unsafe { right.raw_analysis().as_chunks_unchecked::<64>() };
         let output_chunks = unsafe { self.data.as_chunks_unchecked_mut::<64>() };
-        let masking_output_chunks = unsafe { self.masking.as_chunks_unchecked_mut::<64>() };
 
-        for (output_chunk, (masking_output_chunk, (left_chunk, right_chunk))) in
-            output_chunks.iter_mut().zip(
-                masking_output_chunks
-                    .iter_mut()
-                    .zip(left_analysis_chunks.iter().zip(right_analysis_chunks)),
-            )
+        for (output_chunk, (left_chunk, right_chunk)) in output_chunks
+            .iter_mut()
+            .zip(left_analysis_chunks.iter().zip(right_analysis_chunks))
         {
             for lane in 0..64 {
                 let output = unsafe { output_chunk.get_unchecked_mut(lane) };
                 let left = unsafe { *left_chunk.get_unchecked(lane) };
                 let right = unsafe { *right_chunk.get_unchecked(lane) };
-                let (pan, volume) =
-                    calculate_pan_and_volume_from_amplitude(left as f32, right as f32);
+                let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
                 *output = (pan, volume.algebraic_add(gain));
-                *unsafe { masking_output_chunk.get_unchecked_mut(lane) } = (0.0, f32::NEG_INFINITY);
             }
         }
     }
@@ -351,48 +372,68 @@ impl BetterAnalysis {
 
         let mut sum: f32 = 0.0;
 
-        let normalizer_chunks = unsafe { left.normalizers.as_chunks_unchecked::<64>() };
-
         let total_gain = gain.algebraic_add(listening_volume);
 
-        for (normalizer_chunk, (masking_output_chunk, (data_output_chunk, inputs))) in
-            normalizer_chunks.iter().zip(
-                masking_output_chunks.iter_mut().zip(
-                    data_output_chunks.iter_mut().zip(
-                        left_masking_chunks
-                            .iter()
-                            .zip(right_masking_chunks)
-                            .zip(left_analysis_chunks.iter().zip(right_analysis_chunks)),
-                    ),
-                ),
-            )
-        {
-            let ((left_masking_chunk, right_masking_chunk), (left_chunk, right_chunk)) = inputs;
+        let exponent_scale_chunks =
+            unsafe { left.normalizers.exponent_scales.as_chunks_unchecked::<64>() };
+        let exponent_bias_chunks =
+            unsafe { left.normalizers.exponent_biases.as_chunks_unchecked::<64>() };
+        let param_1_chunks = unsafe { left.normalizers.params_1.as_chunks_unchecked::<64>() };
+        let inverse_param_2_chunks = unsafe {
+            left.normalizers
+                .inverse_params_2
+                .as_chunks_unchecked::<64>()
+        };
+
+        for chunk in 0..data_output_chunks.len() {
+            let masking_output_chunk = unsafe { masking_output_chunks.get_unchecked_mut(chunk) };
+            let data_output_chunk = unsafe { data_output_chunks.get_unchecked_mut(chunk) };
+            let left_masking_chunk = unsafe { left_masking_chunks.get_unchecked(chunk) };
+            let right_masking_chunk = unsafe { right_masking_chunks.get_unchecked(chunk) };
+            let left_chunk = unsafe { left_analysis_chunks.get_unchecked(chunk) };
+            let right_chunk = unsafe { right_analysis_chunks.get_unchecked(chunk) };
+            let exponent_scale_chunk = unsafe { exponent_scale_chunks.get_unchecked(chunk) };
+            let exponent_bias_chunk = unsafe { exponent_bias_chunks.get_unchecked(chunk) };
+            let param_1_chunk = unsafe { param_1_chunks.get_unchecked(chunk) };
+            let inverse_param_2_chunk = unsafe { inverse_param_2_chunks.get_unchecked(chunk) };
 
             for lane in 0..64 {
-                let normalizer = unsafe { normalizer_chunk.get_unchecked(lane) };
+                let exponent_scale = unsafe { *exponent_scale_chunk.get_unchecked(lane) };
+                let exponent_bias = unsafe { *exponent_bias_chunk.get_unchecked(lane) };
+                let param_1 = unsafe { *param_1_chunk.get_unchecked(lane) };
+                let inverse_param_2 = unsafe { *inverse_param_2_chunk.get_unchecked(lane) };
                 let left_masking = unsafe { *left_masking_chunk.get_unchecked(lane) };
                 let right_masking = unsafe { *right_masking_chunk.get_unchecked(lane) };
                 let (masking_pan, masking_volume) =
                     calculate_pan_and_volume_from_amplitude(left_masking, right_masking);
 
-                let masking_volume = normalizer
-                    .spl_to_phon(masking_volume.algebraic_add(total_gain))
-                    //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                    .clamp(HEARING_THRESHOLD_PHON, MAX_INFORMATIVE_NORM_PHON)
-                    .algebraic_sub(listening_volume);
+                let masking_volume = spl_to_phon(
+                    masking_volume.algebraic_add(total_gain),
+                    exponent_scale,
+                    exponent_bias,
+                    param_1,
+                    inverse_param_2,
+                )
+                //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                .clamp(HEARING_THRESHOLD_PHON, MAX_INFORMATIVE_NORM_PHON)
+                .algebraic_sub(listening_volume);
 
                 sum = sum.algebraic_add(dbfs_to_amplitude(masking_volume));
                 *unsafe { masking_output_chunk.get_unchecked_mut(lane) } =
                     (masking_pan, masking_volume);
 
-                let left = unsafe { *left_chunk.get_unchecked(lane) } as f32;
-                let right = unsafe { *right_chunk.get_unchecked(lane) } as f32;
+                let left = unsafe { *left_chunk.get_unchecked(lane) };
+                let right = unsafe { *right_chunk.get_unchecked(lane) };
                 let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
-                let volume = normalizer
-                    .spl_to_phon(volume.algebraic_add(total_gain))
-                    .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                    .algebraic_sub(listening_volume);
+                let volume = spl_to_phon(
+                    volume.algebraic_add(total_gain),
+                    exponent_scale,
+                    exponent_bias,
+                    param_1,
+                    inverse_param_2,
+                )
+                .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                .algebraic_sub(listening_volume);
                 *unsafe { data_output_chunk.get_unchecked_mut(lane) } = (pan, volume);
             }
         }
@@ -442,8 +483,8 @@ impl BetterAnalysis {
                     amplitude_to_dbfs(masking_amplitude).algebraic_add(gain),
                 );
 
-                let left = unsafe { *left_chunk.get_unchecked(lane) } as f32;
-                let right = unsafe { *right_chunk.get_unchecked(lane) } as f32;
+                let left = unsafe { *left_chunk.get_unchecked(lane) };
+                let right = unsafe { *right_chunk.get_unchecked(lane) };
                 let (pan, volume) = calculate_pan_and_volume_from_amplitude(left, right);
                 *unsafe { data_output_chunk.get_unchecked_mut(lane) } =
                     (pan, volume.algebraic_add(gain));
@@ -479,40 +520,70 @@ impl BetterAnalysis {
 
         let mut sum: f32 = 0.0;
 
-        let normalizer_chunks = unsafe { center.normalizers.as_chunks_unchecked::<64>() };
-
         let total_gain = gain
             .algebraic_add(listening_volume)
             .algebraic_add(MONO_AMPLITUDE_DB);
 
-        for (masking_output_chunk, (data_output_chunk, (normalizer_chunk, inputs))) in
-            masking_output_chunks.iter_mut().zip(
-                data_output_chunks.iter_mut().zip(
-                    normalizer_chunks
-                        .iter()
-                        .zip(masking_chunks.iter().zip(analysis_chunks)),
-                ),
-            )
-        {
-            let (masking_chunk, analysis_chunk) = inputs;
+        let exponent_scale_chunks = unsafe {
+            center
+                .normalizers
+                .exponent_scales
+                .as_chunks_unchecked::<64>()
+        };
+        let exponent_bias_chunks = unsafe {
+            center
+                .normalizers
+                .exponent_biases
+                .as_chunks_unchecked::<64>()
+        };
+        let param_1_chunks = unsafe { center.normalizers.params_1.as_chunks_unchecked::<64>() };
+        let inverse_param_2_chunks = unsafe {
+            center
+                .normalizers
+                .inverse_params_2
+                .as_chunks_unchecked::<64>()
+        };
+
+        for chunk in 0..data_output_chunks.len() {
+            let masking_output_chunk = unsafe { masking_output_chunks.get_unchecked_mut(chunk) };
+            let data_output_chunk = unsafe { data_output_chunks.get_unchecked_mut(chunk) };
+            let masking_chunk = unsafe { masking_chunks.get_unchecked(chunk) };
+            let analysis_chunk = unsafe { analysis_chunks.get_unchecked(chunk) };
+            let exponent_scale_chunk = unsafe { exponent_scale_chunks.get_unchecked(chunk) };
+            let exponent_bias_chunk = unsafe { exponent_bias_chunks.get_unchecked(chunk) };
+            let param_1_chunk = unsafe { param_1_chunks.get_unchecked(chunk) };
+            let inverse_param_2_chunk = unsafe { inverse_param_2_chunks.get_unchecked(chunk) };
 
             for lane in 0..64 {
-                let normalizer = unsafe { normalizer_chunk.get_unchecked(lane) };
+                let exponent_scale = unsafe { *exponent_scale_chunk.get_unchecked(lane) };
+                let exponent_bias = unsafe { *exponent_bias_chunk.get_unchecked(lane) };
+                let param_1 = unsafe { *param_1_chunk.get_unchecked(lane) };
+                let inverse_param_2 = unsafe { *inverse_param_2_chunk.get_unchecked(lane) };
                 let masking_amplitude = unsafe { *masking_chunk.get_unchecked(lane) };
-                let masking_volume = normalizer
-                    .spl_to_phon(amplitude_to_dbfs(masking_amplitude).algebraic_add(total_gain))
-                    //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                    .clamp(HEARING_THRESHOLD_PHON, MAX_INFORMATIVE_NORM_PHON)
-                    .algebraic_sub(listening_volume);
+                let masking_volume = spl_to_phon(
+                    amplitude_to_dbfs(masking_amplitude).algebraic_add(total_gain),
+                    exponent_scale,
+                    exponent_bias,
+                    param_1,
+                    inverse_param_2,
+                )
+                //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                .clamp(HEARING_THRESHOLD_PHON, MAX_INFORMATIVE_NORM_PHON)
+                .algebraic_sub(listening_volume);
 
                 sum = sum.algebraic_add(dbfs_to_amplitude(masking_volume));
                 *unsafe { masking_output_chunk.get_unchecked_mut(lane) } = (0.0, masking_volume);
 
-                let amplitude = unsafe { *analysis_chunk.get_unchecked(lane) } as f32;
-                let volume = normalizer
-                    .spl_to_phon(amplitude_to_dbfs(amplitude).algebraic_add(total_gain))
-                    .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                    .algebraic_sub(listening_volume);
+                let amplitude = unsafe { *analysis_chunk.get_unchecked(lane) };
+                let volume = spl_to_phon(
+                    amplitude_to_dbfs(amplitude).algebraic_add(total_gain),
+                    exponent_scale,
+                    exponent_bias,
+                    param_1,
+                    inverse_param_2,
+                )
+                .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                .algebraic_sub(listening_volume);
                 *unsafe { data_output_chunk.get_unchecked_mut(lane) } = (0.0, volume);
             }
         }
@@ -546,7 +617,7 @@ impl BetterAnalysis {
                     amplitude_to_dbfs(masking_amplitude).algebraic_add(total_gain),
                 );
 
-                let amplitude = unsafe { *analysis_chunk.get_unchecked(lane) } as f32;
+                let amplitude = unsafe { *analysis_chunk.get_unchecked(lane) };
                 *unsafe { data_output_chunk.get_unchecked_mut(lane) } =
                     (0.0, amplitude_to_dbfs(amplitude).algebraic_add(total_gain));
             }
@@ -575,55 +646,68 @@ impl BetterAnalysis {
     ) {
         let analysis_chunks = unsafe { center.raw_analysis().as_chunks_unchecked::<64>() };
         let output_chunks = unsafe { self.data.as_chunks_unchecked_mut::<64>() };
-        let masking_output_chunks = unsafe { self.masking.as_chunks_unchecked_mut::<64>() };
-
-        let normalizer_chunks = unsafe { center.normalizers.as_chunks_unchecked::<64>() };
 
         let total_gain = gain
             .algebraic_add(listening_volume)
             .algebraic_add(MONO_AMPLITUDE_DB);
 
-        for (output_chunk, (masking_output_chunk, (normalizer_chunk, analysis_chunk))) in
-            output_chunks.iter_mut().zip(
-                masking_output_chunks
-                    .iter_mut()
-                    .zip(normalizer_chunks.iter().zip(analysis_chunks)),
-            )
-        {
+        let exponent_scale_chunks = unsafe {
+            center
+                .normalizers
+                .exponent_scales
+                .as_chunks_unchecked::<64>()
+        };
+        let exponent_bias_chunks = unsafe {
+            center
+                .normalizers
+                .exponent_biases
+                .as_chunks_unchecked::<64>()
+        };
+        let param_1_chunks = unsafe { center.normalizers.params_1.as_chunks_unchecked::<64>() };
+        let inverse_param_2_chunks = unsafe {
+            center
+                .normalizers
+                .inverse_params_2
+                .as_chunks_unchecked::<64>()
+        };
+
+        for chunk in 0..output_chunks.len() {
+            let output_chunk = unsafe { output_chunks.get_unchecked_mut(chunk) };
+            let analysis_chunk = unsafe { analysis_chunks.get_unchecked(chunk) };
+            let exponent_scale_chunk = unsafe { exponent_scale_chunks.get_unchecked(chunk) };
+            let exponent_bias_chunk = unsafe { exponent_bias_chunks.get_unchecked(chunk) };
+            let param_1_chunk = unsafe { param_1_chunks.get_unchecked(chunk) };
+            let inverse_param_2_chunk = unsafe { inverse_param_2_chunks.get_unchecked(chunk) };
+
             for lane in 0..64 {
                 let output = unsafe { output_chunk.get_unchecked_mut(lane) };
-                let normalizer = unsafe { normalizer_chunk.get_unchecked(lane) };
                 let amplitude = unsafe { *analysis_chunk.get_unchecked(lane) };
-                let volume = normalizer
-                    .spl_to_phon(amplitude_to_dbfs(amplitude as f32).algebraic_add(total_gain))
-                    //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
-                    .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
-                    .algebraic_sub(listening_volume);
+                let volume = spl_to_phon(
+                    amplitude_to_dbfs(amplitude).algebraic_add(total_gain),
+                    unsafe { *exponent_scale_chunk.get_unchecked(lane) },
+                    unsafe { *exponent_bias_chunk.get_unchecked(lane) },
+                    unsafe { *param_1_chunk.get_unchecked(lane) },
+                    unsafe { *inverse_param_2_chunk.get_unchecked(lane) },
+                )
+                //.clamp(MIN_COMPLETE_NORM_PHON, MAX_COMPLETE_NORM_PHON)
+                .clamp(MIN_INFORMATIVE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON)
+                .algebraic_sub(listening_volume);
 
                 *output = (0.0, volume);
-                *unsafe { masking_output_chunk.get_unchecked_mut(lane) } = (0.0, f32::NEG_INFINITY);
             }
         }
     }
     fn update_mono_data_unnormalized(&mut self, center: &BetterAnalyzer, gain: f32) {
         let analysis_chunks = unsafe { center.raw_analysis().as_chunks_unchecked::<64>() };
         let output_chunks = unsafe { self.data.as_chunks_unchecked_mut::<64>() };
-        let masking_output_chunks = unsafe { self.masking.as_chunks_unchecked_mut::<64>() };
 
         let total_gain = gain.algebraic_add(MONO_AMPLITUDE_DB);
 
-        for (output_chunk, (masking_output_chunk, analysis_chunk)) in output_chunks
-            .iter_mut()
-            .zip(masking_output_chunks.iter_mut().zip(analysis_chunks))
-        {
+        for (output_chunk, analysis_chunk) in output_chunks.iter_mut().zip(analysis_chunks) {
             for lane in 0..64 {
                 let output = unsafe { output_chunk.get_unchecked_mut(lane) };
                 let amplitude = unsafe { *analysis_chunk.get_unchecked(lane) };
-                *output = (
-                    0.0,
-                    amplitude_to_dbfs(amplitude as f32).algebraic_add(total_gain),
-                );
-                *unsafe { masking_output_chunk.get_unchecked_mut(lane) } = (0.0, f32::NEG_INFINITY);
+                *output = (0.0, amplitude_to_dbfs(amplitude).algebraic_add(total_gain));
             }
         }
     }
@@ -729,40 +813,60 @@ fn calculate_pan_from_amplitude_sum(
 // ----- Below formulas are taken from ISO 226:2023 -----
 
 #[derive(Clone)]
-struct PrecomputedNormalizer {
+struct PrecomputedNormalizers {
+    exponent_scales: Vec<f32>,
+    exponent_biases: Vec<f32>,
+    params_1: Vec<f32>,
+    inverse_params_2: Vec<f32>,
+}
+
+impl PrecomputedNormalizers {
+    fn new(frequency_bands: &[FrequencyBand]) -> Self {
+        let mut normalizers = Self {
+            exponent_scales: Vec::with_capacity(frequency_bands.len()),
+            exponent_biases: Vec::with_capacity(frequency_bands.len()),
+            params_1: Vec::with_capacity(frequency_bands.len()),
+            inverse_params_2: Vec::with_capacity(frequency_bands.len()),
+        };
+
+        for band in frequency_bands {
+            let (alpha_f, l_u, t_f) = approximate_coefficients(band.center);
+            let exponent_scale = alpha_f * std::f32::consts::LOG2_10 / 10.0;
+            let exponent_bias = exponent_scale * l_u;
+
+            normalizers.exponent_scales.push(exponent_scale);
+            normalizers.exponent_biases.push(exponent_bias);
+            normalizers
+                .params_1
+                .push(f32::exp2(exponent_scale * t_f + exponent_bias));
+            normalizers
+                .inverse_params_2
+                .push(1.0 / (4.0e-10_f32).powf(0.3 - alpha_f));
+        }
+
+        normalizers
+    }
+}
+
+#[inline(always)]
+fn spl_to_phon(
+    db_spl: f32,
     exponent_scale: f32,
     exponent_bias: f32,
     param_1: f32,
     inverse_param_2: f32,
-}
+) -> f32 {
+    let power = f32::exp2(
+        db_spl
+            .algebraic_mul(exponent_scale)
+            .algebraic_add(exponent_bias),
+    );
+    let normalized = power
+        .algebraic_sub(param_1)
+        .algebraic_mul(inverse_param_2)
+        .algebraic_add(NORM_OFFSET);
 
-impl PrecomputedNormalizer {
-    fn new(frequency: f32) -> Self {
-        let (alpha_f, l_u, t_f) = approximate_coefficients(frequency);
-        let exponent_scale = alpha_f * std::f32::consts::LOG2_10 / 10.0;
-        let exponent_bias = exponent_scale * l_u;
-
-        Self {
-            exponent_scale,
-            exponent_bias,
-            param_1: f32::exp2(exponent_scale * t_f + exponent_bias),
-            inverse_param_2: 1.0 / (4.0e-10_f32).powf(0.3 - alpha_f),
-        }
-    }
-    #[inline(always)]
-    fn spl_to_phon(&self, db_spl: f32) -> f32 {
-        let power = f32::exp2(
-            db_spl
-                .algebraic_mul(self.exponent_scale)
-                .algebraic_add(self.exponent_bias),
-        );
-        let normalized = power
-            .algebraic_sub(self.param_1)
-            .algebraic_mul(self.inverse_param_2)
-            .algebraic_add(NORM_OFFSET);
-
-        NORM_LOG2_MULTIPLE.algebraic_mul(f32::log2(normalized))
-    }
+    NORM_LOG2_MULTIPLE.algebraic_mul(f32::log2(normalized))
 }
 
 /*fn spl_to_phon(frequency: f64, db_spl: f64) -> f64 {
@@ -922,32 +1026,19 @@ impl FrequencyScale {
     where
         F: Fn(f32) -> f32,
     {
+        let scaled_low = self.scale(low);
+        let scaled_high = self.scale(high);
+        let target_max = (n - 1) as f32;
+
         (0..n)
             .map(|i| {
                 let i = i as f32;
-                let target_max = (n - 1) as f32;
 
-                let center = self.inv_scale(map_value(
-                    i,
-                    0.0,
-                    target_max,
-                    self.scale(low),
-                    self.scale(high),
-                ));
-                let lower = self.inv_scale(map_value(
-                    i - 0.5,
-                    0.0,
-                    target_max,
-                    self.scale(low),
-                    self.scale(high),
-                ));
-                let higher = self.inv_scale(map_value(
-                    i + 0.5,
-                    0.0,
-                    target_max,
-                    self.scale(low),
-                    self.scale(high),
-                ));
+                let center = self.inv_scale(map_value(i, 0.0, target_max, scaled_low, scaled_high));
+                let lower =
+                    self.inv_scale(map_value(i - 0.5, 0.0, target_max, scaled_low, scaled_high));
+                let higher =
+                    self.inv_scale(map_value(i + 0.5, 0.0, target_max, scaled_low, scaled_high));
                 let bandwidth = bandwidth(center);
 
                 FrequencyBand {
