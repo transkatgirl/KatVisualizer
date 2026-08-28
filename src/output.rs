@@ -127,6 +127,8 @@ mod native {
         timeline: Arc<Timeline>,
         write_sequence: u64,
         generation: u64,
+        // Sink-local mirror: the renderer never writes `Timeline::generation`.
+        published_generation: u64,
         generation_start_ns: u64,
         next_ns: u64,
         enqueued_ns: u64,
@@ -167,6 +169,7 @@ mod native {
                 timeline: timeline.clone(),
                 write_sequence: 0,
                 generation: 0,
+                published_generation: 0,
                 generation_start_ns: 0,
                 next_ns: 0,
                 enqueued_ns: 0,
@@ -306,7 +309,7 @@ mod native {
                 }
             }
 
-            if self.timeline.generation.load(Ordering::Relaxed) != self.generation {
+            if self.published_generation != self.generation {
                 self.timeline
                     .generation_start_ns
                     .store(self.generation_start_ns, Ordering::Relaxed);
@@ -315,6 +318,7 @@ mod native {
                 self.timeline
                     .generation
                     .store(self.generation, Ordering::Release);
+                self.published_generation = self.generation;
             }
 
             // Slot and generation publication happen before this release. The

@@ -96,6 +96,7 @@ struct StereoWorker {
     shared: Arc<StereoWorkerShared>,
     thread: Thread,
     submitted_sequence: Cell<u64>,
+    park_sequence: Cell<u64>,
     batch_woken: Cell<bool>,
     join_handle: Option<JoinHandle<()>>,
 }
@@ -137,6 +138,7 @@ impl StereoWorker {
             shared,
             thread,
             submitted_sequence: Cell::new(initial_sequence),
+            park_sequence: Cell::new(1),
             batch_woken: Cell::new(false),
             join_handle: Some(join_handle),
         }
@@ -147,8 +149,16 @@ impl StereoWorker {
         let mut observed_park_sequence = 0_u64;
 
         loop {
-            let submitted_sequence = shared.submission.sequence.load(Ordering::Acquire);
+            let submitted_sequence = shared.submission.sequence.load(Ordering::Relaxed);
             if submitted_sequence != completed_sequence {
+                // The relaxed probe keeps the hot polling loop cheap. Once it
+                // observes a new job, acquire its publication before accessing
+                // the slot and pointed-to analyzer.
+                let submitted_sequence = shared.submission.sequence.load(Ordering::Acquire);
+                if submitted_sequence == completed_sequence {
+                    continue;
+                }
+
                 #[cfg(test)]
                 let forced_failure = shared.force_failure.swap(false, Ordering::Relaxed);
                 #[cfg(not(test))]
@@ -183,16 +193,16 @@ impl StereoWorker {
                 continue;
             }
 
-            if shared.control.stop.load(Ordering::Acquire) {
+            if shared.control.stop.load(Ordering::Relaxed) {
                 return;
             }
 
-            let park_sequence = shared.control.park_sequence.load(Ordering::Acquire);
+            let park_sequence = shared.control.park_sequence.load(Ordering::Relaxed);
             if park_sequence != observed_park_sequence {
                 // A submission always wins over parking. If an adjacent batch
                 // raced this check, its unpark token either wakes this call or
                 // makes it return immediately, so no wakeup can be missed.
-                if shared.submission.sequence.load(Ordering::Acquire) != completed_sequence {
+                if shared.submission.sequence.load(Ordering::Relaxed) != completed_sequence {
                     continue;
                 }
                 observed_park_sequence = park_sequence;
@@ -212,7 +222,7 @@ impl StereoWorker {
     ) {
         let previous_sequence = self.submitted_sequence.get();
         assert_eq!(
-            self.shared.completion.sequence.load(Ordering::Acquire),
+            self.shared.completion.sequence.load(Ordering::Relaxed),
             previous_sequence,
             "analysis worker was not available before submission"
         );
@@ -241,7 +251,12 @@ impl StereoWorker {
 
         analyze_left();
 
-        while self.shared.completion.sequence.load(Ordering::Acquire) != submitted_sequence {
+        loop {
+            if self.shared.completion.sequence.load(Ordering::Relaxed) == submitted_sequence
+                && self.shared.completion.sequence.load(Ordering::Acquire) == submitted_sequence
+            {
+                break;
+            }
             hint::spin_loop();
         }
         if self.shared.completion.failed.load(Ordering::Relaxed) {
@@ -251,10 +266,12 @@ impl StereoWorker {
 
     fn finish_batch(&self) {
         if self.batch_woken.replace(false) {
+            let park_sequence = self.park_sequence.get().wrapping_add(1);
+            self.park_sequence.set(park_sequence);
             self.shared
                 .control
                 .park_sequence
-                .fetch_add(1, Ordering::Release);
+                .store(park_sequence, Ordering::Relaxed);
         }
     }
 
@@ -282,7 +299,7 @@ impl StereoWorker {
 #[cfg(not(target_arch = "wasm32"))]
 impl Drop for StereoWorker {
     fn drop(&mut self) {
-        self.shared.control.stop.store(true, Ordering::Release);
+        self.shared.control.stop.store(true, Ordering::Relaxed);
         self.thread.unpark();
         if let Some(join_handle) = self.join_handle.take() {
             let _ = join_handle.join();
