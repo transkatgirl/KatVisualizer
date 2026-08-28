@@ -58,6 +58,8 @@ struct StereoWorkerShared {
     force_failure: AtomicBool,
     #[cfg(test)]
     wake_count: std::sync::atomic::AtomicU64,
+    #[cfg(test)]
+    park_count: std::sync::atomic::AtomicU64,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -74,7 +76,7 @@ struct StereoCompletion {
 
 #[cfg(not(target_arch = "wasm32"))]
 struct StereoControl {
-    park_sequence: AtomicU64,
+    batch_active: AtomicBool,
     stop: AtomicBool,
 }
 
@@ -96,7 +98,6 @@ struct StereoWorker {
     shared: Arc<StereoWorkerShared>,
     thread: Thread,
     submitted_sequence: Cell<u64>,
-    park_sequence: Cell<u64>,
     batch_woken: Cell<bool>,
     join_handle: Option<JoinHandle<()>>,
 }
@@ -117,15 +118,16 @@ impl StereoWorker {
                 sequence: AtomicU64::new(initial_sequence),
                 failed: AtomicBool::new(false),
             }),
-            // The initial request lets the new helper park until its first job.
             control: CachePadded::new(StereoControl {
-                park_sequence: AtomicU64::new(1),
+                batch_active: AtomicBool::new(false),
                 stop: AtomicBool::new(false),
             }),
             #[cfg(test)]
             force_failure: AtomicBool::new(false),
             #[cfg(test)]
             wake_count: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(test)]
+            park_count: std::sync::atomic::AtomicU64::new(0),
         });
         let worker_shared = Arc::clone(&shared);
         let join_handle = thread::Builder::new()
@@ -138,7 +140,6 @@ impl StereoWorker {
             shared,
             thread,
             submitted_sequence: Cell::new(initial_sequence),
-            park_sequence: Cell::new(1),
             batch_woken: Cell::new(false),
             join_handle: Some(join_handle),
         }
@@ -146,7 +147,6 @@ impl StereoWorker {
 
     fn run(shared: Arc<StereoWorkerShared>, initial_sequence: u64) {
         let mut completed_sequence = initial_sequence;
-        let mut observed_park_sequence = 0_u64;
 
         loop {
             let submitted_sequence = shared.submission.sequence.load(Ordering::Relaxed);
@@ -197,20 +197,28 @@ impl StereoWorker {
                 return;
             }
 
-            let park_sequence = shared.control.park_sequence.load(Ordering::Relaxed);
-            if park_sequence != observed_park_sequence {
-                // A submission always wins over parking. If an adjacent batch
-                // raced this check, its unpark token either wakes this call or
-                // makes it return immediately, so no wakeup can be missed.
-                if shared.submission.sequence.load(Ordering::Relaxed) != completed_sequence {
-                    continue;
-                }
-                observed_park_sequence = park_sequence;
-                thread::park();
-            } else {
+            if shared.control.batch_active.load(Ordering::Acquire) {
                 hint::spin_loop();
+            } else {
+                // `unpark()` has token semantics. A token sent while the worker
+                // was still running may make this return immediately, so an
+                // idle worker loops back and parks again instead of spinning.
+                #[cfg(test)]
+                shared.park_count.fetch_add(1, Ordering::Relaxed);
+                thread::park();
             }
         }
+    }
+
+    fn begin_batch(&self) {
+        debug_assert!(
+            !self.batch_woken.get(),
+            "analysis worker batch was already active"
+        );
+        self.shared
+            .control
+            .batch_active
+            .store(true, Ordering::Release);
     }
 
     fn analyze(
@@ -265,14 +273,11 @@ impl StereoWorker {
     }
 
     fn finish_batch(&self) {
-        if self.batch_woken.replace(false) {
-            let park_sequence = self.park_sequence.get().wrapping_add(1);
-            self.park_sequence.set(park_sequence);
-            self.shared
-                .control
-                .park_sequence
-                .store(park_sequence, Ordering::Relaxed);
-        }
+        self.batch_woken.set(false);
+        self.shared
+            .control
+            .batch_active
+            .store(false, Ordering::Release);
     }
 
     fn is_idle(&self) -> bool {
@@ -293,6 +298,11 @@ impl StereoWorker {
     #[cfg(test)]
     fn wake_count(&self) -> u64 {
         self.shared.wake_count.load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
+    fn park_count(&self) -> u64 {
+        self.shared.park_count.load(Ordering::Relaxed)
     }
 }
 
@@ -502,6 +512,10 @@ impl AnalysisChain {
         assert!(buffer.num_channels() == 1 || buffer.num_channels() == 2);
 
         output.begin_batch();
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(stereo_worker) = &self.stereo_worker {
+            stereo_worker.begin_batch();
+        }
         if self.internal_buffering {
             self.analyze_buffered(buffer, output);
         } else {
@@ -1064,5 +1078,25 @@ mod tests {
         let worker = StereoWorker::new();
         std::thread::yield_now();
         drop(worker);
+    }
+
+    #[test]
+    fn idle_worker_reparks_after_stale_wake_token() {
+        let worker = StereoWorker::new();
+        let deadline = Instant::now() + Duration::from_secs(5);
+
+        while worker.park_count() < 1 {
+            assert!(Instant::now() < deadline, "worker did not initially park");
+            std::thread::yield_now();
+        }
+
+        // Model an `unpark()` issued for a batch whose work the worker observed
+        // without sleeping. The retained token must not leave it spinning.
+        worker.thread.unpark();
+
+        while worker.park_count() < 2 {
+            assert!(Instant::now() < deadline, "worker did not park again");
+            std::thread::yield_now();
+        }
     }
 }
