@@ -27,9 +27,9 @@ mute-output = [  ]
 [dependencies]
 color       = "0.3.3"
 fast-math   = "0.1.1"
-parking_lot = "0.12.5"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+parking_lot = "0.12.5"
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95", features = [
 	"assert_process_allocs",
 	"standalone",
@@ -40,6 +40,7 @@ nih_plug_egui = { git = "https://github.com/transkatgirl/egui-baseview.git", rev
 threadpool = "1.8.1"
 keepawake = "0.6.0"
 mimalloc = { version = "0.1.52" }
+rtrb = "0.4.0"
 
 #nih_plug_egui = { git = "https://github.com/BillyDM/egui-baseview.git", rev = "e8a43d4c4029f9380206a52777d10c0ddbbb1d66" }
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -3,23 +3,18 @@
 #[cfg(all(not(debug_assertions), not(target_arch = "wasm32")))]
 use mimalloc::MiMalloc;
 
+use std::time::Duration;
+
+#[cfg(not(target_arch = "wasm32"))]
 use parking_lot::FairMutex;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::{
-    num::NonZero,
-    time::{Duration, Instant},
-};
+use std::num::NonZero;
 
 #[cfg(target_arch = "wasm32")]
-use parking_lot::Mutex;
-
-#[cfg(target_arch = "wasm32")]
-use web_time::{Duration, Instant};
-
-#[cfg(target_arch = "wasm32")]
-use std::sync::LazyLock;
+use std::cell::RefCell;
 
 #[cfg(not(target_arch = "wasm32"))]
 use keepawake::KeepAwake;
@@ -40,19 +35,20 @@ static GLOBAL: MiMalloc = MiMalloc;
 #[cfg(target_arch = "wasm32")]
 use crate::editor::{SharedState, build, render};
 
-use crate::{
-    analyzer::BetterSpectrogram,
-    chain::{AnalysisChain, AnalysisChainConfig},
-};
+use crate::chain::{AnalysisChain, AnalysisChainConfig};
+#[cfg(target_arch = "wasm32")]
+use crate::output::DirectAnalysisSink;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::output::{NativeAnalysisReceiver, NativeAnalysisSink, native_transport};
 
 pub mod analyzer;
 pub mod chain;
 mod editor;
+mod output;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub(crate) struct AnalysisMetrics {
     processing: Duration,
-    finished: Instant,
 }
 
 #[derive(Clone, Debug)]
@@ -112,133 +108,133 @@ const SAMPLE_BUFFER_SIZE: u16 = u16::MAX;
 const BUFFER_LIMIT_SECS: f32 = 0.1;
 
 #[cfg(target_arch = "wasm32")]
-static SAMPLES: LazyLock<Mutex<(u16, bool, f32, u16, Vec<f32>, Vec<f32>)>> = LazyLock::new(|| {
-    Mutex::new((
-        0,
-        false,
-        48000.0,
-        0,
-        vec![0.0; SAMPLE_BUFFER_SIZE as usize],
-        vec![0.0; SAMPLE_BUFFER_SIZE as usize],
-    ))
-}); // The WASM module and the sample passer MUST be on the same thread
+struct SampleBuffers {
+    position: u16,
+    single_input: bool,
+    rate: f32,
+    latency: u16,
+    left: Vec<f32>,
+    right: Vec<f32>,
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+static SAMPLES: RefCell<SampleBuffers> = RefCell::new(SampleBuffers {
+    position: 0,
+    single_input: false,
+    rate: 48000.0,
+    latency: 0,
+    left: vec![0.0; SAMPLE_BUFFER_SIZE as usize],
+    right: vec![0.0; SAMPLE_BUFFER_SIZE as usize],
+});
+} // The WASM module and the sample passer MUST be on the same thread
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn left_sample_buffer() -> Float32Array {
-    let lock = LazyLock::force(&SAMPLES).lock();
-
-    unsafe { Float32Array::view(&lock.4) }
+    SAMPLES.with(|samples| unsafe { Float32Array::view(&samples.borrow().left) })
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn right_sample_buffer() -> Float32Array {
-    let lock = LazyLock::force(&SAMPLES).lock();
-
-    unsafe { Float32Array::view(&lock.5) }
+    SAMPLES.with(|samples| unsafe { Float32Array::view(&samples.borrow().right) })
 }
 
 #[cfg(target_arch = "wasm32")]
 pub fn drain_buffers(callback: impl FnOnce(bool, f32, [&mut [f32]; 2])) {
-    let mut lock = LazyLock::force(&SAMPLES).lock();
+    SAMPLES.with(|samples| {
+        let mut samples = samples.borrow_mut();
 
-    let (
-        ref mut position,
-        ref single_input,
-        ref rate,
-        ref latency,
-        ref mut left_samples,
-        ref mut right_samples,
-    ) = *lock;
+        let SampleBuffers {
+            position,
+            single_input,
+            rate,
+            latency,
+            left: left_samples,
+            right: right_samples,
+        } = &mut *samples;
 
-    if *latency >= *position {
-        return;
-    }
+        if *latency >= *position {
+            return;
+        }
 
-    let index = *position as usize;
-    let latency_usize = *latency as usize;
-    let compensated_index = index - latency_usize;
+        let index = *position as usize;
+        let latency_usize = *latency as usize;
+        let compensated_index = index - latency_usize;
 
-    let compensated_limited_index =
-        compensated_index.min((rate * BUFFER_LIMIT_SECS).floor() as usize);
+        let compensated_limited_index =
+            compensated_index.min((*rate * BUFFER_LIMIT_SECS).floor() as usize);
 
-    callback(
-        *single_input,
-        *rate,
-        [
-            unsafe { left_samples.get_unchecked_mut(0..compensated_limited_index) },
-            unsafe { right_samples.get_unchecked_mut(0..compensated_limited_index) },
-        ],
-    );
+        callback(
+            *single_input,
+            *rate,
+            [
+                unsafe { left_samples.get_unchecked_mut(0..compensated_limited_index) },
+                unsafe { right_samples.get_unchecked_mut(0..compensated_limited_index) },
+            ],
+        );
 
-    if compensated_index != index {
-        left_samples.copy_within(compensated_index..index, 0);
-        right_samples.copy_within(compensated_index..index, 0);
-        *position = *latency;
-    } else {
-        *position = 0;
-    }
+        if compensated_index != index {
+            left_samples.copy_within(compensated_index..index, 0);
+            right_samples.copy_within(compensated_index..index, 0);
+            *position = *latency;
+        } else {
+            *position = 0;
+        }
+    });
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn get_position() -> u16 {
-    let lock = LazyLock::force(&SAMPLES).lock();
-
-    lock.0
+    SAMPLES.with(|samples| samples.borrow().position)
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn set_position(position: u16) {
-    let mut lock = LazyLock::force(&SAMPLES).lock();
-
-    lock.0 = position.min(SAMPLE_BUFFER_SIZE);
+    SAMPLES.with(|samples| samples.borrow_mut().position = position);
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn set_rate_and_latency(rate: f32, latency: f32) {
-    let mut lock = LazyLock::force(&SAMPLES).lock();
-
     assert!(rate.is_normal() && rate > 0.0 && latency.is_finite() && latency >= 0.0);
 
-    lock.2 = rate;
-    lock.3 =
-        if ((latency + BUFFER_LIMIT_SECS) * rate).ceil() as usize >= SAMPLE_BUFFER_SIZE as usize {
+    SAMPLES.with(|samples| {
+        let mut samples = samples.borrow_mut();
+        samples.rate = rate;
+        samples.latency = if ((latency + BUFFER_LIMIT_SECS) * rate).ceil() as usize
+            >= SAMPLE_BUFFER_SIZE as usize
+        {
             0
         } else {
             (latency * rate).round() as u16
         };
+    });
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn set_mono() {
-    let mut lock = LazyLock::force(&SAMPLES).lock();
-
-    lock.1 = true;
+    SAMPLES.with(|samples| samples.borrow_mut().single_input = true);
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn set_stereo() {
-    let mut lock = LazyLock::force(&SAMPLES).lock();
-
-    lock.1 = false;
+    SAMPLES.with(|samples| samples.borrow_mut().single_input = false);
 }
 
 #[cfg(target_arch = "wasm32")]
 pub struct WasmApp {
-    analysis_chain: Arc<FairMutex<Option<AnalysisChain>>>,
-    analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
-    analysis_frequencies: Arc<FairMutex<Vec<(f32, f32, f32)>>>,
-    state_info: Arc<FairMutex<Option<AudioState>>>,
+    analysis_chain: AnalysisChain,
+    state_info: AudioState,
     last_single_input: bool,
     last_sample_rate: f32,
 
-    shared_state: Mutex<SharedState>,
+    shared_state: SharedState,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -248,55 +244,28 @@ impl WasmApp {
 
         build(&cc.egui_ctx, &mut shared_state.spectrogram_texture);
 
-        let analysis_frequencies = Arc::new(FairMutex::new(Vec::with_capacity(MAX_FREQUENCY_BINS)));
-
         let analysis_chain = AnalysisChain::new(
             &AnalysisChainConfig::default(),
             AudioState::default().sample_rate,
             false,
-            analysis_frequencies.clone(),
         );
 
         Self {
-            analysis_chain: Arc::new(FairMutex::new(Some(analysis_chain))),
-            analysis_output: Arc::new(FairMutex::new((
-                BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
-                AnalysisMetrics {
-                    processing: Duration::ZERO,
-                    finished: Instant::now(),
-                },
-            ))),
-            analysis_frequencies,
-            state_info: Arc::new(FairMutex::new(Some(AudioState::default()))),
+            analysis_chain,
+            state_info: AudioState::default(),
             last_single_input: AudioState::default().input_channels == 1,
             last_sample_rate: AudioState::default().sample_rate,
-            shared_state: Mutex::new(shared_state),
+            shared_state,
         }
     }
     fn update_config(&mut self, single_input: bool, sample_rate: f32) {
-        let mut analysis_chain = self.analysis_chain.lock();
+        let analysis_config = self.analysis_chain.config();
 
-        let analysis_config = match &*analysis_chain {
-            Some(old_chain) => old_chain.config(),
-            None => AnalysisChainConfig::default(),
-        };
+        self.analysis_chain = AnalysisChain::new(&analysis_config, sample_rate, single_input);
 
-        *analysis_chain = Some(AnalysisChain::new(
-            &analysis_config,
-            sample_rate,
-            single_input,
-            self.analysis_frequencies.clone(),
-        ));
+        self.shared_state.invalidate_analysis_history();
 
-        *self.analysis_output.lock() = (
-            BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
-            AnalysisMetrics {
-                processing: Duration::ZERO,
-                finished: Instant::now(),
-            },
-        );
-
-        *self.state_info.lock() = Some(AudioState {
+        self.state_info = AudioState {
             input_channels: if single_input { 1 } else { 2 },
             sample_rate,
             buffer_size_range: (
@@ -304,7 +273,7 @@ impl WasmApp {
                 (SAMPLE_BUFFER_SIZE as u32).min((sample_rate * BUFFER_LIMIT_SECS).floor() as u32),
             ),
             ..Default::default()
-        });
+        };
         self.last_single_input = single_input;
         self.last_sample_rate = sample_rate;
     }
@@ -318,20 +287,22 @@ impl eframe::App for WasmApp {
                 self.update_config(single_input, sample_rate);
             }
 
-            let mut lock = self.analysis_chain.lock();
-
-            let mut analysis_chain = lock.as_mut().unwrap();
-
-            analysis_chain.analyze(&mut buffer, &self.analysis_output);
+            let (spectrogram, metrics) = (
+                &mut self.shared_state.spectrogram,
+                &mut self.shared_state.metrics,
+            );
+            let mut sink = DirectAnalysisSink {
+                spectrogram,
+                metrics,
+            };
+            self.analysis_chain.analyze(&mut buffer, &mut sink);
         });
 
         render(
             ctx,
-            &self.analysis_chain,
-            &self.analysis_output,
-            &self.analysis_frequencies,
+            &mut self.analysis_chain,
             &self.state_info,
-            &self.shared_state,
+            &mut self.shared_state,
             false,
         )
     }
@@ -342,7 +313,8 @@ pub struct MyPlugin {
     params: Arc<PluginParams>,
     analysis_chain: Arc<FairMutex<Option<AnalysisChain>>>,
     latency_samples: u32,
-    analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
+    analysis_sink: NativeAnalysisSink,
+    analysis_receiver: Option<NativeAnalysisReceiver>,
     analysis_frequencies: Arc<FairMutex<Vec<(f32, f32, f32)>>>,
     state_info: Arc<FairMutex<Option<AudioState>>>,
     keepawake: Option<KeepAwake>,
@@ -370,17 +342,14 @@ const SPECTROGRAM_SLICES: usize = 2048;
 #[cfg(not(target_arch = "wasm32"))]
 impl Default for MyPlugin {
     fn default() -> Self {
+        let (analysis_sink, analysis_receiver) = native_transport(MAX_FREQUENCY_BINS);
+
         Self {
             params: Arc::new(PluginParams::default()),
             analysis_chain: Arc::new(FairMutex::new(None)),
             latency_samples: 0,
-            analysis_output: Arc::new(FairMutex::new((
-                BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
-                AnalysisMetrics {
-                    processing: Duration::ZERO,
-                    finished: Instant::now(),
-                },
-            ))),
+            analysis_sink,
+            analysis_receiver: Some(analysis_receiver),
             analysis_frequencies: Arc::new(FairMutex::new(Vec::with_capacity(MAX_FREQUENCY_BINS))),
             state_info: Arc::new(FairMutex::new(None)),
             keepawake: None,
@@ -473,10 +442,12 @@ impl Plugin for MyPlugin {
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        let analysis_receiver = self.analysis_receiver.take()?;
+
         editor::create(
             self.params.clone(),
             self.analysis_chain.clone(),
-            self.analysis_output.clone(),
+            analysis_receiver,
             self.analysis_frequencies.clone(),
             self.state_info.clone(),
         )
@@ -506,13 +477,7 @@ impl Plugin for MyPlugin {
 
         *analysis_chain = Some(new_chain);
 
-        *self.analysis_output.lock() = (
-            BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
-            AnalysisMetrics {
-                processing: Duration::ZERO,
-                finished: Instant::now(),
-            },
-        );
+        self.analysis_sink.reset_stream();
 
         *self.state_info.lock() = Some(AudioState::new(*audio_io_layout, *buffer_config));
 
@@ -542,7 +507,7 @@ impl Plugin for MyPlugin {
                 self.latency_samples = analysis_chain.latency_samples;
             }
 
-            analysis_chain.analyze(buffer.as_slice(), &self.analysis_output);
+            analysis_chain.analyze(buffer.as_slice(), &mut self.analysis_sink);
 
             drop(lock);
         }

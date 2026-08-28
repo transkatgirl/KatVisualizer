@@ -20,8 +20,12 @@ use nih_plug_egui::{
     },
     resizable_window::paint_resize_corner,
 };
-use parking_lot::{FairMutex, Mutex};
 use std::sync::Arc;
+
+#[cfg(not(target_arch = "wasm32"))]
+use parking_lot::{FairMutex, Mutex};
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
@@ -31,21 +35,20 @@ use web_time::{Duration, Instant};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::PluginParams;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::output::NativeAnalysisReceiver;
 
 use crate::{
     AnalysisChain, AnalysisChainConfig, AnalysisMetrics, AudioState, MAX_FREQUENCY_BINS,
     SPECTROGRAM_SLICES,
     analyzer::{
-        BetterAnalysis, BetterSpectrogram, HEARING_THRESHOLD_PHON, MAX_COMPLETE_NORM_PHON,
-        MAX_INFORMATIVE_NORM_PHON, MIN_COMPLETE_NORM_PHON, map_value, scale_bark,
+        BetterAnalysis, HEARING_THRESHOLD_PHON, MAX_COMPLETE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON,
+        MIN_COMPLETE_NORM_PHON, Spectrogram, map_value, scale_bark,
     },
 };
 
-fn calculate_volume_min_max(
-    settings: &RenderSettings,
-    spectrogram: &BetterSpectrogram,
-) -> (f32, f32) {
-    if !settings.automatic_gain || !spectrogram.data[0].masking_mean.is_finite() {
+fn calculate_volume_min_max(settings: &RenderSettings, spectrogram: &Spectrogram) -> (f32, f32) {
+    if !settings.automatic_gain || !spectrogram.newest().masking_mean.is_finite() {
         return (settings.min_db, settings.max_db);
     }
 
@@ -54,7 +57,7 @@ fn calculate_volume_min_max(
     let mut masking_sum = 0.0;
     let mut rows: usize = 0;
 
-    for row in &spectrogram.data {
+    for row in spectrogram.newest_to_oldest() {
         elapsed += row.duration;
         if elapsed > settings.agc_duration {
             break;
@@ -78,7 +81,7 @@ fn calculate_volume_min_max(
 #[allow(clippy::type_complexity)]
 fn draw_bargraph(
     mesh: &mut Mesh,
-    spectrogram: &BetterSpectrogram,
+    spectrogram: &Spectrogram,
     buffer: (Vec<(f32, f32)>, Vec<f32>),
     horizontal: bool,
     bounds: Rect,
@@ -87,7 +90,7 @@ fn draw_bargraph(
     (max_db, min_db): (f32, f32),
     averaging: Duration,
 ) {
-    let front = &spectrogram.data.front().unwrap();
+    let front = spectrogram.newest();
 
     if !averaging.is_zero() {
         assert_eq!(front.data.len(), buffer.0.len());
@@ -96,8 +99,7 @@ fn draw_bargraph(
         let target_duration = front.duration;
 
         let max_index = spectrogram
-            .data
-            .iter()
+            .newest_to_oldest()
             .enumerate()
             .take_while(|(i, row)| {
                 row.duration.mul_f32(*i as f32) <= averaging
@@ -150,7 +152,7 @@ fn draw_bargraph(
 #[allow(clippy::type_complexity)]
 fn draw_averaged_bargraph(
     mesh: &mut Mesh,
-    spectrogram: &BetterSpectrogram,
+    spectrogram: &Spectrogram,
     mut buffer: (Vec<(f32, f32)>, Vec<f32>),
     horizontal: bool,
     bounds: Rect,
@@ -165,8 +167,7 @@ fn draw_averaged_bargraph(
     for i in 0..=max_index {
         for (spectrogram_chunk, output_chunk) in unsafe {
             spectrogram
-                .data
-                .get(i)
+                .at_age(i)
                 .unwrap_unchecked()
                 .data
                 .as_chunks_unchecked::<64>()
@@ -204,8 +205,7 @@ fn draw_averaged_bargraph(
         for i in 0..=max_index {
             for (spectrogram_chunk, output_chunk) in unsafe {
                 spectrogram
-                    .data
-                    .get(i)
+                    .at_age(i)
                     .unwrap_unchecked()
                     .masking
                     .as_chunks_unchecked::<64>()
@@ -813,14 +813,14 @@ fn draw_vertical_secondary_bargraph_from_pairs(
 
 fn draw_spectrogram_image(
     image: &mut ColorImage,
-    spectrogram: &BetterSpectrogram,
+    spectrogram: &Spectrogram,
     frequencies: &[(f32, f32, f32)],
     color_table: &ColorTable,
     (max_db, min_db): (f32, f32),
     clamp_using_smr: bool,
     blending_proportion: f32,
 ) {
-    let target_duration = spectrogram.data.front().unwrap().duration;
+    let target_duration = spectrogram.newest().duration;
 
     let image_width = image.width();
     let image_height = image.height();
@@ -878,7 +878,7 @@ fn draw_spectrogram_image(
 #[inline(never)]
 fn draw_spectrogram_smr_unblended(
     image: &mut ColorImage,
-    spectrogram: &BetterSpectrogram,
+    spectrogram: &Spectrogram,
     color_table: &ColorTable,
     (max_db, min_db): (f32, f32),
     (image_width, image_height): (usize, usize),
@@ -887,7 +887,7 @@ fn draw_spectrogram_smr_unblended(
 ) {
     let mut buffer = [0; 64];
 
-    for (y, analysis) in spectrogram.data.iter().enumerate() {
+    for (y, analysis) in spectrogram.newest_to_oldest().enumerate() {
         if analysis.data.len() != image_width
             || y == image_height
             || analysis.duration != target_duration
@@ -946,7 +946,7 @@ fn draw_spectrogram_smr_unblended(
 #[allow(clippy::too_many_arguments)]
 fn draw_spectrogram_smr_blended(
     image: &mut ColorImage,
-    spectrogram: &BetterSpectrogram,
+    spectrogram: &Spectrogram,
     color_table: &ColorTable,
     (max_db, min_db): (f32, f32),
     (image_width, image_height): (usize, usize),
@@ -957,7 +957,7 @@ fn draw_spectrogram_smr_blended(
     let mut buffer = [0; 64];
     let blending_inv = 1.0 - blending_proportion;
 
-    for (y, analysis) in spectrogram.data.iter().enumerate() {
+    for (y, analysis) in spectrogram.newest_to_oldest().enumerate() {
         if analysis.data.len() != image_width
             || y == image_height
             || analysis.duration != target_duration
@@ -1017,7 +1017,7 @@ fn draw_spectrogram_smr_blended(
 #[inline(never)]
 fn draw_spectrogram_nosmr(
     image: &mut ColorImage,
-    spectrogram: &BetterSpectrogram,
+    spectrogram: &Spectrogram,
     color_table: &ColorTable,
     (max_db, min_db): (f32, f32),
     (image_width, image_height): (usize, usize),
@@ -1025,7 +1025,7 @@ fn draw_spectrogram_nosmr(
 ) {
     let mut buffer = [0; 64];
 
-    for (y, analysis) in spectrogram.data.iter().enumerate() {
+    for (y, analysis) in spectrogram.newest_to_oldest().enumerate() {
         if analysis.data.len() != image_width
             || y == image_height
             || analysis.duration != target_duration
@@ -1064,7 +1064,7 @@ struct UnderCursor {
 #[allow(clippy::too_many_arguments)]
 fn get_under_cursor(
     cursor: Pos2,
-    spectrogram: &BetterSpectrogram,
+    spectrogram: &Spectrogram,
     frequencies: &[(f32, f32, f32)],
     horizontal: bool,
     bargraph_bounds: Rect,
@@ -1160,16 +1160,12 @@ fn get_under_cursor(
         };
 
         let frequency = frequencies[x];
-        let duration = spectrogram.data[0].duration;
+        let duration = spectrogram.newest().duration;
 
-        let item = if spectrogram.data.len() > y
-            && spectrogram.data[y].data.len() == frequencies.len()
-            && spectrogram.data[y].duration == duration
-        {
-            Some(spectrogram.data[y].data[x])
-        } else {
-            None
-        };
+        let item = spectrogram.at_age(y).and_then(|analysis| {
+            (analysis.data.len() == frequencies.len() && analysis.duration == duration)
+                .then(|| analysis.data[x])
+        });
 
         if let Some((pan, amplitude)) = item {
             Some(UnderCursor {
@@ -1362,15 +1358,29 @@ impl ColorTable {
 }
 
 pub(crate) struct SharedState {
+    #[cfg(not(target_arch = "wasm32"))]
     settings: Arc<Mutex<RenderSettings>>,
+    #[cfg(target_arch = "wasm32")]
+    settings: RefCell<RenderSettings>,
     frame_timing: (Instant, Duration, Duration),
     color_table: ColorTable,
+    #[cfg(not(target_arch = "wasm32"))]
     cached_analysis_settings: Arc<Mutex<AnalysisChainConfig>>,
+    #[cfg(target_arch = "wasm32")]
+    cached_analysis_settings: RefCell<AnalysisChainConfig>,
+    pub(crate) spectrogram: Spectrogram,
+    pub(crate) metrics: AnalysisMetrics,
+    #[cfg(not(target_arch = "wasm32"))]
+    analysis_receiver: NativeAnalysisReceiver,
+    #[cfg(not(target_arch = "wasm32"))]
+    buffering_duration: Duration,
     pub(crate) spectrogram_texture: Option<TextureId>,
 }
 
 impl SharedState {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(
+        #[cfg(not(target_arch = "wasm32"))] analysis_receiver: NativeAnalysisReceiver,
+    ) -> Self {
         let settings = RenderSettings::default();
         let mut color_table = ColorTable::new(
             COLOR_TABLE_BASE_CHROMA_SIZE * settings.lookup_size,
@@ -1384,13 +1394,47 @@ impl SharedState {
             settings.maximum_chroma,
         );
 
-        Self {
+        #[allow(unused_mut)]
+        let mut state = Self {
+            #[cfg(not(target_arch = "wasm32"))]
             settings: Arc::new(Mutex::new(settings)),
+            #[cfg(target_arch = "wasm32")]
+            settings: RefCell::new(settings),
             frame_timing: (Instant::now(), Duration::ZERO, Duration::ZERO),
             color_table,
+            #[cfg(not(target_arch = "wasm32"))]
             cached_analysis_settings: Arc::new(Mutex::new(AnalysisChainConfig::default())),
+            #[cfg(target_arch = "wasm32")]
+            cached_analysis_settings: RefCell::new(AnalysisChainConfig::default()),
+            spectrogram: Spectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
+            metrics: AnalysisMetrics::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            analysis_receiver,
+            #[cfg(not(target_arch = "wasm32"))]
+            buffering_duration: Duration::ZERO,
             spectrogram_texture: None,
-        }
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        state.analysis_receiver.fresh_start(&mut state.spectrogram);
+
+        state
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn drain_analysis(&mut self) {
+        self.buffering_duration = self
+            .analysis_receiver
+            .drain_into(&mut self.spectrogram, &mut self.metrics);
+    }
+
+    pub(crate) fn invalidate_analysis_history(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.analysis_receiver
+            .invalidate_history(&mut self.spectrogram);
+
+        #[cfg(target_arch = "wasm32")]
+        self.spectrogram.clear();
     }
 }
 
@@ -1401,18 +1445,17 @@ const BASELINE_TARGET_FRAME_SECS: f32 = 1.0 / BASELINE_TARGET_FPS;
 pub fn create(
     params: Arc<PluginParams>,
     analysis_chain: Arc<FairMutex<Option<AnalysisChain>>>,
-    analysis_output: Arc<FairMutex<(BetterSpectrogram, AnalysisMetrics)>>,
+    analysis_receiver: NativeAnalysisReceiver,
     analysis_frequencies: Arc<FairMutex<Vec<(f32, f32, f32)>>>,
     audio_state: Arc<FairMutex<Option<AudioState>>>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
 
-    let shared_state = Arc::new(Mutex::new(SharedState::new()));
-    let second_shared_state = shared_state.clone();
+    let shared_state = SharedState::new(analysis_receiver);
 
     create_egui_editor(
         egui_state.clone(),
-        (),
+        shared_state,
         EguiSettings {
             graphics_config: GraphicsConfig {
                 dithering: true,
@@ -1424,20 +1467,16 @@ pub fn create(
                 ..Default::default()
             },
         },
-        move |egui_ctx, _, _| {
-            build(
-                egui_ctx,
-                &mut second_shared_state.lock().spectrogram_texture,
-            );
+        move |egui_ctx, _, shared_state| {
+            build(egui_ctx, &mut shared_state.spectrogram_texture);
         },
-        move |egui_ctx, _setter, _, _| {
+        move |egui_ctx, _setter, _, shared_state| {
             render(
                 egui_ctx,
                 &analysis_chain,
-                &analysis_output,
                 &analysis_frequencies,
                 &audio_state,
-                &shared_state,
+                shared_state,
                 false,
                 &egui_state,
             );
@@ -1476,26 +1515,31 @@ pub(crate) fn build(egui_ctx: &Context, spectrogram_texture: &mut Option<Texture
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render(
     egui_ctx: &Context,
-    analysis_chain: &FairMutex<Option<AnalysisChain>>,
-    analysis_output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
-    analysis_frequencies: &FairMutex<Vec<(f32, f32, f32)>>,
-    audio_state: &FairMutex<Option<AudioState>>,
-    shared_state: &Mutex<SharedState>,
-    mut paused: bool,
+    #[cfg(not(target_arch = "wasm32"))] analysis_chain: &FairMutex<Option<AnalysisChain>>,
+    #[cfg(target_arch = "wasm32")] analysis_chain: &mut AnalysisChain,
+    #[cfg(not(target_arch = "wasm32"))] analysis_frequencies: &FairMutex<Vec<(f32, f32, f32)>>,
+    #[cfg(not(target_arch = "wasm32"))] audio_state: &FairMutex<Option<AudioState>>,
+    #[cfg(target_arch = "wasm32")] audio_state: &AudioState,
+    shared_state: &mut SharedState,
+    paused: bool,
     #[cfg(not(target_arch = "wasm32"))] egui_state: &EguiState,
 ) {
     egui_ctx.request_repaint();
 
     let start = Instant::now();
 
-    let mut shared_state = shared_state.lock();
+    #[cfg(not(target_arch = "wasm32"))]
+    shared_state.drain_analysis();
 
     egui::CentralPanel::default().show(egui_ctx, |ui| {
         let painter = ui.painter();
         let max_x = painter.clip_rect().max.x;
         let max_y = painter.clip_rect().max.y;
 
+        #[cfg(not(target_arch = "wasm32"))]
         let settings = *shared_state.settings.lock();
+        #[cfg(target_arch = "wasm32")]
+        let settings = *shared_state.settings.borrow();
 
         let (bargraph_bounds, spectrogram_bounds) = if !settings.horizontal {
             (
@@ -1533,14 +1577,10 @@ pub(crate) fn render(
             )
         };
 
-        let lock = analysis_output.lock();
-        let (ref spectrogram, metrics) = *lock;
+        let spectrogram = &shared_state.spectrogram;
+        let metrics = shared_state.metrics;
 
-        let spectrogram = spectrogram.clone();
-
-        drop(lock);
-
-        let front = spectrogram.data.front().unwrap();
+        let front = spectrogram.newest();
 
         let spectrogram_width = front.data.len();
         let spectrogram_height = (settings.spectrogram_duration.as_secs_f32()
@@ -1564,21 +1604,26 @@ pub(crate) fn render(
         let bargraph_buffer_2 = vec![0.0; spectrogram_width];
 
         #[cfg(not(target_arch = "wasm32"))]
-        let buffering_duration = metrics.finished.elapsed();
+        let buffering_duration = shared_state.buffering_duration;
 
         let processing_duration = metrics.processing;
         let chunk_duration = front.duration;
 
-        let (min_db, max_db) = calculate_volume_min_max(&settings, &spectrogram);
+        let (min_db, max_db) = calculate_volume_min_max(&settings, spectrogram);
 
-        let frequencies = analysis_frequencies.lock();
+        #[cfg(not(target_arch = "wasm32"))]
+        let frequency_guard = analysis_frequencies.lock();
+        #[cfg(not(target_arch = "wasm32"))]
+        let frequencies = frequency_guard.as_slice();
+        #[cfg(target_arch = "wasm32")]
+        let frequencies = analysis_chain.frequencies.as_slice();
 
         {
             if settings.bargraph_height != 0.0 {
                 if settings.show_masking {
                     draw_bargraph(
                         &mut bargraph_mesh,
-                        &spectrogram,
+                        spectrogram,
                         (bargraph_buffer_1, bargraph_buffer_2),
                         settings.horizontal,
                         bargraph_bounds,
@@ -1590,7 +1635,7 @@ pub(crate) fn render(
                 } else {
                     draw_bargraph(
                         &mut bargraph_mesh,
-                        &spectrogram,
+                        spectrogram,
                         (bargraph_buffer_1, bargraph_buffer_2),
                         settings.horizontal,
                         bargraph_bounds,
@@ -1605,8 +1650,8 @@ pub(crate) fn render(
             if settings.bargraph_height != 1.0 {
                 draw_spectrogram_image(
                     &mut spectrogram_image,
-                    &spectrogram,
-                    &frequencies,
+                    spectrogram,
+                    frequencies,
                     &shared_state.color_table,
                     (max_db, min_db),
                     settings.clamp_using_smr,
@@ -1619,8 +1664,8 @@ pub(crate) fn render(
             if let Some(pointer) = egui_ctx.pointer_latest_pos() {
                 get_under_cursor(
                     pointer,
-                    &spectrogram,
-                    &frequencies,
+                    spectrogram,
+                    frequencies,
                     settings.horizontal,
                     bargraph_bounds,
                     spectrogram_bounds,
@@ -1633,8 +1678,6 @@ pub(crate) fn render(
         } else {
             None
         };
-
-        drop(spectrogram);
 
         {
             let spectrogram_texture = shared_state.spectrogram_texture.unwrap();
@@ -1719,7 +1762,10 @@ pub(crate) fn render(
         }
 
         if let Some(under) = under_pointer {
+            #[cfg(not(target_arch = "wasm32"))]
             let analysis_settings = shared_state.cached_analysis_settings.lock();
+            #[cfg(target_arch = "wasm32")]
+            let analysis_settings = shared_state.cached_analysis_settings.borrow();
 
             let amplitude_text = if analysis_settings.normalize_amplitude {
                 format!(
@@ -1739,7 +1785,11 @@ pub(crate) fn render(
                     pan
                 )
             } else {
-                let width = if let Some(audio_state) = audio_state.lock().as_ref() {
+                #[cfg(not(target_arch = "wasm32"))]
+                let audio_state = audio_state.lock();
+                #[cfg(target_arch = "wasm32")]
+                let audio_state = Some(audio_state);
+                let width = if let Some(audio_state) = audio_state.as_ref() {
                     // Copied from vqsdft.rs line 175
 
                     let q = under.frequency.1 as f64
@@ -1794,7 +1844,11 @@ pub(crate) fn render(
         }
 
         if settings.show_format {
-            if let Some(audio_state) = audio_state.lock().as_ref() {
+            #[cfg(not(target_arch = "wasm32"))]
+            let audio_state = audio_state.lock();
+            #[cfg(target_arch = "wasm32")]
+            let audio_state = Some(audio_state);
+            if let Some(audio_state) = audio_state.as_ref() {
                 let min_buffer_size_s =
                     audio_state.buffer_size_range.0 as f32 / audio_state.sample_rate;
                 let max_buffer_size_s =
@@ -1832,7 +1886,8 @@ pub(crate) fn render(
             }
         }
 
-        drop(frequencies);
+        #[cfg(not(target_arch = "wasm32"))]
+        drop(frequency_guard);
 
         if settings.show_performance {
             let frame_elapsed = shared_state.frame_timing.1;
@@ -1845,27 +1900,12 @@ pub(crate) fn render(
             let chunk_secs = chunk_duration.as_secs_f32();
             let frame_secs = frame_elapsed.as_secs_f32();
 
-            /*let rasterize_processing_duration = rasterize_secs / (frame_secs / chunk_secs);
-            let adjusted_processing_duration =
-                processing_duration.as_secs_f32() + rasterize_processing_duration;*/
-            #[cfg(not(target_arch = "wasm32"))]
-            let buffer_processing_duration = buffering_secs / (frame_secs / chunk_secs);
-
-            #[cfg(target_arch = "wasm32")]
-            let buffer_processing_duration = 0.0;
-
-            let adjusted_processing_duration =
-                processing_duration.as_secs_f32() + buffer_processing_duration;
+            let adjusted_processing_duration = processing_duration.as_secs_f32();
             let rasterize_proportion = rasterize_secs / frame_secs;
             let processing_proportion = adjusted_processing_duration / chunk_secs;
 
             #[cfg(not(target_arch = "wasm32"))]
             let buffering_proportion = buffering_secs / frame_secs;
-
-            #[cfg(not(target_arch = "wasm32"))]
-            if buffering_duration > Duration::from_millis(500) {
-                paused = true;
-            }
 
             #[cfg(not(target_arch = "wasm32"))]
             const RASTERIZE_PROPORTION_TARGETS: (f32, f32) = (0.3, 0.6);
@@ -1915,9 +1955,9 @@ pub(crate) fn render(
                         size: 12.0,
                         family: egui::FontFamily::Monospace,
                     },
-                    if buffering_proportion >= 1.0 {
+                    if buffering_proportion >= 2.5 {
                         Color32::RED
-                    } else if buffering_proportion >= 0.5 {
+                    } else if buffering_proportion >= 1.5 {
                         Color32::YELLOW
                     } else {
                         Color32::from_rgb(224, 224, 224)
@@ -2014,10 +2054,22 @@ pub(crate) fn render(
         })
         .default_open(false)
         .show(egui_ctx, |ui| {
+            #[cfg(not(target_arch = "wasm32"))]
             let analysis_settings = shared_state.cached_analysis_settings.clone();
+            #[cfg(target_arch = "wasm32")]
+            let analysis_settings = &shared_state.cached_analysis_settings;
+            #[cfg(not(target_arch = "wasm32"))]
             let render_settings = shared_state.settings.clone();
+            #[cfg(target_arch = "wasm32")]
+            let render_settings = &shared_state.settings;
+            #[cfg(not(target_arch = "wasm32"))]
             let mut analysis_settings = analysis_settings.lock();
+            #[cfg(target_arch = "wasm32")]
+            let mut analysis_settings = analysis_settings.borrow_mut();
+            #[cfg(not(target_arch = "wasm32"))]
             let mut render_settings = render_settings.lock();
+            #[cfg(target_arch = "wasm32")]
+            let mut render_settings = render_settings.borrow_mut();
 
             ui.collapsing("Render Options", |ui| {
                 ui.checkbox(&mut render_settings.horizontal, "Use horizontal rendering mode");
@@ -2300,19 +2352,36 @@ pub(crate) fn render(
             });
 
             ui.collapsing("Analysis Options", |ui| {
+                #[cfg(target_arch = "wasm32")]
+                let analysis_chain = RefCell::new(&mut *analysis_chain);
+
                 let update = |settings| {
+                    #[cfg(not(target_arch = "wasm32"))]
                     let mut lock = analysis_chain.lock();
+                    #[cfg(target_arch = "wasm32")]
+                    let mut lock = analysis_chain.borrow_mut();
+                    #[cfg(not(target_arch = "wasm32"))]
                     let analysis_chain = lock.as_mut().unwrap();
+                    #[cfg(target_arch = "wasm32")]
+                    let analysis_chain = &mut **lock;
                     analysis_chain.update_config(settings);
                 };
 
-                let update_and_clear = |settings| {
+                let mut update_and_clear = |settings| {
+                    #[cfg(not(target_arch = "wasm32"))]
                     let mut lock = analysis_chain.lock();
+                    #[cfg(target_arch = "wasm32")]
+                    let mut lock = analysis_chain.borrow_mut();
+                    #[cfg(not(target_arch = "wasm32"))]
                     let analysis_chain = lock.as_mut().unwrap();
+                    #[cfg(target_arch = "wasm32")]
+                    let analysis_chain = &mut **lock;
                     analysis_chain.update_config(settings);
 
-                    analysis_output.lock().0 =
-                        BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    shared_state.invalidate_analysis_history();
+                    #[cfg(target_arch = "wasm32")]
+                    shared_state.spectrogram.clear();
                 };
 
                 let is_outside_hearing_range = analysis_settings.start_frequency < 20.0 || analysis_settings.start_frequency > 20000.0 || analysis_settings.end_frequency > 20000.0 || analysis_settings.end_frequency < 20.0;

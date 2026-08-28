@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, f32::consts::PI, sync::Arc, time::Duration};
+use std::{collections::VecDeque, f32::consts::PI, time::Duration};
 
 mod masker;
 mod vqsdft;
@@ -709,58 +709,107 @@ impl BetterAnalysis {
     }
 }
 
-#[derive(Clone)]
-pub struct BetterSpectrogram {
-    pub data: VecDeque<Arc<BetterAnalysis>>,
+/// Render-owned analysis history. The newest slice is always at age zero.
+pub(crate) struct Spectrogram {
+    data: VecDeque<BetterAnalysis>,
 }
 
-impl BetterSpectrogram {
-    pub fn new(length: usize, slice_capacity: usize) -> Self {
+impl Spectrogram {
+    pub(crate) fn new(length: usize, slice_capacity: usize) -> Self {
+        assert!(length > 0);
+
         Self {
             data: VecDeque::from_iter((0..length).map(|_| {
-                Arc::new(BetterAnalysis {
-                    duration: Duration::from_secs(1),
-                    data: vec![(0.0, f32::NEG_INFINITY); slice_capacity],
-                    masking: vec![(0.0, f32::NEG_INFINITY); slice_capacity],
-                    masking_mean: f32::NEG_INFINITY,
-                })
+                let mut analysis = BetterAnalysis::new(slice_capacity);
+                analysis
+                    .data
+                    .resize(slice_capacity, (0.0, f32::NEG_INFINITY));
+                analysis
+                    .masking
+                    .resize(slice_capacity, (0.0, f32::NEG_INFINITY));
+                analysis.duration = Duration::from_secs(1);
+                analysis
             })),
         }
     }
-    pub fn update(&mut self, analysis: &BetterAnalysis) {
-        self.update_fn(|buffer| {
-            if buffer.data.len() == analysis.data.len() {
-                buffer.data.copy_from_slice(&analysis.data);
-                buffer.masking.copy_from_slice(&analysis.masking);
-            } else {
-                buffer.data.clone_from(&analysis.data);
-                buffer.masking.clone_from(&analysis.masking);
-            }
-            buffer.duration = analysis.duration;
-            buffer.masking_mean = analysis.masking_mean;
-        });
+
+    #[inline]
+    pub(crate) fn newest(&self) -> &BetterAnalysis {
+        self.data.front().expect("spectrogram is never empty")
     }
-    pub fn update_fn<F>(&mut self, callback: F)
-    where
-        F: Fn(&mut BetterAnalysis),
-    {
-        let buffer = self.data.pop_back().unwrap();
 
-        callback(unsafe { &mut *Arc::as_ptr(&buffer).cast_mut() }); // *Intentional* race condition; This can only cause visual glitches, as all other references are read-only
-
-        // TODO: Add measures to ensure safety in the future! This is currently an ugly hack
-
-        /*loop {
-            if let Some(buffer) = Arc::get_mut(&mut buffer) {
-                callback(buffer);
-                break;
-            }
-        }*/
-
-        self.data.push_front(buffer);
+    #[inline]
+    pub(crate) fn at_age(&self, age: usize) -> Option<&BetterAnalysis> {
+        self.data.get(age)
     }
-    pub fn clone_from(&mut self, source: &Self) {
-        self.data.clone_from(&source.data);
+
+    #[inline]
+    pub(crate) fn newest_to_oldest(&self) -> impl Iterator<Item = &BetterAnalysis> {
+        self.data.iter()
+    }
+
+    #[inline]
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Inserts an owned slice and returns the oldest allocation for recycling.
+    #[cfg(any(not(target_arch = "wasm32"), test))]
+    pub(crate) fn rotate_in(&mut self, analysis: BetterAnalysis) -> BetterAnalysis {
+        let evicted = self.data.pop_back().expect("spectrogram is never empty");
+        self.data.push_front(analysis);
+        evicted
+    }
+
+    /// Reuses the oldest render-owned allocation and makes it the newest slice.
+    pub(crate) fn update_with(&mut self, update: impl FnOnce(&mut BetterAnalysis)) {
+        let mut analysis = self.data.pop_back().expect("spectrogram is never empty");
+        update(&mut analysis);
+        self.data.push_front(analysis);
+    }
+
+    /// Inserts zero-amplitude rows for missing analyzed time.
+    ///
+    /// The number of rows is quantized to `slice_duration` and capped to the
+    /// retained history, so even a very long stall has bounded work.
+    #[cfg(any(not(target_arch = "wasm32"), test))]
+    pub(crate) fn insert_blank_span(
+        &mut self,
+        missing: Duration,
+        slice_duration: Duration,
+        bins: usize,
+    ) {
+        if missing.is_zero() || slice_duration.is_zero() {
+            return;
+        }
+
+        let rows = (missing.as_secs_f64() / slice_duration.as_secs_f64()).round() as usize;
+        let rows = rows.min(self.data.len());
+
+        for _ in 0..rows {
+            self.update_with(|analysis| analysis.make_blank(slice_duration, bins));
+        }
+    }
+
+    /// Clears visible history while retaining all allocated buffers.
+    pub(crate) fn clear(&mut self) {
+        for analysis in &mut self.data {
+            let duration = analysis.duration;
+            let bins = analysis.data.len();
+            analysis.make_blank(duration, bins);
+        }
+    }
+}
+
+impl BetterAnalysis {
+    fn make_blank(&mut self, duration: Duration, bins: usize) {
+        self.duration = duration;
+        self.data.resize(bins, (0.0, f32::NEG_INFINITY));
+        self.masking.resize(bins, (0.0, f32::NEG_INFINITY));
+        self.data.fill((0.0, f32::NEG_INFINITY));
+        self.masking.fill((0.0, f32::NEG_INFINITY));
+        self.masking_mean = f32::NEG_INFINITY;
     }
 }
 

@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -6,14 +7,16 @@ use std::time::{Duration, Instant};
 #[cfg(target_arch = "wasm32")]
 use web_time::{Duration, Instant};
 
+#[cfg(not(target_arch = "wasm32"))]
 use parking_lot::{FairMutex, Mutex};
 #[cfg(not(target_arch = "wasm32"))]
 use threadpool::ThreadPool;
 
 use crate::{
     AnalysisMetrics,
-    analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram},
+    analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration},
     chain::chunker::{StftHelper, StftInput},
+    output::AnalysisSink,
 };
 
 mod chunker;
@@ -82,8 +85,14 @@ impl Default for AnalysisChainConfig {
 #[allow(clippy::type_complexity)]
 pub(crate) struct AnalysisChain {
     chunker: StftHelper<0>,
+    #[cfg(not(target_arch = "wasm32"))]
     left_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
+    #[cfg(target_arch = "wasm32")]
+    left_analyzer: BetterAnalyzer,
+    #[cfg(not(target_arch = "wasm32"))]
     right_analyzer: Arc<Mutex<(Vec<f32>, BetterAnalyzer)>>,
+    #[cfg(target_arch = "wasm32")]
+    right_analyzer: BetterAnalyzer,
     gain: f32,
     internal_buffering: bool,
     strict_synchronization: bool,
@@ -98,7 +107,10 @@ pub(crate) struct AnalysisChain {
     single_input: bool,
     #[cfg(not(target_arch = "wasm32"))]
     analyzer_pool: ThreadPool,
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) frequencies: Arc<FairMutex<Vec<(f32, f32, f32)>>>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) frequencies: Vec<(f32, f32, f32)>,
 }
 
 impl AnalysisChain {
@@ -106,7 +118,9 @@ impl AnalysisChain {
         config: &AnalysisChainConfig,
         sample_rate: f32,
         single_input: bool,
-        frequency_list_container: Arc<FairMutex<Vec<(f32, f32, f32)>>>,
+        #[cfg(not(target_arch = "wasm32"))] frequency_list_container: Arc<
+            FairMutex<Vec<(f32, f32, f32)>>,
+        >,
     ) -> Self {
         let analyzer_config = BetterAnalyzerConfiguration {
             resolution: config.resolution,
@@ -131,6 +145,7 @@ impl AnalysisChain {
         let chunk_size = (sample_rate as f64 / config.update_rate_hz).round() as usize;
         chunker.set_block_size(chunk_size);
 
+        #[cfg(not(target_arch = "wasm32"))]
         {
             let mut frequencies = frequency_list_container.lock();
             frequencies.clear();
@@ -153,9 +168,22 @@ impl AnalysisChain {
             } + (config.latency_offset.as_secs_f64() * sample_rate as f64) as u32,
             additional_latency: config.latency_offset,
             chunker,
+            #[cfg(not(target_arch = "wasm32"))]
             frequencies: frequency_list_container,
+            #[cfg(target_arch = "wasm32")]
+            frequencies: left_analyzer
+                .frequencies()
+                .iter()
+                .map(|(a, b, c)| (*a, *b, *c))
+                .collect(),
+            #[cfg(not(target_arch = "wasm32"))]
             left_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], left_analyzer))),
+            #[cfg(target_arch = "wasm32")]
+            left_analyzer,
+            #[cfg(not(target_arch = "wasm32"))]
             right_analyzer: Arc::new(Mutex::new((vec![0.0; chunk_size], right_analyzer))),
+            #[cfg(target_arch = "wasm32")]
+            right_analyzer,
             gain: config.gain,
             update_rate: config.update_rate_hz,
             listening_volume: if config.normalize_amplitude {
@@ -171,11 +199,7 @@ impl AnalysisChain {
             analyzer_pool: ThreadPool::new(2),
         }
     }
-    pub(crate) fn analyze(
-        &mut self,
-        buffer: &mut [&mut [f32]],
-        output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
-    ) {
+    pub(crate) fn analyze<S: AnalysisSink>(&mut self, buffer: &mut [&mut [f32]], output: &mut S) {
         assert!(buffer.num_channels() == 1 || buffer.num_channels() == 2);
 
         if self.internal_buffering {
@@ -184,11 +208,7 @@ impl AnalysisChain {
             self.analyze_unbuffered(buffer, output);
         }
     }
-    fn analyze_buffered(
-        &mut self,
-        buffer: &mut [&mut [f32]],
-        output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
-    ) {
+    fn analyze_buffered<S: AnalysisSink>(&mut self, buffer: &mut [&mut [f32]], output: &mut S) {
         let mut finished = Instant::now();
 
         let mut callback = |channel_idx, buffer: &[f32]| {
@@ -197,10 +217,14 @@ impl AnalysisChain {
             }
 
             if self.single_input {
-                let mut lock = self.left_analyzer.lock();
-                let (ref _buffer, ref mut analyzer) = *lock;
-
-                analyzer.analyze(buffer.iter().copied(), self.listening_volume);
+                #[cfg(not(target_arch = "wasm32"))]
+                self.left_analyzer
+                    .lock()
+                    .1
+                    .analyze(buffer.iter().copied(), self.listening_volume);
+                #[cfg(target_arch = "wasm32")]
+                self.left_analyzer
+                    .analyze(buffer.iter().copied(), self.listening_volume);
             } else {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
@@ -231,29 +255,33 @@ impl AnalysisChain {
 
                 #[cfg(target_arch = "wasm32")]
                 {
-                    let mut lock = if channel_idx == 0 {
-                        self.left_analyzer.lock()
+                    let analyzer = if channel_idx == 0 {
+                        &mut self.left_analyzer
                     } else {
-                        self.right_analyzer.lock()
+                        &mut self.right_analyzer
                     };
-                    let (ref _buffer, ref mut analyzer) = *lock;
-
                     analyzer.analyze(buffer.iter().copied(), self.listening_volume);
                 }
             }
 
             if channel_idx == 1 || (channel_idx == 0 && self.single_input) {
-                let (ref mut spectrogram, ref mut metrics) = *output.lock();
-
                 #[cfg(not(target_arch = "wasm32"))]
                 self.analyzer_pool.join();
 
+                #[cfg(not(target_arch = "wasm32"))]
                 let left_lock = self.left_analyzer.lock();
+                #[cfg(target_arch = "wasm32")]
+                let left_analyzer = &self.left_analyzer;
+                #[cfg(not(target_arch = "wasm32"))]
                 let right_lock = self.right_analyzer.lock();
+                #[cfg(target_arch = "wasm32")]
+                let right_analyzer = &self.right_analyzer;
+                #[cfg(not(target_arch = "wasm32"))]
                 let left_analyzer = &left_lock.1;
+                #[cfg(not(target_arch = "wasm32"))]
                 let right_analyzer = &right_lock.1;
 
-                spectrogram.update_fn(|analysis_output| {
+                output.submit(self.chunk_duration, |analysis_output| {
                     if self.single_input {
                         analysis_output.update_mono(
                             left_analyzer,
@@ -270,13 +298,13 @@ impl AnalysisChain {
                             self.chunk_duration,
                         );
                     }
+
+                    AnalysisMetrics {
+                        processing: finished.elapsed(),
+                    }
                 });
 
-                let now = Instant::now();
-                metrics.processing = now.duration_since(finished);
-                metrics.finished = now;
-
-                finished = now;
+                finished = Instant::now();
             }
         };
 
@@ -299,11 +327,7 @@ impl AnalysisChain {
                 callback(channel_idx, buffer);
             });
     }
-    fn analyze_unbuffered(
-        &mut self,
-        buffer: &mut [&mut [f32]],
-        output: &FairMutex<(BetterSpectrogram, AnalysisMetrics)>,
-    ) {
+    fn analyze_unbuffered<S: AnalysisSink>(&mut self, buffer: &mut [&mut [f32]], output: &mut S) {
         let finished = Instant::now();
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -341,37 +365,43 @@ impl AnalysisChain {
                         analyzer.analyze(buffer.iter().copied(), listening_volume);
                     });
                 }
-
-                #[cfg(target_arch = "wasm32")]
-                {
-                    let mut lock = if channel_idx == 0 {
-                        self.left_analyzer.lock()
-                    } else {
-                        self.right_analyzer.lock()
-                    };
-                    let (ref _buffer, ref mut analyzer) = *lock;
-
-                    analyzer.analyze(buffer.iter().copied(), self.listening_volume);
-                }
             }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        if self.single_input {
+            self.left_analyzer
+                .analyze(buffer[0].iter().copied(), self.listening_volume);
+        } else {
+            self.left_analyzer
+                .analyze(buffer[0].iter().copied(), self.listening_volume);
+            self.right_analyzer
+                .analyze(buffer[1].iter().copied(), self.listening_volume);
         }
 
         let chunk_duration =
             Duration::from_secs_f64(buffer.num_samples() as f64 / self.sample_rate as f64);
 
-        let (ref mut spectrogram, ref mut metrics) = *output.lock();
-
+        #[cfg(not(target_arch = "wasm32"))]
         let (left_ref, right_ref) = (self.left_analyzer.clone(), self.right_analyzer.clone());
 
         #[cfg(not(target_arch = "wasm32"))]
         self.analyzer_pool.join();
 
+        #[cfg(not(target_arch = "wasm32"))]
         let mut left_lock = left_ref.lock();
+        #[cfg(not(target_arch = "wasm32"))]
         let mut right_lock = right_ref.lock();
+        #[cfg(not(target_arch = "wasm32"))]
         let left_analyzer = &mut left_lock.1;
+        #[cfg(not(target_arch = "wasm32"))]
         let right_analyzer = &mut right_lock.1;
+        #[cfg(target_arch = "wasm32")]
+        let left_analyzer = &mut self.left_analyzer;
+        #[cfg(target_arch = "wasm32")]
+        let right_analyzer = &mut self.right_analyzer;
 
-        spectrogram.update_fn(|analysis_output| {
+        output.submit(chunk_duration, |analysis_output| {
             if self.single_input {
                 analysis_output.update_mono(
                     left_analyzer,
@@ -388,14 +418,18 @@ impl AnalysisChain {
                     chunk_duration,
                 );
             }
-        });
 
-        let now = Instant::now();
-        metrics.processing = now.duration_since(finished);
-        metrics.finished = now;
+            AnalysisMetrics {
+                processing: finished.elapsed(),
+            }
+        });
     }
     pub(crate) fn config(&self) -> AnalysisChainConfig {
+        #[cfg(not(target_arch = "wasm32"))]
         let analyzer = self.left_analyzer.lock();
+        #[cfg(target_arch = "wasm32")]
+        let analyzer_config = self.left_analyzer.config();
+        #[cfg(not(target_arch = "wasm32"))]
         let analyzer_config = analyzer.1.config();
 
         AnalysisChainConfig {
@@ -431,7 +465,11 @@ impl AnalysisChain {
         };
         self.masking = config.masking;
 
+        #[cfg(not(target_arch = "wasm32"))]
         let old_left_analyzer = self.left_analyzer.lock();
+        #[cfg(target_arch = "wasm32")]
+        let old_analyzer_config = self.left_analyzer.config();
+        #[cfg(not(target_arch = "wasm32"))]
         let old_analyzer_config = old_left_analyzer.1.config();
 
         if self.update_rate != config.update_rate_hz {
@@ -484,11 +522,15 @@ impl AnalysisChain {
                 masking: config.masking,
                 approximate_masking: config.approximate_masking,
             };
+            #[cfg(not(target_arch = "wasm32"))]
             drop(old_left_analyzer);
             let left_analyzer = BetterAnalyzer::new(analyzer_config.clone());
             let right_analyzer = BetterAnalyzer::new(analyzer_config);
 
+            #[cfg(not(target_arch = "wasm32"))]
             let mut frequencies = self.frequencies.lock();
+            #[cfg(target_arch = "wasm32")]
+            let frequencies = &mut self.frequencies;
             frequencies.clear();
             frequencies.extend(
                 left_analyzer
@@ -497,16 +539,29 @@ impl AnalysisChain {
                     .map(|(a, b, c)| (*a, *b, *c)),
             );
 
-            self.left_analyzer = Arc::new(Mutex::new((vec![0.0; self.chunk_size], left_analyzer)));
-            self.right_analyzer =
-                Arc::new(Mutex::new((vec![0.0; self.chunk_size], right_analyzer)));
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.left_analyzer =
+                    Arc::new(Mutex::new((vec![0.0; self.chunk_size], left_analyzer)));
+                self.right_analyzer =
+                    Arc::new(Mutex::new((vec![0.0; self.chunk_size], right_analyzer)));
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                self.left_analyzer = left_analyzer;
+                self.right_analyzer = right_analyzer;
+            }
         } else if self.update_rate != config.update_rate_hz
             || self.internal_buffering != config.internal_buffering
         {
+            #[cfg(not(target_arch = "wasm32"))]
             drop(old_left_analyzer);
 
-            self.left_analyzer.lock().0 = vec![0.0; self.chunk_size];
-            self.right_analyzer.lock().0 = vec![0.0; self.chunk_size];
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.left_analyzer.lock().0 = vec![0.0; self.chunk_size];
+                self.right_analyzer.lock().0 = vec![0.0; self.chunk_size];
+            }
         }
 
         self.internal_buffering = config.internal_buffering;

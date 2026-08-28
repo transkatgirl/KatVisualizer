@@ -108,9 +108,7 @@ At the moment, settings are not saved between sessions, but this functionality i
 
 The visualizer uses different threads for different tasks. The audio thread\* performs DSP on audio samples provided by the plugin host, and the render thread uses the resulting data to render a visualization.
 
-<!--
-Only one thread can access the shared data at a time: When the render thread is generating a spectrogram, the audio thread cannot continue processing, and vice versa. However, the different threads try to do as much of their work as possible before locking the shared data and try to lock it for the minimum amount of time necessary.
--->
+The audio thread stores a short buffer worth of updates to send to the render thread. If the renderer falls far enough behind, dropped updates will show up as blank slices in the spectrogram.
 
 \* When processing stereo inputs, some components of the audio processing chain use one thread per channel.
 
@@ -119,7 +117,6 @@ Only one thread can access the shared data at a time: When the render thread is 
 If you're having performance or latency issues, enabling performance counters can help you troubleshoot the issue.
 
 - processing = Proportion of the available time budget spent processing audio.
-	- Affected by buffering time
 	- Affected by the following settings:
 		- Update rate
 			- If internal buffering is disabled, the update rate is determined by the buffer size set in the plugin's host
@@ -137,10 +134,9 @@ If you're having performance or latency issues, enabling performance counters ca
 		- Update rate
 		- Resolution
 	- Affected by processing time
-- buffering = Time spent waiting for the render thread to get data from the audio thread.
+- buffering = Length of the buffer used to send updates between the audio and render threads
 	- Affected by plugin buffer size (set by the host, or the `--period-size` flag in standalone mode)
-	- Affected by processing time
+	- Affected by processing time & rasterize time
 - frame = Time between each frame.
-	<!-- - This is rarely the issue. Generally, the appearance of dropped frames is caused by high buffering time, not a variance in frame times. -->
-	- Affected by buffering time & rasterize time
-		- These only increase the frame time when they exceed what can be compensated for by the renderer.
+	- Affected by rasterize time
+		- This only increases the frame time when it exceeds what can be compensated for by the renderer.
