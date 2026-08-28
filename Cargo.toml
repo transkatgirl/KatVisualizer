@@ -1,6 +1,6 @@
 [package]
 name    = "katvisualizer"
-version = "0.17.9"
+version = "0.17.10"
 edition = "2024"
 
 [workspace]
@@ -25,8 +25,8 @@ force-mono-to-stereo = [
 mute-output = [  ]
 
 [dependencies]
-color       = "0.3.3"
-fast-math   = "0.1.1"
+color     = "0.3.3"
+fast-math = "0.1.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 arc-swap = "1.7.1"
