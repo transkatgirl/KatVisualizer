@@ -29,7 +29,8 @@ color       = "0.3.3"
 fast-math   = "0.1.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-parking_lot = "0.12.5"
+arc-swap = "1.7.1"
+crossbeam-utils = "0.8.21"
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95", features = [
 	"assert_process_allocs",
 	"standalone",
@@ -37,7 +38,6 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149e
 nih_plug_egui = { git = "https://github.com/transkatgirl/egui-baseview.git", rev = "956484fa019cbdff6bd590300a3d04969bd4e0a8", features = [
 	"keyboard_focus_workaround",
 ] }
-threadpool = "1.8.1"
 keepawake = "0.6.0"
 mimalloc = { version = "0.1.52" }
 rtrb = "0.4.0"

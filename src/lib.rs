@@ -6,9 +6,12 @@ use mimalloc::MiMalloc;
 use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
-use parking_lot::FairMutex;
-#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
+
+#[cfg(not(target_arch = "wasm32"))]
+use arc_swap::{ArcSwap, ArcSwapOption};
+#[cfg(not(target_arch = "wasm32"))]
+use rtrb::{Consumer, Producer, PushError, RingBuffer};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::num::NonZero;
@@ -35,6 +38,8 @@ static GLOBAL: MiMalloc = MiMalloc;
 #[cfg(target_arch = "wasm32")]
 use crate::editor::{SharedState, build, render};
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::chain::AnalyzerPair;
 use crate::chain::{AnalysisChain, AnalysisChainConfig};
 #[cfg(target_arch = "wasm32")]
 use crate::output::DirectAnalysisSink;
@@ -59,6 +64,8 @@ pub(crate) struct AudioState {
     pub(crate) realtime: bool,
     pub(crate) input_channels: u32,
     pub(crate) output_channels: u32,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) generation: u64,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -80,7 +87,7 @@ impl Default for AudioState {
 
 impl AudioState {
     #[cfg(not(target_arch = "wasm32"))]
-    fn new(audio_io_layout: AudioIOLayout, buffer_config: BufferConfig) -> Self {
+    fn new(audio_io_layout: AudioIOLayout, buffer_config: BufferConfig, generation: u64) -> Self {
         Self {
             buffer_size_range: (
                 buffer_config.min_buffer_size.unwrap_or(0),
@@ -97,8 +104,248 @@ impl AudioState {
                 .main_output_channels
                 .map(u32::from)
                 .unwrap_or(0),
+            generation,
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct PreparedAnalyzers {
+    generation: u64,
+    config: AnalysisChainConfig,
+    analyzers: Box<AnalyzerPair>,
+    frequencies: Arc<Vec<(f32, f32, f32)>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct FrequencySnapshot {
+    generation: u64,
+    frequencies: Vec<(f32, f32, f32)>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct AnalysisUpdate {
+    config: AnalysisChainConfig,
+    prepared: Option<PreparedAnalyzers>,
+    clear_history: bool,
+    requires_preparation: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct ReclaimAcknowledgement {
+    reclaimed: Box<AnalyzerPair>,
+    generation: u64,
+    frequencies: Arc<Vec<(f32, f32, f32)>>,
+    publish_frequencies: bool,
+    retry_clear_history: Option<bool>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct AnalysisUpdateSender {
+    updates: Producer<AnalysisUpdate>,
+    reclaims: Consumer<ReclaimAcknowledgement>,
+    pending: Option<AnalysisUpdate>,
+    last_queued: AnalysisChainConfig,
+    desired_config: Arc<ArcSwap<AnalysisChainConfig>>,
+    frequencies: Arc<ArcSwap<FrequencySnapshot>>,
+    audio_state: Arc<ArcSwapOption<AudioState>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl AnalysisUpdateSender {
+    fn drain_reclaims(&mut self) {
+        let mut retry_clear_history = None;
+        while let Ok(acknowledgement) = self.reclaims.pop() {
+            let ReclaimAcknowledgement {
+                reclaimed,
+                generation,
+                frequencies,
+                publish_frequencies,
+                retry_clear_history: retry,
+            } = acknowledgement;
+            if publish_frequencies {
+                let current = self.frequencies.load_full();
+                if current.generation == generation {
+                    let replacement = Arc::new(FrequencySnapshot {
+                        generation,
+                        frequencies: Arc::unwrap_or_clone(frequencies),
+                    });
+                    // Reinitialization publishes a newer generation directly.
+                    // Only replace the exact snapshot observed above so an old
+                    // acknowledgement cannot overwrite that newer metadata.
+                    self.frequencies.compare_and_swap(&current, replacement);
+                }
+            }
+            if let Some(clear_history) = retry {
+                retry_clear_history = Some(retry_clear_history.unwrap_or(false) || clear_history);
+            }
+            drop(reclaimed);
+        }
+
+        if let Some(retry_clear_history) = retry_clear_history {
+            let config = **self.desired_config.load();
+            let (prepared, pending_clear_history) = match self.pending.take() {
+                Some(mut update) => {
+                    let prepared = update
+                        .prepared
+                        .take()
+                        .filter(|prepared| prepared.config.structurally_eq(&config));
+                    (prepared, update.clear_history)
+                }
+                None => (None, false),
+            };
+            self.pending = Some(AnalysisUpdate {
+                config,
+                prepared,
+                clear_history: retry_clear_history || pending_clear_history,
+                // The rejected analyzers were built for an obsolete audio
+                // format. `last_queued` already contains this configuration, so
+                // explicitly require a new preparation for the current format.
+                requires_preparation: true,
+            });
+        }
+    }
+
+    fn prepare_pending(&mut self) {
+        let Some(pending) = &mut self.pending else {
+            return;
+        };
+        if !pending.requires_preparation && self.last_queued.structurally_eq(&pending.config) {
+            pending.prepared = None;
+            return;
+        }
+
+        let Some(audio_state) = self.audio_state.load_full() else {
+            return;
+        };
+        let can_reuse = pending.prepared.as_ref().is_some_and(|prepared| {
+            prepared.generation == audio_state.generation
+                && prepared.config.structurally_eq(&pending.config)
+        });
+        if can_reuse {
+            let prepared = pending.prepared.as_mut().unwrap();
+            let chunk_size =
+                (audio_state.sample_rate as f64 / pending.config.update_rate_hz).round() as usize;
+            prepared.analyzers.resize_buffers(chunk_size);
+            prepared.config = pending.config;
+        } else {
+            let analyzers = Box::new(AnalyzerPair::new(&pending.config, audio_state.sample_rate));
+            let frequencies = Arc::new(analyzers.frequencies().to_vec());
+            pending.prepared = Some(PreparedAnalyzers {
+                generation: audio_state.generation,
+                config: pending.config,
+                analyzers,
+                frequencies,
+            });
+        }
+    }
+
+    fn try_send_pending(&mut self) {
+        // Analyzer construction can be expensive. Leave the latest update
+        // coalesced until the audio thread has made room for it instead of
+        // preparing a value that cannot be sent yet.
+        if self.updates.slots() == 0 {
+            return;
+        }
+
+        self.prepare_pending();
+        let Some(update) = self.pending.take() else {
+            return;
+        };
+        if (update.requires_preparation || !self.last_queued.structurally_eq(&update.config))
+            && update.prepared.is_none()
+        {
+            self.pending = Some(update);
+            return;
+        }
+        let config = update.config;
+        match self.updates.push(update) {
+            Ok(()) => self.last_queued = config,
+            Err(PushError::Full(update)) => self.pending = Some(update),
+        }
+    }
+
+    pub(crate) fn service(&mut self) {
+        self.drain_reclaims();
+        self.try_send_pending();
+    }
+
+    pub(crate) fn stage(&mut self, config: AnalysisChainConfig, clear_history: bool) {
+        self.desired_config.store(Arc::new(config));
+        self.drain_reclaims();
+
+        if self.pending.is_none() && config == self.last_queued && !clear_history {
+            return;
+        }
+
+        let (prepared, pending_clear_history, requires_preparation) = match self.pending.take() {
+            Some(mut update) => {
+                let prepared = update
+                    .prepared
+                    .take()
+                    .filter(|prepared| prepared.config.structurally_eq(&config));
+                (prepared, update.clear_history, update.requires_preparation)
+            }
+            None => (None, false, false),
+        };
+        let clear_history = clear_history || pending_clear_history;
+        self.pending = Some(AnalysisUpdate {
+            config,
+            prepared,
+            clear_history,
+            requires_preparation,
+        });
+        self.try_send_pending();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_pending_analysis_update(
+    updates: &mut Consumer<AnalysisUpdate>,
+    reclaims: &mut Producer<ReclaimAcknowledgement>,
+    audio_format_generation: u64,
+    analysis_chain: &mut AnalysisChain,
+    analysis_sink: &mut NativeAnalysisSink,
+) -> bool {
+    let Ok(update) = updates.peek() else {
+        return false;
+    };
+    if update.prepared.is_some() && reclaims.slots() == 0 {
+        return false;
+    }
+
+    let update = updates.pop().expect("peeked analysis update is available");
+    if let Some(prepared) = update.prepared {
+        if prepared.generation != audio_format_generation {
+            reclaims
+                .push(ReclaimAcknowledgement {
+                    reclaimed: prepared.analyzers,
+                    generation: prepared.generation,
+                    frequencies: prepared.frequencies,
+                    publish_frequencies: false,
+                    retry_clear_history: Some(update.clear_history),
+                })
+                .unwrap_or_else(|_| unreachable!("reclaim capacity was checked"));
+            return false;
+        }
+
+        let reclaimed = analysis_chain.replace_analyzers(prepared.analyzers);
+        reclaims
+            .push(ReclaimAcknowledgement {
+                reclaimed,
+                generation: prepared.generation,
+                frequencies: prepared.frequencies,
+                publish_frequencies: true,
+                retry_clear_history: None,
+            })
+            .unwrap_or_else(|_| unreachable!("reclaim capacity was checked"));
+    }
+
+    analysis_chain.apply_runtime_config(&update.config);
+    if update.clear_history {
+        analysis_sink.reset_stream();
+    }
+    true
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -311,12 +558,17 @@ impl eframe::App for WasmApp {
 #[cfg(not(target_arch = "wasm32"))]
 pub struct MyPlugin {
     params: Arc<PluginParams>,
-    analysis_chain: Arc<FairMutex<Option<AnalysisChain>>>,
+    analysis_chain: Option<AnalysisChain>,
+    analysis_updates: Consumer<AnalysisUpdate>,
+    analysis_reclaims: Producer<ReclaimAcknowledgement>,
+    analysis_update_sender: Option<AnalysisUpdateSender>,
+    desired_config: Arc<ArcSwap<AnalysisChainConfig>>,
+    audio_format_generation: u64,
     latency_samples: u32,
     analysis_sink: NativeAnalysisSink,
     analysis_receiver: Option<NativeAnalysisReceiver>,
-    analysis_frequencies: Arc<FairMutex<Vec<(f32, f32, f32)>>>,
-    state_info: Arc<FairMutex<Option<AudioState>>>,
+    analysis_frequencies: Arc<ArcSwap<FrequencySnapshot>>,
+    state_info: Arc<ArcSwapOption<AudioState>>,
     keepawake: Option<KeepAwake>,
 }
 
@@ -343,15 +595,36 @@ const SPECTROGRAM_SLICES: usize = 2048;
 impl Default for MyPlugin {
     fn default() -> Self {
         let (analysis_sink, analysis_receiver) = native_transport(MAX_FREQUENCY_BINS);
+        let (updates, analysis_updates) = RingBuffer::new(1);
+        let (analysis_reclaims, reclaims) = RingBuffer::new(1);
+        let desired_config = Arc::new(ArcSwap::from_pointee(AnalysisChainConfig::default()));
+        let analysis_frequencies = Arc::new(ArcSwap::from_pointee(FrequencySnapshot {
+            generation: 0,
+            frequencies: Vec::new(),
+        }));
+        let state_info = Arc::new(ArcSwapOption::empty());
 
         Self {
             params: Arc::new(PluginParams::default()),
-            analysis_chain: Arc::new(FairMutex::new(None)),
+            analysis_chain: None,
+            analysis_updates,
+            analysis_reclaims,
+            analysis_update_sender: Some(AnalysisUpdateSender {
+                updates,
+                reclaims,
+                pending: None,
+                last_queued: AnalysisChainConfig::default(),
+                desired_config: desired_config.clone(),
+                frequencies: analysis_frequencies.clone(),
+                audio_state: state_info.clone(),
+            }),
+            desired_config,
+            audio_format_generation: 0,
             latency_samples: 0,
             analysis_sink,
             analysis_receiver: Some(analysis_receiver),
-            analysis_frequencies: Arc::new(FairMutex::new(Vec::with_capacity(MAX_FREQUENCY_BINS))),
-            state_info: Arc::new(FairMutex::new(None)),
+            analysis_frequencies,
+            state_info,
             keepawake: None,
         }
     }
@@ -443,10 +716,11 @@ impl Plugin for MyPlugin {
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let analysis_receiver = self.analysis_receiver.take()?;
+        let analysis_update_sender = self.analysis_update_sender.take()?;
 
         editor::create(
             self.params.clone(),
-            self.analysis_chain.clone(),
+            analysis_update_sender,
             analysis_receiver,
             self.analysis_frequencies.clone(),
             self.state_info.clone(),
@@ -459,27 +733,30 @@ impl Plugin for MyPlugin {
         buffer_config: &BufferConfig,
         context: &mut impl InitContext<Self>,
     ) -> bool {
-        let mut analysis_chain = self.analysis_chain.lock();
-
-        let analysis_config = match &*analysis_chain {
-            Some(old_chain) => old_chain.config(),
-            None => AnalysisChainConfig::default(),
-        };
+        self.audio_format_generation = self.audio_format_generation.wrapping_add(1);
+        let analysis_config = **self.desired_config.load();
 
         let new_chain = AnalysisChain::new(
             &analysis_config,
             buffer_config.sample_rate,
             audio_io_layout.main_input_channels == NonZero::new(1),
-            self.analysis_frequencies.clone(),
         );
         context.set_latency_samples(new_chain.latency_samples);
         self.latency_samples = new_chain.latency_samples;
+        self.analysis_frequencies.store(Arc::new(FrequencySnapshot {
+            generation: self.audio_format_generation,
+            frequencies: new_chain.frequencies().to_vec(),
+        }));
 
-        *analysis_chain = Some(new_chain);
+        self.analysis_chain = Some(new_chain);
 
         self.analysis_sink.reset_stream();
 
-        *self.state_info.lock() = Some(AudioState::new(*audio_io_layout, *buffer_config));
+        self.state_info.store(Some(Arc::new(AudioState::new(
+            *audio_io_layout,
+            *buffer_config,
+            self.audio_format_generation,
+        ))));
 
         self.keepawake = keepawake::Builder::default()
             .app_name("KatVisualizer")
@@ -499,17 +776,23 @@ impl Plugin for MyPlugin {
         _aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        if let Some(mut lock) = self.analysis_chain.try_lock() {
-            let analysis_chain = lock.as_mut().unwrap();
+        if let Some(analysis_chain) = self.analysis_chain.as_mut() {
+            apply_pending_analysis_update(
+                &mut self.analysis_updates,
+                &mut self.analysis_reclaims,
+                self.audio_format_generation,
+                analysis_chain,
+                &mut self.analysis_sink,
+            );
+        }
 
+        if let Some(analysis_chain) = self.analysis_chain.as_mut() {
             if analysis_chain.latency_samples != self.latency_samples {
                 context.set_latency_samples(analysis_chain.latency_samples);
                 self.latency_samples = analysis_chain.latency_samples;
             }
 
             analysis_chain.analyze(buffer.as_slice(), &mut self.analysis_sink);
-
-            drop(lock);
         }
 
         #[cfg(feature = "mute-output")]
@@ -549,3 +832,289 @@ nih_export_clap!(MyPlugin);
 
 #[cfg(not(target_arch = "wasm32"))]
 nih_export_vst3!(MyPlugin);
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod update_tests {
+    use super::*;
+
+    fn configured_plugin() -> (MyPlugin, AnalysisUpdateSender, AnalysisChainConfig) {
+        let mut plugin = MyPlugin::default();
+        let mut sender = plugin.analysis_update_sender.take().unwrap();
+        let base = AnalysisChainConfig {
+            resolution: 128,
+            masking: false,
+            normalize_amplitude: false,
+            ..AnalysisChainConfig::default()
+        };
+        sender.last_queued = base;
+        sender.desired_config.store(Arc::new(base));
+        plugin.audio_format_generation = 1;
+        plugin.analysis_chain = Some(AnalysisChain::new(&base, 48_000.0, false));
+        plugin
+            .analysis_frequencies
+            .store(Arc::new(FrequencySnapshot {
+                generation: 1,
+                frequencies: plugin
+                    .analysis_chain
+                    .as_ref()
+                    .unwrap()
+                    .frequencies()
+                    .to_vec(),
+            }));
+        plugin.state_info.store(Some(Arc::new(AudioState {
+            buffer_size_range: (32, 512),
+            sample_rate: 48_000.0,
+            process_mode_title: "Realtime".to_owned(),
+            realtime: true,
+            input_channels: 2,
+            output_channels: 2,
+            generation: 1,
+        })));
+        (plugin, sender, base)
+    }
+
+    fn apply(plugin: &mut MyPlugin) -> bool {
+        apply_pending_analysis_update(
+            &mut plugin.analysis_updates,
+            &mut plugin.analysis_reclaims,
+            plugin.audio_format_generation,
+            plugin.analysis_chain.as_mut().unwrap(),
+            &mut plugin.analysis_sink,
+        )
+    }
+
+    #[test]
+    fn runtime_update_preserves_structural_analyzers() {
+        let (mut plugin, mut sender, base) = configured_plugin();
+        let frequencies = plugin
+            .analysis_chain
+            .as_ref()
+            .unwrap()
+            .frequencies()
+            .as_ptr();
+        let updated = AnalysisChainConfig { gain: 6.0, ..base };
+
+        sender.stage(updated, false);
+        assert!(apply(&mut plugin));
+
+        let chain = plugin.analysis_chain.as_ref().unwrap();
+        assert_eq!(chain.config(), updated);
+        assert_eq!(chain.frequencies().as_ptr(), frequencies);
+        assert_eq!(plugin.analysis_reclaims.slots(), 1);
+    }
+
+    #[test]
+    fn structural_update_swaps_and_reclaims_on_ui_side() {
+        let (mut plugin, mut sender, base) = configured_plugin();
+        let updated = AnalysisChainConfig {
+            resolution: 192,
+            ..base
+        };
+
+        sender.stage(updated, false);
+        assert!(apply(&mut plugin));
+        assert_eq!(plugin.analysis_chain.as_ref().unwrap().config(), updated);
+        assert_eq!(plugin.analysis_reclaims.slots(), 0);
+
+        sender.service();
+        assert_eq!(sender.frequencies.load().frequencies.len(), 192);
+        assert_eq!(plugin.analysis_reclaims.slots(), 1);
+    }
+
+    #[test]
+    fn reinitialization_wins_over_stale_frequency_acknowledgement() {
+        let (mut plugin, mut sender, base) = configured_plugin();
+        sender.stage(
+            AnalysisChainConfig {
+                resolution: 192,
+                ..base
+            },
+            false,
+        );
+        assert!(apply(&mut plugin));
+
+        let reinitialized = Arc::new(FrequencySnapshot {
+            generation: 2,
+            frequencies: vec![(1.0, 2.0, 3.0)],
+        });
+        plugin
+            .analysis_frequencies
+            .store(Arc::clone(&reinitialized));
+
+        sender.service();
+
+        let published = plugin.analysis_frequencies.load_full();
+        assert!(Arc::ptr_eq(&published, &reinitialized));
+        assert_eq!(published.generation, 2);
+    }
+
+    #[test]
+    fn stale_structural_update_is_reclaimed_without_application() {
+        let (mut plugin, mut sender, base) = configured_plugin();
+        sender.stage(
+            AnalysisChainConfig {
+                resolution: 192,
+                ..base
+            },
+            false,
+        );
+        plugin.audio_format_generation = 2;
+
+        assert!(!apply(&mut plugin));
+        assert_eq!(plugin.analysis_chain.as_ref().unwrap().config(), base);
+        assert_eq!(plugin.analysis_reclaims.slots(), 0);
+        sender.service();
+        assert_eq!(plugin.analysis_reclaims.slots(), 1);
+    }
+
+    #[test]
+    fn structural_update_racing_reinitialization_is_reprepared() {
+        let (mut plugin, mut sender, base) = configured_plugin();
+
+        // `initialize()` may have already snapshotted the old desired config
+        // while the editor still sees the previous audio format generation.
+        let initialization_config = **sender.desired_config.load();
+        let updated = AnalysisChainConfig {
+            resolution: 192,
+            ..base
+        };
+        sender.stage(updated, false);
+
+        plugin.audio_format_generation = 2;
+        plugin.analysis_chain = Some(AnalysisChain::new(&initialization_config, 96_000.0, false));
+        plugin.state_info.store(Some(Arc::new(AudioState {
+            buffer_size_range: (32, 512),
+            sample_rate: 96_000.0,
+            process_mode_title: "Realtime".to_owned(),
+            realtime: true,
+            input_channels: 2,
+            output_channels: 2,
+            generation: 2,
+        })));
+
+        // The obsolete preparation is rejected, then the UI side rebuilds the
+        // latest desired configuration for generation 2 and sends it again.
+        assert!(!apply(&mut plugin));
+        assert_eq!(plugin.analysis_chain.as_ref().unwrap().config(), base);
+        sender.service();
+        assert!(apply(&mut plugin));
+        assert_eq!(plugin.analysis_chain.as_ref().unwrap().config(), updated);
+    }
+
+    #[test]
+    fn full_update_queue_coalesces_latest_and_retains_history_reset() {
+        let (mut plugin, mut sender, base) = configured_plugin();
+        sender.stage(AnalysisChainConfig { gain: 1.0, ..base }, false);
+        sender.stage(AnalysisChainConfig { gain: 2.0, ..base }, true);
+        sender.stage(AnalysisChainConfig { gain: 3.0, ..base }, false);
+
+        let first = plugin.analysis_updates.pop().unwrap();
+        assert_eq!(first.config.gain, 1.0);
+        assert!(!first.clear_history);
+        sender.service();
+        let coalesced = plugin.analysis_updates.pop().unwrap();
+        assert_eq!(coalesced.config.gain, 3.0);
+        assert!(coalesced.clear_history);
+    }
+
+    #[test]
+    fn structural_preparation_waits_for_update_queue_capacity() {
+        let (mut plugin, mut sender, base) = configured_plugin();
+        sender.stage(AnalysisChainConfig { gain: 1.0, ..base }, false);
+        sender.stage(
+            AnalysisChainConfig {
+                resolution: 192,
+                ..base
+            },
+            false,
+        );
+
+        assert!(
+            sender
+                .pending
+                .as_ref()
+                .is_some_and(|update| update.prepared.is_none())
+        );
+
+        let first = plugin.analysis_updates.pop().unwrap();
+        assert_eq!(first.config.gain, 1.0);
+        sender.service();
+
+        let structural = plugin.analysis_updates.pop().unwrap();
+        assert_eq!(structural.config.resolution, 192);
+        assert!(structural.prepared.is_some());
+    }
+
+    #[test]
+    fn retained_structural_preparation_tracks_latest_chunk_size() {
+        let (mut plugin, mut sender, base) = configured_plugin();
+        let runtime = AnalysisChainConfig {
+            update_rate_hz: 1_000.0,
+            ..base
+        };
+        sender.stage(runtime, false);
+        sender.stage(
+            AnalysisChainConfig {
+                resolution: 192,
+                ..base
+            },
+            false,
+        );
+        sender.stage(
+            AnalysisChainConfig {
+                resolution: 192,
+                ..runtime
+            },
+            false,
+        );
+
+        assert!(apply(&mut plugin));
+        sender.service();
+        assert!(apply(&mut plugin));
+
+        let mut left = vec![0.0; 48];
+        let mut right = vec![0.0; 48];
+        plugin
+            .analysis_chain
+            .as_mut()
+            .unwrap()
+            .analyze(&mut [&mut left, &mut right], &mut plugin.analysis_sink);
+    }
+
+    #[test]
+    fn structural_update_waits_for_reclaim_capacity() {
+        let (mut plugin, mut sender, base) = configured_plugin();
+        sender.stage(
+            AnalysisChainConfig {
+                resolution: 192,
+                ..base
+            },
+            false,
+        );
+        plugin
+            .analysis_reclaims
+            .push(ReclaimAcknowledgement {
+                reclaimed: Box::new(AnalyzerPair::new(&base, 48_000.0)),
+                generation: 1,
+                frequencies: Arc::new(Vec::new()),
+                publish_frequencies: false,
+                retry_clear_history: None,
+            })
+            .unwrap_or_else(|_| unreachable!());
+
+        assert!(!apply(&mut plugin));
+        assert_eq!(plugin.analysis_updates.slots(), 1);
+        assert_eq!(plugin.analysis_chain.as_ref().unwrap().config(), base);
+    }
+
+    #[test]
+    fn history_reset_occurs_at_update_block_boundary() {
+        let (mut plugin, mut sender, base) = configured_plugin();
+        let generation = plugin.analysis_sink.generation();
+        sender.stage(AnalysisChainConfig { gain: 1.0, ..base }, true);
+        assert_eq!(plugin.analysis_sink.generation(), generation);
+
+        assert!(apply(&mut plugin));
+        assert_eq!(plugin.analysis_sink.generation(), generation + 1);
+    }
+}

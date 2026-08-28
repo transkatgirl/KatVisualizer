@@ -134,9 +134,6 @@ If you're having performance or latency issues, enabling performance counters ca
 		- Update rate
 		- Resolution
 	- Affected by processing time
-- buffering = Length of the buffer used to send updates between the audio and render threads
-	- Affected by plugin buffer size (set by the host, or the `--period-size` flag in standalone mode)
-	- Affected by processing time & rasterize time
 - frame = Time between each frame.
 	- Affected by rasterize time
 		- This only increases the frame time when it exceeds what can be compensated for by the renderer.

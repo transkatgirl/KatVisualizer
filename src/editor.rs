@@ -1,6 +1,8 @@
 #![allow(clippy::collapsible_if)]
 #![allow(clippy::collapsible_else_if)]
 
+#[cfg(not(target_arch = "wasm32"))]
+use arc_swap::{ArcSwap, ArcSwapOption};
 use color::{ColorSpaceTag, DynamicColor, Flags, Rgba8, Srgb};
 #[cfg(target_arch = "wasm32")]
 use eframe::egui::{
@@ -20,12 +22,7 @@ use nih_plug_egui::{
     },
     resizable_window::paint_resize_corner,
 };
-use std::sync::Arc;
-
-#[cfg(not(target_arch = "wasm32"))]
-use parking_lot::{FairMutex, Mutex};
-#[cfg(target_arch = "wasm32")]
-use std::cell::RefCell;
+use std::{cell::Cell, sync::Arc};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
@@ -34,13 +31,14 @@ use std::time::{Duration, Instant};
 use web_time::{Duration, Instant};
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::PluginParams;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::output::NativeAnalysisReceiver;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::{AnalysisUpdateSender, FrequencySnapshot, PluginParams};
 
+#[cfg(target_arch = "wasm32")]
+use crate::AnalysisChain;
 use crate::{
-    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, AudioState, MAX_FREQUENCY_BINS,
-    SPECTROGRAM_SLICES,
+    AnalysisChainConfig, AnalysisMetrics, AudioState, MAX_FREQUENCY_BINS, SPECTROGRAM_SLICES,
     analyzer::{
         BetterAnalysis, HEARING_THRESHOLD_PHON, MAX_COMPLETE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON,
         MIN_COMPLETE_NORM_PHON, Spectrogram, map_value, scale_bark,
@@ -1182,7 +1180,7 @@ fn get_under_cursor(
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 struct RenderSettings {
     horizontal: bool,
     left_hue: f32,
@@ -1358,28 +1356,23 @@ impl ColorTable {
 }
 
 pub(crate) struct SharedState {
-    #[cfg(not(target_arch = "wasm32"))]
-    settings: Arc<Mutex<RenderSettings>>,
-    #[cfg(target_arch = "wasm32")]
-    settings: RefCell<RenderSettings>,
+    settings: RenderSettings,
     frame_timing: (Instant, Duration, Duration),
     color_table: ColorTable,
-    #[cfg(not(target_arch = "wasm32"))]
-    cached_analysis_settings: Arc<Mutex<AnalysisChainConfig>>,
-    #[cfg(target_arch = "wasm32")]
-    cached_analysis_settings: RefCell<AnalysisChainConfig>,
+    cached_analysis_settings: AnalysisChainConfig,
     pub(crate) spectrogram: Spectrogram,
     pub(crate) metrics: AnalysisMetrics,
     #[cfg(not(target_arch = "wasm32"))]
     analysis_receiver: NativeAnalysisReceiver,
     #[cfg(not(target_arch = "wasm32"))]
-    buffering_duration: Duration,
+    analysis_updates: AnalysisUpdateSender,
     pub(crate) spectrogram_texture: Option<TextureId>,
 }
 
 impl SharedState {
     pub(crate) fn new(
         #[cfg(not(target_arch = "wasm32"))] analysis_receiver: NativeAnalysisReceiver,
+        #[cfg(not(target_arch = "wasm32"))] analysis_updates: AnalysisUpdateSender,
     ) -> Self {
         let settings = RenderSettings::default();
         let mut color_table = ColorTable::new(
@@ -1396,22 +1389,16 @@ impl SharedState {
 
         #[allow(unused_mut)]
         let mut state = Self {
-            #[cfg(not(target_arch = "wasm32"))]
-            settings: Arc::new(Mutex::new(settings)),
-            #[cfg(target_arch = "wasm32")]
-            settings: RefCell::new(settings),
+            settings,
             frame_timing: (Instant::now(), Duration::ZERO, Duration::ZERO),
             color_table,
-            #[cfg(not(target_arch = "wasm32"))]
-            cached_analysis_settings: Arc::new(Mutex::new(AnalysisChainConfig::default())),
-            #[cfg(target_arch = "wasm32")]
-            cached_analysis_settings: RefCell::new(AnalysisChainConfig::default()),
+            cached_analysis_settings: AnalysisChainConfig::default(),
             spectrogram: Spectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
             metrics: AnalysisMetrics::default(),
             #[cfg(not(target_arch = "wasm32"))]
             analysis_receiver,
             #[cfg(not(target_arch = "wasm32"))]
-            buffering_duration: Duration::ZERO,
+            analysis_updates,
             spectrogram_texture: None,
         };
 
@@ -1423,17 +1410,12 @@ impl SharedState {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn drain_analysis(&mut self) {
-        self.buffering_duration = self
-            .analysis_receiver
+        self.analysis_receiver
             .drain_into(&mut self.spectrogram, &mut self.metrics);
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn invalidate_analysis_history(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
-        self.analysis_receiver
-            .invalidate_history(&mut self.spectrogram);
-
-        #[cfg(target_arch = "wasm32")]
         self.spectrogram.clear();
     }
 }
@@ -1444,14 +1426,14 @@ const BASELINE_TARGET_FRAME_SECS: f32 = 1.0 / BASELINE_TARGET_FPS;
 #[cfg(not(target_arch = "wasm32"))]
 pub fn create(
     params: Arc<PluginParams>,
-    analysis_chain: Arc<FairMutex<Option<AnalysisChain>>>,
+    analysis_updates: AnalysisUpdateSender,
     analysis_receiver: NativeAnalysisReceiver,
-    analysis_frequencies: Arc<FairMutex<Vec<(f32, f32, f32)>>>,
-    audio_state: Arc<FairMutex<Option<AudioState>>>,
+    analysis_frequencies: Arc<ArcSwap<FrequencySnapshot>>,
+    audio_state: Arc<ArcSwapOption<AudioState>>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
 
-    let shared_state = SharedState::new(analysis_receiver);
+    let shared_state = SharedState::new(analysis_receiver, analysis_updates);
 
     create_egui_editor(
         egui_state.clone(),
@@ -1473,7 +1455,6 @@ pub fn create(
         move |egui_ctx, _setter, _, shared_state| {
             render(
                 egui_ctx,
-                &analysis_chain,
                 &analysis_frequencies,
                 &audio_state,
                 shared_state,
@@ -1515,10 +1496,9 @@ pub(crate) fn build(egui_ctx: &Context, spectrogram_texture: &mut Option<Texture
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render(
     egui_ctx: &Context,
-    #[cfg(not(target_arch = "wasm32"))] analysis_chain: &FairMutex<Option<AnalysisChain>>,
     #[cfg(target_arch = "wasm32")] analysis_chain: &mut AnalysisChain,
-    #[cfg(not(target_arch = "wasm32"))] analysis_frequencies: &FairMutex<Vec<(f32, f32, f32)>>,
-    #[cfg(not(target_arch = "wasm32"))] audio_state: &FairMutex<Option<AudioState>>,
+    #[cfg(not(target_arch = "wasm32"))] analysis_frequencies: &ArcSwap<FrequencySnapshot>,
+    #[cfg(not(target_arch = "wasm32"))] audio_state: &ArcSwapOption<AudioState>,
     #[cfg(target_arch = "wasm32")] audio_state: &AudioState,
     shared_state: &mut SharedState,
     paused: bool,
@@ -1529,17 +1509,24 @@ pub(crate) fn render(
     let start = Instant::now();
 
     #[cfg(not(target_arch = "wasm32"))]
-    shared_state.drain_analysis();
+    {
+        shared_state.analysis_updates.service();
+        shared_state.drain_analysis();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let frequency_snapshot = analysis_frequencies.load_full();
+    #[cfg(not(target_arch = "wasm32"))]
+    let audio_state = audio_state.load_full();
+    #[cfg(target_arch = "wasm32")]
+    let audio_state = Some(&*audio_state);
 
     egui::CentralPanel::default().show(egui_ctx, |ui| {
         let painter = ui.painter();
         let max_x = painter.clip_rect().max.x;
         let max_y = painter.clip_rect().max.y;
 
-        #[cfg(not(target_arch = "wasm32"))]
-        let settings = *shared_state.settings.lock();
-        #[cfg(target_arch = "wasm32")]
-        let settings = *shared_state.settings.borrow();
+        let settings = shared_state.settings;
 
         let (bargraph_bounds, spectrogram_bounds) = if !settings.horizontal {
             (
@@ -1603,20 +1590,15 @@ pub(crate) fn render(
         let bargraph_buffer_1 = vec![(0.0, 0.0); spectrogram_width];
         let bargraph_buffer_2 = vec![0.0; spectrogram_width];
 
-        #[cfg(not(target_arch = "wasm32"))]
-        let buffering_duration = shared_state.buffering_duration;
-
         let processing_duration = metrics.processing;
         let chunk_duration = front.duration;
 
         let (min_db, max_db) = calculate_volume_min_max(&settings, spectrogram);
 
         #[cfg(not(target_arch = "wasm32"))]
-        let frequency_guard = analysis_frequencies.lock();
-        #[cfg(not(target_arch = "wasm32"))]
-        let frequencies = frequency_guard.as_slice();
+        let frequencies = frequency_snapshot.frequencies.as_slice();
         #[cfg(target_arch = "wasm32")]
-        let frequencies = analysis_chain.frequencies.as_slice();
+        let frequencies = analysis_chain.frequencies();
 
         {
             if settings.bargraph_height != 0.0 {
@@ -1647,7 +1629,7 @@ pub(crate) fn render(
                 }
             }
 
-            if settings.bargraph_height != 1.0 {
+            if settings.bargraph_height != 1.0 && frequencies.len() == spectrogram_width {
                 draw_spectrogram_image(
                     &mut spectrogram_image,
                     spectrogram,
@@ -1660,7 +1642,7 @@ pub(crate) fn render(
             }
         }
 
-        let under_pointer = if settings.show_hover {
+        let under_pointer = if settings.show_hover && frequencies.len() == spectrogram_width {
             if let Some(pointer) = egui_ctx.pointer_latest_pos() {
                 get_under_cursor(
                     pointer,
@@ -1762,10 +1744,7 @@ pub(crate) fn render(
         }
 
         if let Some(under) = under_pointer {
-            #[cfg(not(target_arch = "wasm32"))]
-            let analysis_settings = shared_state.cached_analysis_settings.lock();
-            #[cfg(target_arch = "wasm32")]
-            let analysis_settings = shared_state.cached_analysis_settings.borrow();
+            let analysis_settings = &shared_state.cached_analysis_settings;
 
             let amplitude_text = if analysis_settings.normalize_amplitude {
                 format!(
@@ -1785,11 +1764,7 @@ pub(crate) fn render(
                     pan
                 )
             } else {
-                #[cfg(not(target_arch = "wasm32"))]
-                let audio_state = audio_state.lock();
-                #[cfg(target_arch = "wasm32")]
-                let audio_state = Some(audio_state);
-                let width = if let Some(audio_state) = audio_state.as_ref() {
+                let width = if let Some(audio_state) = audio_state.as_deref() {
                     // Copied from vqsdft.rs line 175
 
                     let q = under.frequency.1 as f64
@@ -1829,8 +1804,6 @@ pub(crate) fn render(
                 }
             };
 
-            drop(analysis_settings);
-
             painter.text(
                 Pos2 { x: 16.0, y: 16.0 },
                 Align2::LEFT_TOP,
@@ -1844,17 +1817,15 @@ pub(crate) fn render(
         }
 
         if settings.show_format {
-            #[cfg(not(target_arch = "wasm32"))]
-            let audio_state = audio_state.lock();
-            #[cfg(target_arch = "wasm32")]
-            let audio_state = Some(audio_state);
-            if let Some(audio_state) = audio_state.as_ref() {
+            if let Some(audio_state) = audio_state.as_deref() {
                 let min_buffer_size_s =
                     audio_state.buffer_size_range.0 as f32 / audio_state.sample_rate;
                 let max_buffer_size_s =
                     audio_state.buffer_size_range.1 as f32 / audio_state.sample_rate;
 
-                let should_warn = audio_state.sample_rate < (frequencies.last().unwrap().2 * 2.0)
+                let should_warn = frequencies
+                    .last()
+                    .is_some_and(|frequency| audio_state.sample_rate < frequency.2 * 2.0)
                     || max_buffer_size_s > 0.010
                     || !audio_state.realtime;
 
@@ -1886,15 +1857,9 @@ pub(crate) fn render(
             }
         }
 
-        #[cfg(not(target_arch = "wasm32"))]
-        drop(frequency_guard);
-
         if settings.show_performance {
             let frame_elapsed = shared_state.frame_timing.1;
             let rasterize_elapsed = shared_state.frame_timing.2;
-
-            #[cfg(not(target_arch = "wasm32"))]
-            let buffering_secs = buffering_duration.as_secs_f32();
 
             let rasterize_secs = rasterize_elapsed.as_secs_f32();
             let chunk_secs = chunk_duration.as_secs_f32();
@@ -1903,9 +1868,6 @@ pub(crate) fn render(
             let adjusted_processing_duration = processing_duration.as_secs_f32();
             let rasterize_proportion = rasterize_secs / frame_secs;
             let processing_proportion = adjusted_processing_duration / chunk_secs;
-
-            #[cfg(not(target_arch = "wasm32"))]
-            let buffering_proportion = buffering_secs / frame_secs;
 
             #[cfg(not(target_arch = "wasm32"))]
             const RASTERIZE_PROPORTION_TARGETS: (f32, f32) = (0.3, 0.6);
@@ -1938,26 +1900,6 @@ pub(crate) fn render(
                     if processing_proportion >= PROCESSING_PROPORTION_TARGETS.1 {
                         Color32::RED
                     } else if processing_proportion >= PROCESSING_PROPORTION_TARGETS.0 {
-                        Color32::YELLOW
-                    } else {
-                        Color32::from_rgb(224, 224, 224)
-                    },
-                );
-                #[cfg(not(target_arch = "wasm32"))]
-                painter.text(
-                    Pos2 {
-                        x: max_x - 32.0,
-                        y: 64.0,
-                    },
-                    Align2::RIGHT_TOP,
-                    format!("{:.1}ms buffering", buffering_secs * 1000.0),
-                    FontId {
-                        size: 12.0,
-                        family: egui::FontFamily::Monospace,
-                    },
-                    if buffering_proportion >= 2.5 {
-                        Color32::RED
-                    } else if buffering_proportion >= 1.5 {
                         Color32::YELLOW
                     } else {
                         Color32::from_rgb(224, 224, 224)
@@ -2046,6 +1988,12 @@ pub(crate) fn render(
             paint_resize_corner(&content_ui, &corner_response);
         }
     });
+    let mut edited_render_settings = shared_state.settings;
+    let mut edited_analysis_settings = shared_state.cached_analysis_settings;
+    let analysis_action = Cell::new(None::<bool>);
+    let rebuild_color_table = Cell::new(false);
+    let resize_color_table = Cell::new(false);
+
     egui::Window::new("Settings")
         .id(egui::Id::new("settings"))
         .default_pos(Pos2 {
@@ -2054,22 +2002,8 @@ pub(crate) fn render(
         })
         .default_open(false)
         .show(egui_ctx, |ui| {
-            #[cfg(not(target_arch = "wasm32"))]
-            let analysis_settings = shared_state.cached_analysis_settings.clone();
-            #[cfg(target_arch = "wasm32")]
-            let analysis_settings = &shared_state.cached_analysis_settings;
-            #[cfg(not(target_arch = "wasm32"))]
-            let render_settings = shared_state.settings.clone();
-            #[cfg(target_arch = "wasm32")]
-            let render_settings = &shared_state.settings;
-            #[cfg(not(target_arch = "wasm32"))]
-            let mut analysis_settings = analysis_settings.lock();
-            #[cfg(target_arch = "wasm32")]
-            let mut analysis_settings = analysis_settings.borrow_mut();
-            #[cfg(not(target_arch = "wasm32"))]
-            let mut render_settings = render_settings.lock();
-            #[cfg(target_arch = "wasm32")]
-            let mut render_settings = render_settings.borrow_mut();
+            let analysis_settings = &mut edited_analysis_settings;
+            let render_settings = &mut edited_render_settings;
 
             ui.collapsing("Render Options", |ui| {
                 ui.checkbox(&mut render_settings.horizontal, "Use horizontal rendering mode");
@@ -2083,13 +2017,7 @@ pub(crate) fn render(
                     )
                     .changed()
                 {
-                    shared_state.color_table.build(
-                        render_settings.left_hue,
-                        render_settings.right_hue,
-                        render_settings.minimum_lightness,
-                        render_settings.maximum_lightness,
-                        render_settings.maximum_chroma,
-                    );
+                    rebuild_color_table.set(true);
                 };
 
                 if ui
@@ -2101,13 +2029,7 @@ pub(crate) fn render(
                     )
                     .changed()
                 {
-                    shared_state.color_table.build(
-                        render_settings.left_hue,
-                        render_settings.right_hue,
-                        render_settings.minimum_lightness,
-                        render_settings.maximum_lightness,
-                        render_settings.maximum_chroma,
-                    );
+                    rebuild_color_table.set(true);
                 };
 
                 if ui
@@ -2117,13 +2039,7 @@ pub(crate) fn render(
                     )
                     .changed()
                 {
-                    shared_state.color_table.build(
-                        render_settings.left_hue,
-                        render_settings.right_hue,
-                        render_settings.minimum_lightness,
-                        render_settings.maximum_lightness,
-                        render_settings.maximum_chroma,
-                    );
+                    rebuild_color_table.set(true);
                 };
 
                 if ui
@@ -2133,13 +2049,7 @@ pub(crate) fn render(
                     )
                     .changed()
                 {
-                    shared_state.color_table.build(
-                        render_settings.left_hue,
-                        render_settings.right_hue,
-                        render_settings.minimum_lightness,
-                        render_settings.maximum_lightness,
-                        render_settings.maximum_chroma,
-                    );
+                    rebuild_color_table.set(true);
                 };
 
                 if ui
@@ -2149,13 +2059,7 @@ pub(crate) fn render(
                     )
                     .changed()
                 {
-                    shared_state.color_table.build(
-                        render_settings.left_hue,
-                        render_settings.right_hue,
-                        render_settings.minimum_lightness,
-                        render_settings.maximum_lightness,
-                        render_settings.maximum_chroma,
-                    );
+                    rebuild_color_table.set(true);
                 };
 
                 if ui
@@ -2167,17 +2071,8 @@ pub(crate) fn render(
                     )
                     .changed()
                 {
-                    shared_state.color_table = ColorTable::new(
-                        COLOR_TABLE_BASE_CHROMA_SIZE * render_settings.lookup_size,
-                        COLOR_TABLE_BASE_LIGHTNESS_SIZE * render_settings.lookup_size,
-                    );
-                    shared_state.color_table.build(
-                        render_settings.left_hue,
-                        render_settings.right_hue,
-                        render_settings.minimum_lightness,
-                        render_settings.maximum_lightness,
-                        render_settings.maximum_chroma,
-                    );
+                    resize_color_table.set(true);
+                    rebuild_color_table.set(true);
                 };
 
                 if analysis_settings.masking {
@@ -2341,55 +2236,21 @@ pub(crate) fn render(
                             f32::NEG_INFINITY;
                         render_settings.agc_maximum = f32::INFINITY;
                     }
-                    shared_state.color_table.build(
-                        render_settings.left_hue,
-                        render_settings.right_hue,
-                        render_settings.minimum_lightness,
-                        render_settings.maximum_lightness,
-                        render_settings.maximum_chroma,
-                    );
+                    resize_color_table.set(true);
+                    rebuild_color_table.set(true);
                 }
             });
 
             ui.collapsing("Analysis Options", |ui| {
-                #[cfg(target_arch = "wasm32")]
-                let analysis_chain = RefCell::new(&mut *analysis_chain);
-
-                let update = |settings| {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    let mut lock = analysis_chain.lock();
-                    #[cfg(target_arch = "wasm32")]
-                    let mut lock = analysis_chain.borrow_mut();
-                    #[cfg(not(target_arch = "wasm32"))]
-                    let analysis_chain = lock.as_mut().unwrap();
-                    #[cfg(target_arch = "wasm32")]
-                    let analysis_chain = &mut **lock;
-                    analysis_chain.update_config(settings);
+                let update = || {
+                    analysis_action.set(Some(analysis_action.get().unwrap_or(false)));
                 };
 
-                let mut update_and_clear = |settings| {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    let mut lock = analysis_chain.lock();
-                    #[cfg(target_arch = "wasm32")]
-                    let mut lock = analysis_chain.borrow_mut();
-                    #[cfg(not(target_arch = "wasm32"))]
-                    let analysis_chain = lock.as_mut().unwrap();
-                    #[cfg(target_arch = "wasm32")]
-                    let analysis_chain = &mut **lock;
-                    analysis_chain.update_config(settings);
-
-                    #[cfg(not(target_arch = "wasm32"))]
-                    shared_state.invalidate_analysis_history();
-                    #[cfg(target_arch = "wasm32")]
-                    shared_state.spectrogram.clear();
+                let update_and_clear = || {
+                    analysis_action.set(Some(true));
                 };
 
                 let is_outside_hearing_range = analysis_settings.start_frequency < 20.0 || analysis_settings.start_frequency > 20000.0 || analysis_settings.end_frequency > 20000.0 || analysis_settings.end_frequency < 20.0;
-
-                ui.colored_label(
-                    Color32::YELLOW,
-                    "Editing these options temporarily interrupts audio analysis.",
-                );
 
                 if ui
                     .add(
@@ -2401,7 +2262,7 @@ pub(crate) fn render(
                     .on_hover_text("This setting adjusts the amplitude of the incoming signal before it is processed (but does not affect the plugin's output channels; audio is always passed through unmodified).\n\nAll internal audio processing is done using 32-bit floating point, so this can be adjusted freely without concern for clipping.")
                     .changed()
                 {
-                    update(&analysis_settings);
+                    update();
                     egui_ctx.request_discard("Changed setting");
                     return;
                 };
@@ -2420,7 +2281,7 @@ pub(crate) fn render(
                     .changed()
                 {
                     analysis_settings.latency_offset = Duration::from_secs_f64(latency_offset.max(0.0) / 1000.0);
-                    update(&analysis_settings);
+                    update();
                     egui_ctx.request_discard("Changed setting");
                     return;
                 };
@@ -2434,7 +2295,7 @@ pub(crate) fn render(
                         .on_hover_text("If this is enabled, amplitude values are normalized using the ISO 226:2023 equal-loudness contours, which map the amplitudes of frequency bins into phons, a psychoacoustic unit of loudness measurement.\nIf this is disabled, amplitude values are not normalized.")
                         .changed()
                     {
-                        update(&analysis_settings);
+                    update();
                         if analysis_settings.normalize_amplitude {
                             render_settings.agc_minimum =
                                 3.0 - analysis_settings.listening_volume;
@@ -2466,7 +2327,7 @@ pub(crate) fn render(
                         .on_hover_text("When normalizing amplitude values using an equal-loudness contour, a reference value is necessary to convert dBFS into dB SPL.\nIn order to improve the accuracy of amplitude normalization and receive accurate phon values, this value should be set to the dB SPL value corresponding to 0 dBFS on your system.")
                         .changed()
                     {
-                        update_and_clear(&analysis_settings);
+                    update_and_clear();
                         render_settings.min_db =
                             old_min_phon - analysis_settings.listening_volume;
                         render_settings.max_db =
@@ -2489,7 +2350,7 @@ pub(crate) fn render(
                         .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, simultaneous masking thresholds are calculated using a simple tone-masking-tone model.\nIf this is disabled, simultaneous masking thresholds are not calculated.")
                         .changed()
                     {
-                        update(&analysis_settings);
+                    update();
                         egui_ctx.request_discard("Changed setting");
                         return;
                     }
@@ -2500,7 +2361,7 @@ pub(crate) fn render(
                             .on_hover_text("Calculating the simultaneous masking threshold makes use of a spreading function, which can be computationally intensive to compute in real time.\nIf this is enabled, the spreading function is approximated, reducing CPU usage at the expense of outputting less psychoacoustically accurate results.\nIf this is disabled, the spreading function is computed normally, resulting in more psychoacoustically accurate results at the expense of additional CPU usage.")
                             .changed()
                         {
-                            update(&analysis_settings);
+                    update();
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
@@ -2515,7 +2376,7 @@ pub(crate) fn render(
                             .on_hover_text("In hearing, tones can mask the presence of other tones in a process called simultaneous masking. Most lossy audio codecs use a model of this process in order to hide compression artifacts.\nIf this is enabled, tones underneath the simultaneous masking threshold are replaced with an amplitude of zero, creating a (sometimes) more readable but less psychoacoustically accurate output.\nIf this is disabled, tones underneath the simultaneous masking threshold are replaced with the simultaneous masking threshold's value.")
                             .changed()
                         {
-                            update(&analysis_settings);
+                    update();
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
@@ -2531,7 +2392,7 @@ pub(crate) fn render(
                     .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows.\nIf this is enabled, the plugin maintains its own buffer of samples, allowing the number of overlapping windows per second to be changed by the user. This adds a small amount of latency, which is reported to the plugin's host so that it can be compensated for.\nIf this is disabled, the number of overlapping windows per second is determined by the buffer size set by the host.")
                     .changed()
                 {
-                    update(&analysis_settings);
+                    update();
                     egui_ctx.request_discard("Changed setting");
                     return;
                 }
@@ -2546,7 +2407,7 @@ pub(crate) fn render(
                         .on_hover_text("When using internal buffering, synchronization can be done in a relaxed manner, where audio analysis can desynchronize slightly from audio output (if the host supports delay compensation, the analysis ends up running slightly ahead of the output), or in a strict manner, where samples must be analyzed before they can be outputted.\nIf this is enabled, audio synchronization is performed in a strict manner.\nIf this is disabled, audio synchronization is performed in a relaxed manner.")
                         .changed()
                     {
-                        update(&analysis_settings);
+                    update();
                         egui_ctx.request_discard("Changed setting");
                         return;
                     }
@@ -2568,7 +2429,7 @@ pub(crate) fn render(
                         .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows. This setting allows you to adjust the number of overlapping windows per second, effectively setting the spectrogram's vertical resolution (and the associated amount of CPU usage required).\n\nThe default value for the setting is roughly half the length of the just-noticeable-difference in onset time between two auditory events.\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution.)")
                         .changed()
                     {
-                        update_and_clear(&analysis_settings);
+                    update_and_clear();
                         egui_ctx.request_discard("Changed setting");
                         return;
                     };
@@ -2590,7 +2451,7 @@ pub(crate) fn render(
                         .on_hover_text("In order to better capture transient signals and phase information, audio is processed in multiple overlapping windows. This setting allows you to adjust the number of overlapping windows per second, effectively setting the spectrogram's vertical resolution (and the associated amount of CPU usage required).\n\n(Note: This setting does not change the trade-off between time resolution and frequency resolution.)")
                         .changed()
                     {
-                        update_and_clear(&analysis_settings);
+                    update_and_clear();
                         egui_ctx.request_discard("Changed setting");
                         return;
                     };
@@ -2611,7 +2472,7 @@ pub(crate) fn render(
                     .on_hover_text("In order to convert data into frequency domain, the selected frequency range needs to be split into a set number of frequency bins. This setting allows you to adjust the number of bins used, effectively setting the horizontal resolution of the spectrogram and bargraph (and the associated amount of CPU usage required).\n\nThis setting does not increase the width of the transform's filters beyond the time resolution setting.")
                     .changed()
                 {
-                    update_and_clear(&analysis_settings);
+                    update_and_clear();
                     egui_ctx.request_discard("Changed setting");
                     return;
                 };
@@ -2643,7 +2504,7 @@ pub(crate) fn render(
                                 analysis_settings.normalize_amplitude = false;
                                 analysis_settings.masking = false;
                             }
-                            update_and_clear(&analysis_settings);
+                    update_and_clear();
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
@@ -2670,7 +2531,7 @@ pub(crate) fn render(
                                 analysis_settings.normalize_amplitude = false;
                                 analysis_settings.masking = false;
                             }
-                            update_and_clear(&analysis_settings);
+                    update_and_clear();
                             egui_ctx.request_discard("Changed setting");
                             return;
                         }
@@ -2686,7 +2547,7 @@ pub(crate) fn render(
                     .on_hover_text("If this is enabled, frequencies will be displayed using the Equivalent Rectangular Bandwidth scale, a psychoacoustic measure of pitch perception.\nIf this is disabled, frequencies will be displayed on a base 2 logarithmic scale, which is used by most musical scales.")
                     .changed()
                 {
-                    update_and_clear(&analysis_settings);
+                    update_and_clear();
                     egui_ctx.request_discard("Changed setting");
                     return;
                 }
@@ -2699,7 +2560,7 @@ pub(crate) fn render(
                     .on_hover_text("Transforming time-domain data (audio samples) into the frequency domain has an inherent tradeoff between time resolution and frequency resolution.\nIf this setting is enabled, the appropriate time resolution will be determined using an adjusted version of the ERB scale.\nIf this setting is disabled, time resolution is determined based on the configured Q factor.")
                     .changed()
                 {
-                    update(&analysis_settings);
+                    update();
                     egui_ctx.request_discard("Changed setting");
                     return;
                 }
@@ -2718,7 +2579,7 @@ pub(crate) fn render(
                             analysis_settings.erb_bandwidth_divisor = 0.01;
                         }
 
-                        update(&analysis_settings);
+                    update();
                         egui_ctx.request_discard("Changed setting");
                         return;
                     };
@@ -2736,7 +2597,7 @@ pub(crate) fn render(
                     {
                         analysis_settings.q_time_resolution = analysis_settings.q_time_resolution.max(0.1);
 
-                        update(&analysis_settings);
+                    update();
                         egui_ctx.request_discard("Changed setting");
                         return;
                     };
@@ -2757,7 +2618,7 @@ pub(crate) fn render(
                             analysis_settings.time_resolution_clamp.1 = analysis_settings.time_resolution_clamp.0;
                         }
 
-                        update(&analysis_settings);
+                    update();
                         egui_ctx.request_discard("Changed setting");
                         return;
                     };
@@ -2777,7 +2638,7 @@ pub(crate) fn render(
                             analysis_settings.time_resolution_clamp.0 = analysis_settings.time_resolution_clamp.1;
                         }
 
-                        update(&analysis_settings);
+                    update();
                         egui_ctx.request_discard("Changed setting");
                         return;
                     };
@@ -2790,7 +2651,7 @@ pub(crate) fn render(
                     .on_hover_text("If this is enabled, windowing is performed using the NC method, a form of spectral reassignment using phase information which usually outperforms typical window functions.\nIf this is disabled, windowing is performed using the Hann window function.")
                     .changed()
                 {
-                    update(&analysis_settings);
+                    update();
                     egui_ctx.request_discard("Changed setting");
                     return;
                 }
@@ -2804,7 +2665,7 @@ pub(crate) fn render(
                         .on_hover_text("If this is enabled, the \"optimal\" version of the NC method is used, improving filter bandwidth characteristics at the expense of introducing banding artifacts into the spectrogram due to changes in time resolution.\nIf this is disabled, an alternate implementation of the NC method is used, which prioritizes the reduction of spectrogram artifacts.")
                         .changed()
                     {
-                        update(&analysis_settings);
+                    update();
                         egui_ctx.request_discard("Changed setting");
                         return;
                     }
@@ -2820,12 +2681,43 @@ pub(crate) fn render(
                         3.0 - analysis_settings.listening_volume;
                     render_settings.agc_maximum =
                         100.0 - analysis_settings.listening_volume;
-                    update_and_clear(&analysis_settings);
+                    update_and_clear();
                 }
             });
 
             ui.label(format!("KatVisualizer v{}", env!("CARGO_PKG_VERSION")));
         });
+
+    shared_state.settings = edited_render_settings;
+    shared_state.cached_analysis_settings = edited_analysis_settings;
+    if resize_color_table.get() {
+        shared_state.color_table = ColorTable::new(
+            COLOR_TABLE_BASE_CHROMA_SIZE * edited_render_settings.lookup_size,
+            COLOR_TABLE_BASE_LIGHTNESS_SIZE * edited_render_settings.lookup_size,
+        );
+    }
+    if rebuild_color_table.get() {
+        shared_state.color_table.build(
+            edited_render_settings.left_hue,
+            edited_render_settings.right_hue,
+            edited_render_settings.minimum_lightness,
+            edited_render_settings.maximum_lightness,
+            edited_render_settings.maximum_chroma,
+        );
+    }
+    if let Some(clear_history) = analysis_action.get() {
+        #[cfg(not(target_arch = "wasm32"))]
+        shared_state
+            .analysis_updates
+            .stage(edited_analysis_settings, clear_history);
+        #[cfg(target_arch = "wasm32")]
+        {
+            analysis_chain.update_config(&edited_analysis_settings);
+            if clear_history {
+                shared_state.invalidate_analysis_history();
+            }
+        }
+    }
 
     let now = Instant::now();
 
