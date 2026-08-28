@@ -130,7 +130,10 @@ impl BetterAnalyzer {
         samples: impl ExactSizeIterator<Item = f32>,
         listening_volume: Option<f32>,
     ) {
-        let spectrum = self.transform.analyze(samples.map(|s| s as f64));
+        self.transform.analyze_into(
+            samples.map(|sample| sample as f64),
+            &mut self.processed_spectrum,
+        );
 
         /*let flatness = if spectrum.len() > 128 {
             0.0
@@ -140,32 +143,25 @@ impl BetterAnalyzer {
 
         if self.config.masking {
             self.masker.calculate_masking_threshold(
-                spectrum,
+                &self.processed_spectrum,
                 listening_volume,
                 //0.0,
                 &mut self.masking,
             );
 
-            unsafe { spectrum.as_chunks_unchecked::<64>() }
-                .iter()
-                .zip(unsafe { self.processed_spectrum.as_chunks_unchecked_mut::<64>() })
-                .zip(unsafe { self.masking.as_chunks_unchecked::<64>() })
-                .for_each(|((source_chunk, spectrum_chunk), masking_chunk)| {
-                    for ((source, spectrum), masking) in
-                        source_chunk.iter().zip(spectrum_chunk).zip(masking_chunk)
-                    {
-                        *spectrum = (*source as f32).max(*masking);
-                    }
-                });
-        } else {
-            unsafe { spectrum.as_chunks_unchecked::<64>() }
-                .iter()
-                .zip(unsafe { self.processed_spectrum.as_chunks_unchecked_mut::<64>() })
-                .for_each(|(source_chunk, spectrum_chunk)| {
-                    for (source, spectrum) in source_chunk.iter().zip(spectrum_chunk) {
-                        *spectrum = *source as f32;
-                    }
-                });
+            debug_assert_eq!(self.processed_spectrum.len(), self.masking.len());
+
+            // Both buffers are created with the immutable band count. The normalized transform
+            // is already in `processed_spectrum`, so masking can be applied in place.
+            unsafe {
+                let processed = self.processed_spectrum.as_mut_ptr();
+                let masking = self.masking.as_ptr();
+
+                for index in 0..self.processed_spectrum.len() {
+                    let output = processed.add(index);
+                    output.write((*output).max(*masking.add(index)));
+                }
+            }
         }
     }
     #[inline(always)]

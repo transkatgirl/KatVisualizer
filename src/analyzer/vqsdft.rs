@@ -338,7 +338,23 @@ impl VQsDFT {
         self.coeffs.coeff5_y.fill(0.0);
     }
 
-    pub(super) fn analyze(&mut self, samples: impl ExactSizeIterator<Item = f64>) -> &[f64] {
+    pub(super) fn analyze_into(
+        &mut self,
+        samples: impl ExactSizeIterator<Item = f64>,
+        output: &mut [f32],
+    ) {
+        assert_eq!(output.len(), self.spectrum_data.len());
+        let sample_count = self.analyze_accumulated(samples);
+
+        // Normalize and narrow once, directly into the analyzer's reusable output buffer.
+        // Masking and all public consumers operate on f32, so retaining a second normalized
+        // f64 representation would only add another complete-band pass.
+        for (output, &value) in output.iter_mut().zip(&self.spectrum_data) {
+            *output = value.algebraic_div(sample_count) as f32;
+        }
+    }
+
+    fn analyze_accumulated(&mut self, samples: impl ExactSizeIterator<Item = f64>) -> f64 {
         self.spectrum_data.fill(0.0);
         let sample_count = samples.len().max(1) as f64;
 
@@ -355,6 +371,12 @@ impl VQsDFT {
             _ => unreachable!("invalid VQsDFT mode and term count"),
         }
 
+        sample_count
+    }
+
+    #[cfg(test)]
+    pub(super) fn analyze(&mut self, samples: impl ExactSizeIterator<Item = f64>) -> &[f64] {
+        let sample_count = self.analyze_accumulated(samples);
         for value in &mut self.spectrum_data {
             *value = value.algebraic_div(sample_count);
         }
@@ -509,9 +531,73 @@ impl VQsDFT {
 
             if USE_NC {
                 debug_assert_eq!(TERM_COUNT, 2);
+                let band_count = self.coeffs.band_count;
+                let right_start = band_count + band_start;
+
+                // Pass every disjoint coefficient range as its own reference. Keeping the
+                // owning `VQsDFTCoefficients` reference out of the numerical kernel lets LLVM
+                // attach `noalias` information to the mutable ranges instead of emitting a
+                // large set of overlap guards on every tile invocation.
+                let (
+                    left_twiddle_x,
+                    left_twiddle_y,
+                    right_twiddle_x,
+                    right_twiddle_y,
+                    inverse_periods,
+                    coeff2_x,
+                    coeff2_y,
+                    left_coeff4_x,
+                    right_coeff4_x,
+                    left_coeff4_y,
+                    right_coeff4_y,
+                    left_coeff5_x,
+                    right_coeff5_x,
+                    left_coeff5_y,
+                    right_coeff5_y,
+                ) = unsafe {
+                    let (left_coeff4_x, right_coeff4_x) =
+                        get_two_band_tiles_mut(&mut self.coeffs.coeff4_x, band_start, right_start);
+                    let (left_coeff4_y, right_coeff4_y) =
+                        get_two_band_tiles_mut(&mut self.coeffs.coeff4_y, band_start, right_start);
+                    let (left_coeff5_x, right_coeff5_x) =
+                        get_two_band_tiles_mut(&mut self.coeffs.coeff5_x, band_start, right_start);
+                    let (left_coeff5_y, right_coeff5_y) =
+                        get_two_band_tiles_mut(&mut self.coeffs.coeff5_y, band_start, right_start);
+                    (
+                        get_band_tile(&self.coeffs.twiddle_x, band_start),
+                        get_band_tile(&self.coeffs.twiddle_y, band_start),
+                        get_band_tile(&self.coeffs.twiddle_x, right_start),
+                        get_band_tile(&self.coeffs.twiddle_y, right_start),
+                        get_band_tile(&self.coeffs.inverse_periods, band_start),
+                        get_band_tile_mut(&mut self.coeffs.coeff2_x, band_start),
+                        get_band_tile_mut(&mut self.coeffs.coeff2_y, band_start),
+                        left_coeff4_x,
+                        right_coeff4_x,
+                        left_coeff4_y,
+                        right_coeff4_y,
+                        left_coeff5_x,
+                        right_coeff5_x,
+                        left_coeff5_y,
+                        right_coeff5_y,
+                    )
+                };
+
                 calculate_nc_tile_block::<SAMPLE_COUNT>(
-                    &mut self.coeffs,
-                    band_start,
+                    left_twiddle_x,
+                    left_twiddle_y,
+                    right_twiddle_x,
+                    right_twiddle_y,
+                    inverse_periods,
+                    coeff2_x,
+                    coeff2_y,
+                    left_coeff4_x,
+                    right_coeff4_x,
+                    left_coeff4_y,
+                    right_coeff4_y,
+                    left_coeff5_x,
+                    right_coeff5_x,
+                    left_coeff5_y,
+                    right_coeff5_y,
                     comb_x,
                     comb_y,
                     spectrum,
@@ -696,62 +782,27 @@ fn recurrence_step_values(
 /// per-band recurrence state remains local across time and is written back
 /// only once.
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 fn calculate_nc_tile_block<const SAMPLE_COUNT: usize>(
-    coeffs: &mut VQsDFTCoefficients,
-    band_start: usize,
+    left_twiddle_x: &[f64; BAND_TILE_LEN],
+    left_twiddle_y: &[f64; BAND_TILE_LEN],
+    right_twiddle_x: &[f64; BAND_TILE_LEN],
+    right_twiddle_y: &[f64; BAND_TILE_LEN],
+    inverse_periods: &[f64; BAND_TILE_LEN],
+    coeff2_x: &mut [f64; BAND_TILE_LEN],
+    coeff2_y: &mut [f64; BAND_TILE_LEN],
+    left_coeff4_x: &mut [f64; BAND_TILE_LEN],
+    right_coeff4_x: &mut [f64; BAND_TILE_LEN],
+    left_coeff4_y: &mut [f64; BAND_TILE_LEN],
+    right_coeff4_y: &mut [f64; BAND_TILE_LEN],
+    left_coeff5_x: &mut [f64; BAND_TILE_LEN],
+    right_coeff5_x: &mut [f64; BAND_TILE_LEN],
+    left_coeff5_y: &mut [f64; BAND_TILE_LEN],
+    right_coeff5_y: &mut [f64; BAND_TILE_LEN],
     comb_x: &[[f64; BAND_TILE_LEN]; SAMPLE_COUNT],
     comb_y: &[[f64; BAND_TILE_LEN]; SAMPLE_COUNT],
     spectrum: &mut [f64; BAND_TILE_LEN],
 ) {
-    debug_assert_eq!(coeffs.term_count, 2);
-    let right_start = coeffs.band_count + band_start;
-
-    // SAFETY: NC contains two complete, disjoint term rows, and the caller
-    // advances through complete band tiles.
-    let (
-        left_twiddle_x,
-        left_twiddle_y,
-        right_twiddle_x,
-        right_twiddle_y,
-        inverse_periods,
-        coeff2_x,
-        coeff2_y,
-        left_coeff4_x,
-        right_coeff4_x,
-        left_coeff4_y,
-        right_coeff4_y,
-        left_coeff5_x,
-        right_coeff5_x,
-        left_coeff5_y,
-        right_coeff5_y,
-    ) = unsafe {
-        let (left_coeff4_x, right_coeff4_x) =
-            get_two_band_tiles_mut(&mut coeffs.coeff4_x, band_start, right_start);
-        let (left_coeff4_y, right_coeff4_y) =
-            get_two_band_tiles_mut(&mut coeffs.coeff4_y, band_start, right_start);
-        let (left_coeff5_x, right_coeff5_x) =
-            get_two_band_tiles_mut(&mut coeffs.coeff5_x, band_start, right_start);
-        let (left_coeff5_y, right_coeff5_y) =
-            get_two_band_tiles_mut(&mut coeffs.coeff5_y, band_start, right_start);
-        (
-            get_band_tile(&coeffs.twiddle_x, band_start),
-            get_band_tile(&coeffs.twiddle_y, band_start),
-            get_band_tile(&coeffs.twiddle_x, right_start),
-            get_band_tile(&coeffs.twiddle_y, right_start),
-            get_band_tile(&coeffs.inverse_periods, band_start),
-            get_band_tile_mut(&mut coeffs.coeff2_x, band_start),
-            get_band_tile_mut(&mut coeffs.coeff2_y, band_start),
-            left_coeff4_x,
-            right_coeff4_x,
-            left_coeff4_y,
-            right_coeff4_y,
-            left_coeff5_x,
-            right_coeff5_x,
-            left_coeff5_y,
-            right_coeff5_y,
-        )
-    };
-
     for lane in 0..BAND_TILE_LEN {
         let mut previous_coeff2_x = coeff2_x[lane];
         let mut previous_coeff2_y = coeff2_y[lane];

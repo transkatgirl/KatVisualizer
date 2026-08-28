@@ -247,7 +247,7 @@ impl Masker {
     }
     pub(super) fn calculate_masking_threshold(
         &self,
-        spectrum: &[f64],
+        spectrum: &[f32],
         listening_volume: Option<f32>,
         masking_threshold: &mut [f32],
     ) {
@@ -288,7 +288,7 @@ impl Masker {
     #[inline(never)]
     fn calculate_masking_threshold_inner_approx(
         &self,
-        spectrum: &[f64],
+        spectrum: &[f32],
         masking_threshold: &mut [f32],
         target_counts: &[u32],
         lookup: &[f32],
@@ -309,7 +309,7 @@ impl Masker {
                 let target_count = *target_counts_ptr.add(source) as usize;
                 let source_lookup = lookup_cursor;
                 lookup_cursor = lookup_cursor.add(target_count);
-                let amplitude = *spectrum_ptr.add(source) as f32;
+                let amplitude = *spectrum_ptr.add(source);
                 if amplitude == 0.0 {
                     continue;
                 }
@@ -326,7 +326,7 @@ impl Masker {
     #[inline(never)]
     fn calculate_masking_threshold_inner_exact(
         &self,
-        spectrum: &[f64],
+        spectrum: &[f32],
         listening_volume: Option<f32>,
         masking_threshold: &mut [f32],
         bark_set: &[f32],
@@ -356,7 +356,7 @@ impl Masker {
             // The final source cannot mask a higher band. For every preceding source,
             // low_bark[source] < bark[source] guarantees at least the source target itself.
             for i in 0..last_source {
-                let amplitude = *spectrum_ptr.add(i) as f32;
+                let amplitude = *spectrum_ptr.add(i);
 
                 if amplitude == 0.0 {
                     continue;
@@ -416,7 +416,7 @@ impl Masker {
     }
 
     #[inline(never)]
-    fn calculate_lower_masking_threshold(&self, spectrum: &[f64], masking_threshold: &mut [f32]) {
+    fn calculate_lower_masking_threshold(&self, spectrum: &[f32], masking_threshold: &mut [f32]) {
         let mut active_sum = 0.0_f32;
 
         // The highest band has no lower-masking source above it. Peeling it also makes source =
@@ -436,7 +436,7 @@ impl Masker {
             for target in (0..band_count - 1).rev() {
                 let source = target + 1;
                 let source_contribution =
-                    (*spectrum_ptr.add(source) as f32).algebraic_mul(*source_scale_ptr.add(source));
+                    (*spectrum_ptr.add(source)).algebraic_mul(*source_scale_ptr.add(source));
                 active_sum = active_sum.algebraic_add(source_contribution);
 
                 *threshold_ptr.add(target) = active_sum
@@ -459,8 +459,8 @@ impl Masker {
                 }
                 for expired_source in lower_cursor..expiration_end {
                     let source = expired_source;
-                    let source_contribution = (*spectrum_ptr.add(source) as f32)
-                        .algebraic_mul(*source_scale_ptr.add(source));
+                    let source_contribution =
+                        (*spectrum_ptr.add(source)).algebraic_mul(*source_scale_ptr.add(source));
                     active_sum = active_sum.algebraic_sub(source_contribution);
                 }
             }
@@ -487,10 +487,10 @@ mod tests {
             .collect()
     }
 
-    fn spectrum() -> Vec<f64> {
+    fn spectrum() -> Vec<f32> {
         (0..64)
             .map(|i| {
-                let x = i as f64;
+                let x = i as f32;
                 ((x * 0.17).sin().abs() * 0.4) + 0.01
             })
             .collect()
@@ -498,7 +498,7 @@ mod tests {
 
     fn reference_threshold_with_math(
         masker: &Masker,
-        spectrum: &[f64],
+        spectrum: &[f32],
         listening_volume: Option<f32>,
         amplitude_to_dbfs: fn(f32) -> f32,
         exact_exp2: fn(f32) -> f32,
@@ -512,7 +512,7 @@ mod tests {
         let mut threshold = vec![0.0_f32; spectrum.len()];
 
         for (source, &component) in spectrum.iter().enumerate() {
-            let amplitude = component as f32;
+            let amplitude = component;
             if amplitude == 0.0 {
                 continue;
             }
@@ -576,7 +576,7 @@ mod tests {
 
     fn reference_threshold(
         masker: &Masker,
-        spectrum: &[f64],
+        spectrum: &[f32],
         listening_volume: Option<f32>,
     ) -> Vec<f32> {
         reference_threshold_with_math(
@@ -590,7 +590,7 @@ mod tests {
 
     fn assert_matches_pairwise_reference(
         approximate: bool,
-        spectrum: &[f64],
+        spectrum: &[f32],
         listening_volume: Option<f32>,
     ) {
         let bands = frequency_bands();
@@ -614,7 +614,7 @@ mod tests {
     fn masking_matches_pairwise_reference_for_spectrum_shapes() {
         let mut one_hot = vec![0.0; 64];
         one_hot[24] = 0.125;
-        let mixed: Vec<f64> = spectrum()
+        let mixed: Vec<f32> = spectrum()
             .into_iter()
             .enumerate()
             .map(|(i, amplitude)| if i % 5 == 0 { 0.0 } else { amplitude })
