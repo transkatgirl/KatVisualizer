@@ -722,7 +722,7 @@ fn calculate_pan_from_amplitude_sum(
                 .algebraic_sub(right_amplitude)
                 .algebraic_div(amplitude),
         )
-        .algebraic_mul(-4.0 / PI)
+        .algebraic_mul((-4.0_f32).algebraic_div(PI))
     }
 }
 
@@ -877,7 +877,7 @@ pub fn amplitude_to_dbfs(amplitude: f32) -> f32 {
 
 #[inline(always)]
 pub fn dbfs_to_amplitude(decibels: f32) -> f32 {
-    f32::exp2(decibels.algebraic_mul(std::f32::consts::LOG2_10 / 20.0))
+    f32::exp2(decibels.algebraic_mul(std::f32::consts::LOG2_10.algebraic_div(20.0)))
 }
 
 #[inline(always)]
@@ -896,6 +896,7 @@ pub enum FrequencyScale {
 }
 
 // Used by render thread
+#[inline(always)]
 pub fn scale_bark(x: f32) -> f32 {
     (26.81_f32.algebraic_mul(x)).algebraic_div((1960.0_f32.algebraic_add(x)).algebraic_sub(0.53))
 }
