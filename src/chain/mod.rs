@@ -56,7 +56,7 @@ impl Default for AnalysisChainConfig {
             internal_buffering: true,
             strict_synchronization: true,
             #[cfg(not(target_arch = "wasm32"))]
-            update_rate_hz: 1280.0,
+            update_rate_hz: 1536.0, // round((1408 * ((1400 / 900) * 0.75)) / 256) * 256
             #[cfg(target_arch = "wasm32")]
             update_rate_hz: 512.0,
             #[cfg(not(target_arch = "wasm32"))]
