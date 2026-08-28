@@ -1515,9 +1515,9 @@ pub(crate) fn render(
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    let frequency_snapshot = analysis_frequencies.load_full();
+    let frequency_snapshot = analysis_frequencies.load();
     #[cfg(not(target_arch = "wasm32"))]
-    let audio_state = audio_state.load_full();
+    let audio_state = audio_state.load();
     #[cfg(target_arch = "wasm32")]
     let audio_state = Some(&*audio_state);
 

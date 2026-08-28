@@ -754,12 +754,12 @@ impl Spectrogram {
         self.data.len()
     }
 
-    /// Inserts an owned slice and returns the oldest allocation for recycling.
-    #[cfg(any(not(target_arch = "wasm32"), test))]
-    pub(crate) fn rotate_in(&mut self, analysis: BetterAnalysis) -> BetterAnalysis {
+    /// Swaps an incoming transport slot with the oldest render-owned allocation.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn rotate_in_place(&mut self, analysis: &mut BetterAnalysis) {
         let evicted = self.data.pop_back().expect("spectrogram is never empty");
-        self.data.push_front(analysis);
-        evicted
+        let incoming = std::mem::replace(analysis, evicted);
+        self.data.push_front(incoming);
     }
 
     /// Reuses the oldest render-owned allocation and makes it the newest slice.

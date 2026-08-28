@@ -43,13 +43,15 @@ impl AnalysisSink for DirectAnalysisSink<'_> {
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
+    use std::{
+        cell::UnsafeCell,
+        sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        },
     };
 
     use crossbeam_utils::CachePadded;
-    use rtrb::{Consumer, Producer, PushError, RingBuffer};
 
     use super::*;
 
@@ -64,37 +66,85 @@ mod native {
         end_ns: u64,
     }
 
+    struct ConsumerProgress {
+        sequence: AtomicU64,
+        consumed_ns: AtomicU64,
+    }
+
+    struct AnalysisSlotRing {
+        slots: Box<[UnsafeCell<AnalysisPacket>]>,
+        published_sequence: CachePadded<AtomicU64>,
+        consumer: CachePadded<ConsumerProgress>,
+    }
+
+    // SAFETY: the ring has one producer and one consumer. The producer owns
+    // free and unpublished slots; the consumer owns published, unconsumed
+    // slots. Release/acquire publication of the two wrapping sequences transfers
+    // exclusive access in each direction, and neither side accesses a slot after
+    // transferring it until the opposite sequence returns ownership.
+    unsafe impl Send for AnalysisSlotRing {}
+    // SAFETY: all shared non-atomic slot access is covered by the ownership
+    // protocol documented above.
+    unsafe impl Sync for AnalysisSlotRing {}
+
+    impl AnalysisSlotRing {
+        fn new(slice_capacity: usize) -> Self {
+            let slots = (0..TRANSPORT_CAPACITY)
+                .map(|_| {
+                    UnsafeCell::new(AnalysisPacket {
+                        analysis: BetterAnalysis::new(slice_capacity),
+                        metrics: AnalysisMetrics::default(),
+                        generation: 0,
+                        start_ns: 0,
+                        end_ns: 0,
+                    })
+                })
+                .collect();
+            Self {
+                slots,
+                published_sequence: CachePadded::new(AtomicU64::new(0)),
+                consumer: CachePadded::new(ConsumerProgress {
+                    sequence: AtomicU64::new(0),
+                    consumed_ns: AtomicU64::new(0),
+                }),
+            }
+        }
+
+        #[inline]
+        fn slot(&self, sequence: u64) -> *mut AnalysisPacket {
+            self.slots[sequence as usize % TRANSPORT_CAPACITY].get()
+        }
+    }
+
     struct Timeline {
         generation: AtomicU64,
         generation_start_ns: AtomicU64,
         analyzed_ns: AtomicU64,
-        enqueued_ns: CachePadded<AtomicU64>,
-        consumed_ns: CachePadded<AtomicU64>,
     }
 
     pub(crate) struct NativeAnalysisSink {
-        packets: Producer<AnalysisPacket>,
-        recycle: Consumer<BetterAnalysis>,
-        spare: Option<BetterAnalysis>,
+        ring: Arc<AnalysisSlotRing>,
         timeline: Arc<Timeline>,
+        write_sequence: u64,
         generation: u64,
         generation_start_ns: u64,
         next_ns: u64,
         enqueued_ns: u64,
+        batch_consumed_sequence: u64,
         batch_consumed_ns: u64,
-        batch_start_enqueued_ns: u64,
+        batch_start_write_sequence: u64,
         batch_analyzed_ns: Option<u64>,
         batch_active: bool,
         #[cfg(test)]
-        enqueued_publications: u64,
+        slot_publications: u64,
         #[cfg(test)]
         analyzed_publications: u64,
     }
 
     pub(crate) struct NativeAnalysisReceiver {
-        packets: Consumer<AnalysisPacket>,
-        recycle: Producer<BetterAnalysis>,
+        ring: Arc<AnalysisSlotRing>,
         timeline: Arc<Timeline>,
+        read_sequence: u64,
         generation: u64,
         rendered_ns: u64,
         consumed_ns: u64,
@@ -103,51 +153,60 @@ mod native {
     pub(crate) fn native_transport(
         slice_capacity: usize,
     ) -> (NativeAnalysisSink, NativeAnalysisReceiver) {
-        let (packets, packet_consumer) = RingBuffer::new(TRANSPORT_CAPACITY);
-        let (mut recycle_producer, recycle) = RingBuffer::new(TRANSPORT_CAPACITY);
-
-        for _ in 0..TRANSPORT_CAPACITY {
-            recycle_producer
-                .push(BetterAnalysis::new(slice_capacity))
-                .expect("new recycle ring has enough capacity");
-        }
+        let ring = Arc::new(AnalysisSlotRing::new(slice_capacity));
 
         let timeline = Arc::new(Timeline {
             generation: AtomicU64::new(0),
             generation_start_ns: AtomicU64::new(0),
             analyzed_ns: AtomicU64::new(0),
-            enqueued_ns: CachePadded::new(AtomicU64::new(0)),
-            consumed_ns: CachePadded::new(AtomicU64::new(0)),
         });
 
         (
             NativeAnalysisSink {
-                packets,
-                recycle,
-                spare: None,
+                ring: Arc::clone(&ring),
                 timeline: timeline.clone(),
+                write_sequence: 0,
                 generation: 0,
                 generation_start_ns: 0,
                 next_ns: 0,
                 enqueued_ns: 0,
+                batch_consumed_sequence: 0,
                 batch_consumed_ns: 0,
-                batch_start_enqueued_ns: 0,
+                batch_start_write_sequence: 0,
                 batch_analyzed_ns: None,
                 batch_active: false,
                 #[cfg(test)]
-                enqueued_publications: 0,
+                slot_publications: 0,
                 #[cfg(test)]
                 analyzed_publications: 0,
             },
             NativeAnalysisReceiver {
-                packets: packet_consumer,
-                recycle: recycle_producer,
+                ring,
                 timeline,
+                read_sequence: 0,
                 generation: 0,
                 rendered_ns: 0,
                 consumed_ns: 0,
             },
         )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_empty_sequence_for_test(
+        sink: &mut NativeAnalysisSink,
+        receiver: &mut NativeAnalysisReceiver,
+        sequence: u64,
+    ) {
+        assert_eq!(sink.write_sequence, receiver.read_sequence);
+        sink.write_sequence = sequence;
+        receiver.read_sequence = sequence;
+        sink.ring
+            .published_sequence
+            .store(sequence, Ordering::Relaxed);
+        sink.ring
+            .consumer
+            .sequence
+            .store(sequence, Ordering::Relaxed);
     }
 
     impl NativeAnalysisSink {
@@ -160,7 +219,8 @@ mod native {
 
         #[cfg(test)]
         pub(crate) fn recycle_supply(&self) -> usize {
-            self.recycle.slots() + usize::from(self.spare.is_some())
+            // Every slot permanently contains one reusable analysis allocation.
+            TRANSPORT_CAPACITY
         }
 
         #[cfg(test)]
@@ -170,15 +230,30 @@ mod native {
 
         #[cfg(test)]
         pub(crate) fn publication_counts(&self) -> (u64, u64) {
-            (self.enqueued_publications, self.analyzed_publications)
+            (self.slot_publications, self.analyzed_publications)
+        }
+
+        #[cfg(test)]
+        pub(crate) fn sequence(&self) -> u64 {
+            self.write_sequence
+        }
+
+        #[cfg(test)]
+        pub(crate) fn slot_data_pointer(&self, sequence: u64) -> *const (f32, f32) {
+            // SAFETY: test callers inspect slots only while producer and
+            // consumer activity is paused.
+            unsafe { (&*self.ring.slot(sequence)).analysis.data.as_ptr() }
         }
     }
 
     impl AnalysisSink for NativeAnalysisSink {
         fn begin_batch(&mut self) {
             debug_assert!(!self.batch_active, "analysis sink batch was already active");
-            self.batch_consumed_ns = self.timeline.consumed_ns.load(Ordering::Relaxed);
-            self.batch_start_enqueued_ns = self.enqueued_ns;
+            // Acquiring the consumed sequence returns all newly freed slots and
+            // makes the consumer's preceding consumed-time update visible.
+            self.batch_consumed_sequence = self.ring.consumer.sequence.load(Ordering::Acquire);
+            self.batch_consumed_ns = self.ring.consumer.consumed_ns.load(Ordering::Relaxed);
+            self.batch_start_write_sequence = self.write_sequence;
             self.batch_analyzed_ns = None;
             self.batch_active = true;
         }
@@ -195,25 +270,24 @@ mod native {
             self.next_ns = end_ns;
 
             let queued_ns = self.enqueued_ns.saturating_sub(self.batch_consumed_ns);
+            let occupied = self
+                .write_sequence
+                .wrapping_sub(self.batch_consumed_sequence);
 
             if queued_ns.saturating_add(duration_ns) <= MAX_QUEUED_NS
-                && let Some(mut analysis) = self.spare.take().or_else(|| self.recycle.pop().ok())
+                && occupied < TRANSPORT_CAPACITY as u64
             {
-                let metrics = update(&mut analysis);
+                // SAFETY: `occupied < capacity` means this slot was returned by
+                // the acquired consumer sequence. It remains producer-owned and
+                // unpublished until `finish_batch()` release-publishes it.
+                let packet = unsafe { &mut *self.ring.slot(self.write_sequence) };
+                packet.metrics = update(&mut packet.analysis);
+                packet.generation = self.generation;
+                packet.start_ns = start_ns;
+                packet.end_ns = end_ns;
 
-                let packet = AnalysisPacket {
-                    analysis,
-                    metrics,
-                    generation: self.generation,
-                    start_ns,
-                    end_ns,
-                };
-
-                if let Err(PushError::Full(packet)) = self.packets.push(packet) {
-                    self.spare = Some(packet.analysis);
-                } else {
-                    self.enqueued_ns = self.enqueued_ns.saturating_add(duration_ns);
-                }
+                self.write_sequence = self.write_sequence.wrapping_add(1);
+                self.enqueued_ns = self.enqueued_ns.saturating_add(duration_ns);
             }
 
             self.batch_analyzed_ns = Some(end_ns);
@@ -222,13 +296,13 @@ mod native {
         fn finish_batch(&mut self) {
             debug_assert!(self.batch_active, "analysis sink batch was not active");
 
-            if self.enqueued_ns != self.batch_start_enqueued_ns {
-                self.timeline
-                    .enqueued_ns
-                    .store(self.enqueued_ns, Ordering::Relaxed);
+            if self.write_sequence != self.batch_start_write_sequence {
+                self.ring
+                    .published_sequence
+                    .store(self.write_sequence, Ordering::Release);
                 #[cfg(test)]
                 {
-                    self.enqueued_publications += 1;
+                    self.slot_publications += 1;
                 }
             }
 
@@ -243,9 +317,9 @@ mod native {
                     .store(self.generation, Ordering::Release);
             }
 
-            // All packet pushes and the enqueued total are published before this
-            // release. The renderer uses the acquired analyzed time as its packet
-            // visibility watermark.
+            // Slot and generation publication happen before this release. The
+            // renderer acquires this analyzed-time visibility watermark before
+            // snapshotting the published sequence.
             if let Some(analyzed_ns) = self.batch_analyzed_ns {
                 self.timeline
                     .analyzed_ns
@@ -261,66 +335,61 @@ mod native {
     }
 
     impl NativeAnalysisReceiver {
-        fn recycle(&mut self, analysis: BetterAnalysis) {
-            if let Err(PushError::Full(_analysis)) = self.recycle.push(analysis) {
-                debug_assert!(false, "analysis recycle ring overflowed");
+        fn publish_consumed(&self, consumed_before: u64) {
+            if self.read_sequence != consumed_before {
+                self.ring
+                    .consumer
+                    .consumed_ns
+                    .store(self.consumed_ns, Ordering::Relaxed);
+                self.ring
+                    .consumer
+                    .sequence
+                    .store(self.read_sequence, Ordering::Release);
             }
         }
 
-        fn flush(&mut self) -> u64 {
+        fn flush(&mut self, published_sequence: u64) -> u64 {
             let mut newest_end_ns = 0;
-            let packets_to_flush = self.packets.slots();
-            let consumed_before = self.consumed_ns;
+            let consumed_before = self.read_sequence;
 
-            for _ in 0..packets_to_flush {
-                let Ok(packet) = self.packets.pop() else {
-                    break;
-                };
-
+            while self.read_sequence != published_sequence {
+                // SAFETY: the acquired published sequence transfers this slot
+                // to the consumer until it publishes the advanced read sequence.
+                let packet = unsafe { &mut *self.ring.slot(self.read_sequence) };
                 self.consumed_ns = self
                     .consumed_ns
                     .saturating_add(packet.end_ns.saturating_sub(packet.start_ns));
                 newest_end_ns = newest_end_ns.max(packet.end_ns);
-                self.recycle(packet.analysis);
+                self.read_sequence = self.read_sequence.wrapping_add(1);
             }
-            if self.consumed_ns != consumed_before {
-                self.timeline
-                    .consumed_ns
-                    .store(self.consumed_ns, Ordering::Relaxed);
-            }
+            self.publish_consumed(consumed_before);
             newest_end_ns
         }
 
-        fn start_generation(&mut self, generation: u64, spectrogram: &mut Spectrogram) {
-            let consumed_before = self.consumed_ns;
+        fn start_generation(
+            &mut self,
+            generation: u64,
+            published_sequence: u64,
+            spectrogram: &mut Spectrogram,
+        ) {
+            let consumed_before = self.read_sequence;
 
             // Generations are FIFO. Remove only obsolete packets and leave the
-            // first packet from this or a later published generation in the
-            // ring. The wrapping comparison also handles generation overflow.
-            loop {
-                let Ok(packet) = self.packets.peek() else {
-                    break;
-                };
+            // first packet from this or a later published generation available.
+            while self.read_sequence != published_sequence {
+                // SAFETY: this slot is within the acquired published snapshot.
+                let packet = unsafe { &mut *self.ring.slot(self.read_sequence) };
                 let generation_distance = packet.generation.wrapping_sub(generation);
                 if generation_distance < (1_u64 << 63) {
                     break;
                 }
 
-                let packet = self
-                    .packets
-                    .pop()
-                    .expect("peeked analysis packet is available");
                 self.consumed_ns = self
                     .consumed_ns
                     .saturating_add(packet.end_ns.saturating_sub(packet.start_ns));
-                self.recycle(packet.analysis);
+                self.read_sequence = self.read_sequence.wrapping_add(1);
             }
-
-            if self.consumed_ns != consumed_before {
-                self.timeline
-                    .consumed_ns
-                    .store(self.consumed_ns, Ordering::Relaxed);
-            }
+            self.publish_consumed(consumed_before);
 
             self.generation = generation;
             self.rendered_ns = self.timeline.generation_start_ns.load(Ordering::Relaxed);
@@ -332,7 +401,8 @@ mod native {
         pub(crate) fn fresh_start(&mut self, spectrogram: &mut Spectrogram) {
             let generation = self.timeline.generation.load(Ordering::Acquire);
             let watermark_before = self.timeline.analyzed_ns.load(Ordering::Acquire);
-            let flushed_end = self.flush();
+            let published_sequence = self.ring.published_sequence.load(Ordering::Acquire);
+            let flushed_end = self.flush(published_sequence);
             let watermark_after = self.timeline.analyzed_ns.load(Ordering::Acquire);
             self.generation = generation;
             self.rendered_ns = watermark_before.max(flushed_end).max(watermark_after);
@@ -345,42 +415,42 @@ mod native {
             spectrogram: &mut Spectrogram,
             metrics: &mut AnalysisMetrics,
         ) {
-            let watermark = loop {
+            let (watermark, published_sequence) = loop {
                 let current_generation = self.timeline.generation.load(Ordering::Acquire);
                 if current_generation != self.generation {
-                    self.start_generation(current_generation, spectrogram);
+                    let published_sequence = self.ring.published_sequence.load(Ordering::Acquire);
+                    self.start_generation(current_generation, published_sequence, spectrogram);
                 }
 
                 let watermark = self.timeline.analyzed_ns.load(Ordering::Acquire);
+                let published_sequence = self.ring.published_sequence.load(Ordering::Acquire);
                 // The producer publishes a generation just before its analyzed
                 // watermark. Retry if those two loads straddled that boundary.
                 if self.timeline.generation.load(Ordering::Acquire) == self.generation {
-                    break watermark;
+                    break (watermark, published_sequence);
                 }
             };
             // Bound this frame's work, and never consume a packet from a batch
             // whose analyzed-time watermark has not yet been published.
-            let packets_to_drain = self.packets.slots();
-            let consumed_before = self.consumed_ns;
+            let packets_to_drain = published_sequence
+                .wrapping_sub(self.read_sequence)
+                .min(TRANSPORT_CAPACITY as u64);
+            let consumed_before = self.read_sequence;
 
             for _ in 0..packets_to_drain {
-                let Ok(packet) = self.packets.peek() else {
-                    break;
-                };
+                // SAFETY: this slot is within the acquired published snapshot
+                // and remains consumer-owned until the final release store.
+                let packet = unsafe { &mut *self.ring.slot(self.read_sequence) };
                 if packet.end_ns > watermark {
                     break;
                 }
 
-                let Ok(packet) = self.packets.pop() else {
-                    break;
-                };
-
                 self.consumed_ns = self
                     .consumed_ns
                     .saturating_add(packet.end_ns.saturating_sub(packet.start_ns));
+                self.read_sequence = self.read_sequence.wrapping_add(1);
 
                 if packet.generation != self.generation || packet.end_ns <= self.rendered_ns {
-                    self.recycle(packet.analysis);
                     continue;
                 }
 
@@ -394,15 +464,10 @@ mod native {
 
                 self.rendered_ns = packet.end_ns;
                 *metrics = packet.metrics;
-                let evicted = spectrogram.rotate_in(packet.analysis);
-                self.recycle(evicted);
+                spectrogram.rotate_in_place(&mut packet.analysis);
             }
 
-            if self.consumed_ns != consumed_before {
-                self.timeline
-                    .consumed_ns
-                    .store(self.consumed_ns, Ordering::Relaxed);
-            }
+            self.publish_consumed(consumed_before);
 
             if watermark > self.rendered_ns {
                 let newest = spectrogram.newest();
@@ -420,6 +485,11 @@ mod native {
         #[cfg(test)]
         pub(crate) fn rendered_ns(&self) -> u64 {
             self.rendered_ns
+        }
+
+        #[cfg(test)]
+        pub(crate) fn sequence(&self) -> u64 {
+            self.read_sequence
         }
     }
 }
@@ -641,5 +711,68 @@ mod tests {
         assert_eq!(spectrogram.newest().data[0].0, PACKETS as f32);
         assert_eq!(receiver.rendered_ns(), PACKETS);
         assert_eq!(sink.recycle_supply(), native::TRANSPORT_CAPACITY);
+    }
+
+    #[test]
+    fn native_slot_sequences_wrap_without_reordering() {
+        let (mut sink, mut receiver) = native_transport(8);
+        let initial_sequence = u64::MAX - 1;
+        native::set_empty_sequence_for_test(&mut sink, &mut receiver, initial_sequence);
+
+        let mut spectrogram = Spectrogram::new(8, 8);
+        let mut metrics = AnalysisMetrics::default();
+        receiver.fresh_start(&mut spectrogram);
+        sink.begin_batch();
+        submit_unpublished(&mut sink, 1.0, Duration::from_nanos(1));
+        submit_unpublished(&mut sink, 2.0, Duration::from_nanos(1));
+        submit_unpublished(&mut sink, 3.0, Duration::from_nanos(1));
+        sink.finish_batch();
+        receiver.drain_into(&mut spectrogram, &mut metrics);
+
+        assert_eq!(sink.sequence(), 1);
+        assert_eq!(receiver.sequence(), 1);
+        assert_eq!(
+            spectrogram
+                .newest_to_oldest()
+                .take(3)
+                .map(|row| row.data[0].0)
+                .collect::<Vec<_>>(),
+            vec![3.0, 2.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn delivered_slot_swaps_with_oldest_spectrogram_buffer() {
+        let (mut sink, mut receiver) = native_transport(8);
+        let mut spectrogram = Spectrogram::new(3, 8);
+        let mut metrics = AnalysisMetrics::default();
+        receiver.fresh_start(&mut spectrogram);
+        assert_eq!(spectrogram.len(), 3);
+
+        let slot_pointer = sink.slot_data_pointer(0);
+        let oldest_pointer = spectrogram.at_age(2).unwrap().data.as_ptr();
+        submit(&mut sink, 1.0, Duration::from_millis(10));
+        receiver.drain_into(&mut spectrogram, &mut metrics);
+
+        assert_eq!(spectrogram.newest().data.as_ptr(), slot_pointer);
+        assert_eq!(sink.slot_data_pointer(0), oldest_pointer);
+    }
+
+    #[test]
+    fn fresh_start_does_not_consume_an_unpublished_batch() {
+        let (mut sink, mut receiver) = native_transport(8);
+        let mut spectrogram = Spectrogram::new(3, 8);
+        let mut metrics = AnalysisMetrics::default();
+
+        sink.begin_batch();
+        submit_unpublished(&mut sink, 1.0, Duration::from_millis(10));
+        receiver.fresh_start(&mut spectrogram);
+        assert_eq!(receiver.rendered_ns(), 0);
+        assert_eq!(receiver.sequence(), 0);
+
+        sink.finish_batch();
+        receiver.drain_into(&mut spectrogram, &mut metrics);
+        assert_eq!(spectrogram.newest().data[0].0, 1.0);
+        assert_eq!(receiver.rendered_ns(), 10_000_000);
     }
 }

@@ -1,12 +1,12 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::{
-    cell::UnsafeCell,
+    cell::{Cell, UnsafeCell},
     hint,
     panic::{AssertUnwindSafe, catch_unwind},
     ptr,
     sync::{
         Arc,
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread::{self, JoinHandle, Thread},
     time::{Duration, Instant},
@@ -16,13 +16,7 @@ use std::{
 use web_time::{Duration, Instant};
 
 #[cfg(not(target_arch = "wasm32"))]
-use crossbeam_utils::{
-    CachePadded,
-    sync::{Parker, Unparker},
-};
-
-#[cfg(all(not(target_arch = "wasm32"), test))]
-use std::sync::atomic::AtomicBool;
+use crossbeam_utils::CachePadded;
 
 use crate::{
     AnalysisMetrics,
@@ -32,23 +26,6 @@ use crate::{
 };
 
 mod chunker;
-
-#[cfg(not(target_arch = "wasm32"))]
-const WORKER_STARTING: u8 = 0;
-#[cfg(not(target_arch = "wasm32"))]
-const WORKER_IDLE: u8 = 1;
-#[cfg(not(target_arch = "wasm32"))]
-const WORKER_READY: u8 = 2;
-#[cfg(not(target_arch = "wasm32"))]
-const WORKER_DONE: u8 = 3;
-#[cfg(not(target_arch = "wasm32"))]
-const WORKER_FAILED: u8 = 4;
-#[cfg(not(target_arch = "wasm32"))]
-const WORKER_STOP: u8 = 5;
-#[cfg(not(target_arch = "wasm32"))]
-const WORKER_BATCH_IDLE: u8 = 6;
-#[cfg(not(target_arch = "wasm32"))]
-const WORKER_PARK_REQUEST: u8 = 7;
 
 /// One stereo job transferred from the audio thread to the persistent analysis
 /// worker. The pointed-to values stay alive and are not accessed by the audio
@@ -74,22 +51,41 @@ impl StereoJob {
 
 #[cfg(not(target_arch = "wasm32"))]
 struct StereoWorkerShared {
-    state: CachePadded<AtomicU8>,
-    job: UnsafeCell<StereoJob>,
-    audio_unparker: Unparker,
+    submission: CachePadded<StereoSubmission>,
+    completion: CachePadded<StereoCompletion>,
+    control: CachePadded<StereoControl>,
     #[cfg(test)]
     force_failure: AtomicBool,
     #[cfg(test)]
     wake_count: std::sync::atomic::AtomicU64,
 }
 
-// SAFETY: `job` has exactly one producer and one consumer. The producer writes
-// it only while `state` is idle or batch-idle, publishes it with a release
-// store, and waits for an acquire load of done before reusing the slot or its
-// pointed-to data.
+#[cfg(not(target_arch = "wasm32"))]
+struct StereoSubmission {
+    sequence: AtomicU64,
+    job: UnsafeCell<StereoJob>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct StereoCompletion {
+    sequence: AtomicU64,
+    failed: AtomicBool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct StereoControl {
+    park_sequence: AtomicU64,
+    stop: AtomicBool,
+}
+
+// SAFETY: the audio thread writes `job` only after observing completion of the
+// previous sequence. Its release store transfers the initialized job and its
+// pointed-to right analyzer to the worker, which only reads it after acquiring
+// that sequence. Completion transfers ownership back before the slot is reused.
 #[cfg(not(target_arch = "wasm32"))]
 unsafe impl Send for StereoWorkerShared {}
-// SAFETY: Access to `job` follows the same release/acquire ownership protocol.
+// SAFETY: access to the only interior-mutable non-atomic field follows the same
+// single-producer/single-consumer release/acquire protocol.
 #[cfg(not(target_arch = "wasm32"))]
 unsafe impl Sync for StereoWorkerShared {}
 
@@ -99,18 +95,32 @@ unsafe impl Sync for StereoWorkerShared {}
 struct StereoWorker {
     shared: Arc<StereoWorkerShared>,
     thread: Thread,
-    audio_parker: Parker,
+    submitted_sequence: Cell<u64>,
+    batch_woken: Cell<bool>,
     join_handle: Option<JoinHandle<()>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl StereoWorker {
     fn new() -> Self {
-        let audio_parker = Parker::new();
+        Self::new_at_sequence(0)
+    }
+
+    fn new_at_sequence(initial_sequence: u64) -> Self {
         let shared = Arc::new(StereoWorkerShared {
-            state: CachePadded::new(AtomicU8::new(WORKER_STARTING)),
-            job: UnsafeCell::new(StereoJob::EMPTY),
-            audio_unparker: audio_parker.unparker().clone(),
+            submission: CachePadded::new(StereoSubmission {
+                sequence: AtomicU64::new(initial_sequence),
+                job: UnsafeCell::new(StereoJob::EMPTY),
+            }),
+            completion: CachePadded::new(StereoCompletion {
+                sequence: AtomicU64::new(initial_sequence),
+                failed: AtomicBool::new(false),
+            }),
+            // The initial request lets the new helper park until its first job.
+            control: CachePadded::new(StereoControl {
+                park_sequence: AtomicU64::new(1),
+                stop: AtomicBool::new(false),
+            }),
             #[cfg(test)]
             force_failure: AtomicBool::new(false),
             #[cfg(test)]
@@ -119,110 +129,76 @@ impl StereoWorker {
         let worker_shared = Arc::clone(&shared);
         let join_handle = thread::Builder::new()
             .name("katvisualizer-analysis".to_owned())
-            .spawn(move || Self::run(worker_shared))
+            .spawn(move || Self::run(worker_shared, initial_sequence))
             .expect("private analysis worker can be created");
         let thread = join_handle.thread().clone();
-
-        // Warm the thread during construction so the first process block only
-        // needs the steady-state wakeup path.
-        while shared.state.load(Ordering::Acquire) == WORKER_STARTING {
-            audio_parker.park();
-        }
-        assert_eq!(shared.state.load(Ordering::Relaxed), WORKER_IDLE);
 
         Self {
             shared,
             thread,
-            audio_parker,
+            submitted_sequence: Cell::new(initial_sequence),
+            batch_woken: Cell::new(false),
             join_handle: Some(join_handle),
         }
     }
 
-    fn run(shared: Arc<StereoWorkerShared>) {
-        shared.state.store(WORKER_IDLE, Ordering::Release);
-        shared.audio_unparker.unpark();
-        let mut should_park = true;
+    fn run(shared: Arc<StereoWorkerShared>, initial_sequence: u64) {
+        let mut completed_sequence = initial_sequence;
+        let mut observed_park_sequence = 0_u64;
 
         loop {
-            if should_park {
-                // `unpark()` has token semantics, so a wakeup sent after idle is
-                // published but just before this call is kept.
-                thread::park();
-                should_park = false;
-            }
+            let submitted_sequence = shared.submission.sequence.load(Ordering::Acquire);
+            if submitted_sequence != completed_sequence {
+                #[cfg(test)]
+                let forced_failure = shared.force_failure.swap(false, Ordering::Relaxed);
+                #[cfg(not(test))]
+                let forced_failure = false;
 
-            match shared.state.load(Ordering::Acquire) {
-                WORKER_READY => {
-                    #[cfg(test)]
-                    if shared.force_failure.swap(false, Ordering::Relaxed) {
-                        let _ = shared.state.compare_exchange(
-                            WORKER_READY,
-                            WORKER_FAILED,
-                            Ordering::Release,
-                            Ordering::Acquire,
-                        );
-                        shared.audio_unparker.unpark();
-                        return;
-                    }
-
-                    // SAFETY: the acquire load transfers the initialized job and
-                    // exclusive access to its right analyzer to this thread. The
-                    // sample slice remains immutable until completion.
-                    let job = unsafe { *shared.job.get() };
-                    let result = catch_unwind(AssertUnwindSafe(|| unsafe {
+                // SAFETY: acquiring a new submission sequence transfers the
+                // initialized job and exclusive access to its right analyzer.
+                let job = unsafe { *shared.submission.job.get() };
+                let result = if forced_failure {
+                    Err(Box::new("forced analysis worker failure") as Box<dyn std::any::Any + Send>)
+                } else {
+                    catch_unwind(AssertUnwindSafe(|| unsafe {
                         let analyzer = &mut *job.analyzer;
                         let samples = std::slice::from_raw_parts(job.samples, job.sample_count);
                         analyzer.analyze(samples.iter().copied(), job.listening_volume);
-                    }));
-                    let completed_state = if result.is_ok() {
-                        WORKER_DONE
-                    } else {
-                        WORKER_FAILED
-                    };
+                    }))
+                };
 
-                    // Drop may request shutdown while a job is in flight. Do not
-                    // overwrite that request or park again in that case.
-                    if shared
-                        .state
-                        .compare_exchange(
-                            WORKER_READY,
-                            completed_state,
-                            Ordering::Release,
-                            Ordering::Acquire,
-                        )
-                        .is_err()
-                    {
-                        debug_assert_eq!(shared.state.load(Ordering::Relaxed), WORKER_STOP);
-                        return;
-                    }
+                shared
+                    .completion
+                    .failed
+                    .store(result.is_err(), Ordering::Relaxed);
+                shared
+                    .completion
+                    .sequence
+                    .store(submitted_sequence, Ordering::Release);
+                completed_sequence = submitted_sequence;
 
-                    shared.audio_unparker.unpark();
-
-                    if result.is_err() {
-                        return;
-                    }
+                if result.is_err() {
+                    return;
                 }
-                WORKER_PARK_REQUEST => {
-                    // Drop may request shutdown while the audio thread is ending
-                    // a batch. Never overwrite that request with idle.
-                    match shared.state.compare_exchange(
-                        WORKER_PARK_REQUEST,
-                        WORKER_IDLE,
-                        Ordering::Release,
-                        Ordering::Acquire,
-                    ) {
-                        Ok(_) => {
-                            shared.audio_unparker.unpark();
-                            should_park = true;
-                        }
-                        Err(WORKER_STOP) => return,
-                        Err(state) => panic!("invalid analysis worker park state {state}"),
-                    }
+                continue;
+            }
+
+            if shared.control.stop.load(Ordering::Acquire) {
+                return;
+            }
+
+            let park_sequence = shared.control.park_sequence.load(Ordering::Acquire);
+            if park_sequence != observed_park_sequence {
+                // A submission always wins over parking. If an adjacent batch
+                // raced this check, its unpark token either wakes this call or
+                // makes it return immediately, so no wakeup can be missed.
+                if shared.submission.sequence.load(Ordering::Acquire) != completed_sequence {
+                    continue;
                 }
-                WORKER_STOP => return,
-                WORKER_IDLE => should_park = true,
-                WORKER_DONE | WORKER_BATCH_IDLE => hint::spin_loop(),
-                state => panic!("invalid analysis worker state {state}"),
+                observed_park_sequence = park_sequence;
+                thread::park();
+            } else {
+                hint::spin_loop();
             }
         }
     }
@@ -234,24 +210,30 @@ impl StereoWorker {
         listening_volume: Option<f32>,
         analyze_left: impl FnOnce(),
     ) {
-        let previous_state = self.shared.state.load(Ordering::Acquire);
-        assert!(
-            previous_state == WORKER_IDLE || previous_state == WORKER_BATCH_IDLE,
+        let previous_sequence = self.submitted_sequence.get();
+        assert_eq!(
+            self.shared.completion.sequence.load(Ordering::Acquire),
+            previous_sequence,
             "analysis worker was not available before submission"
         );
+        let submitted_sequence = previous_sequence.wrapping_add(1);
 
-        // SAFETY: idle and batch-idle grant the sole producer exclusive access
-        // to the preallocated slot. The release store below publishes the job.
+        // SAFETY: completion of the preceding sequence grants the audio thread
+        // sole access to the preallocated slot. The release store publishes it.
         unsafe {
-            self.shared.job.get().write(StereoJob {
+            self.shared.submission.job.get().write(StereoJob {
                 analyzer: right_analyzer,
                 samples: right_samples.as_ptr(),
                 sample_count: right_samples.len(),
                 listening_volume,
             });
         }
-        self.shared.state.store(WORKER_READY, Ordering::Release);
-        if previous_state == WORKER_IDLE {
+        self.shared
+            .submission
+            .sequence
+            .store(submitted_sequence, Ordering::Release);
+        self.submitted_sequence.set(submitted_sequence);
+        if !self.batch_woken.replace(true) {
             #[cfg(test)]
             self.shared.wake_count.fetch_add(1, Ordering::Relaxed);
             self.thread.unpark();
@@ -259,43 +241,26 @@ impl StereoWorker {
 
         analyze_left();
 
-        loop {
-            match self.shared.state.load(Ordering::Acquire) {
-                WORKER_DONE => {
-                    self.shared
-                        .state
-                        .store(WORKER_BATCH_IDLE, Ordering::Release);
-                    return;
-                }
-                WORKER_FAILED => panic!("right-channel analysis worker failed"),
-                WORKER_READY => self.audio_parker.park(),
-                state => panic!("invalid analysis worker completion state {state}"),
-            }
+        while self.shared.completion.sequence.load(Ordering::Acquire) != submitted_sequence {
+            hint::spin_loop();
+        }
+        if self.shared.completion.failed.load(Ordering::Relaxed) {
+            panic!("right-channel analysis worker failed");
         }
     }
 
     fn finish_batch(&self) {
-        loop {
-            match self.shared.state.load(Ordering::Acquire) {
-                // A batch with no stereo jobs leaves the worker parked.
-                WORKER_IDLE => return,
-                WORKER_BATCH_IDLE => {
-                    let _ = self.shared.state.compare_exchange(
-                        WORKER_BATCH_IDLE,
-                        WORKER_PARK_REQUEST,
-                        Ordering::Release,
-                        Ordering::Acquire,
-                    );
-                }
-                WORKER_PARK_REQUEST => self.audio_parker.park(),
-                WORKER_FAILED => panic!("right-channel analysis worker failed"),
-                state => panic!("invalid analysis worker batch completion state {state}"),
-            }
+        if self.batch_woken.replace(false) {
+            self.shared
+                .control
+                .park_sequence
+                .fetch_add(1, Ordering::Release);
         }
     }
 
     fn is_idle(&self) -> bool {
-        self.shared.state.load(Ordering::Acquire) == WORKER_IDLE
+        self.shared.completion.sequence.load(Ordering::Acquire)
+            == self.shared.submission.sequence.load(Ordering::Acquire)
     }
 
     #[cfg(test)]
@@ -317,7 +282,7 @@ impl StereoWorker {
 #[cfg(not(target_arch = "wasm32"))]
 impl Drop for StereoWorker {
     fn drop(&mut self) {
-        self.shared.state.store(WORKER_STOP, Ordering::Release);
+        self.shared.control.stop.store(true, Ordering::Release);
         self.thread.unpark();
         if let Some(join_handle) = self.join_handle.take() {
             let _ = join_handle.join();
@@ -1009,5 +974,78 @@ mod tests {
         }));
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn worker_sequences_wrap_without_losing_a_job() {
+        let config = test_config(false);
+        let worker = StereoWorker::new_at_sequence(u64::MAX - 1);
+        let analyzer_config = config.analyzer_config(48_000.0);
+        let mut left_analyzer = BetterAnalyzer::new(analyzer_config.clone());
+        let mut right_analyzer = BetterAnalyzer::new(analyzer_config);
+        let left = samples(16, 0.07);
+        let right = samples(16, 0.11);
+
+        for _ in 0..2 {
+            worker.analyze(&mut right_analyzer, &right, None, || {
+                left_analyzer.analyze(left.iter().copied(), None);
+            });
+            worker.finish_batch();
+        }
+
+        assert_eq!(worker.submitted_sequence.get(), 0);
+        assert!(worker.is_idle());
+        assert_eq!(worker.wake_count(), 2);
+    }
+
+    #[test]
+    fn rapid_back_to_back_batches_do_not_miss_wakeups() {
+        const BATCHES: u64 = 256;
+
+        let config = test_config(false);
+        let mut chain = AnalysisChain::new(&config, 48_000.0, false);
+        let mut spectrogram = Spectrogram::new(2, config.resolution);
+        let mut metrics = AnalysisMetrics::default();
+        let mut sink = DirectAnalysisSink {
+            spectrogram: &mut spectrogram,
+            metrics: &mut metrics,
+        };
+        let mut left = samples(16, 0.07);
+        let mut right = samples(16, 0.11);
+
+        for _ in 0..BATCHES {
+            chain.analyze(&mut [&mut left, &mut right], &mut sink);
+        }
+
+        let worker = chain.stereo_worker.as_ref().unwrap();
+        assert_eq!(worker.wake_count(), BATCHES);
+        assert!(worker.is_idle());
+    }
+
+    #[test]
+    fn quiescent_worker_allows_immediate_analyzer_replacement() {
+        let config = test_config(false);
+        let mut chain = AnalysisChain::new(&config, 48_000.0, false);
+        let mut spectrogram = Spectrogram::new(2, config.resolution);
+        let mut metrics = AnalysisMetrics::default();
+        let mut sink = DirectAnalysisSink {
+            spectrogram: &mut spectrogram,
+            metrics: &mut metrics,
+        };
+        let mut left = samples(16, 0.07);
+        let mut right = samples(16, 0.11);
+
+        chain.analyze(&mut [&mut left, &mut right], &mut sink);
+        let old = chain.replace_analyzers(Box::new(AnalyzerPair::new(&config, 48_000.0)));
+
+        drop(old);
+        assert!(chain.stereo_worker.as_ref().unwrap().is_idle());
+    }
+
+    #[test]
+    fn parked_worker_shuts_down_cleanly() {
+        let worker = StereoWorker::new();
+        std::thread::yield_now();
+        drop(worker);
     }
 }
