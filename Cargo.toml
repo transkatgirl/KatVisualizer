@@ -26,6 +26,7 @@ mute-output = [  ]
 
 [dependencies]
 color       = "0.3.3"
+fast-math   = "0.1.1"
 parking_lot = "0.12.5"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

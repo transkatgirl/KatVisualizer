@@ -221,8 +221,6 @@ impl AnalysisChain {
                         }
                     }
 
-                    analyzer.lock().0.copy_from_slice(buffer);
-
                     self.analyzer_pool.execute(move || {
                         let mut lock = analyzer.lock();
                         let (ref mut buffer, ref mut analyzer) = *lock;
