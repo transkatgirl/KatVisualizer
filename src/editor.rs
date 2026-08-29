@@ -399,12 +399,13 @@ struct ColorTable {
     max: (f32, f32),
 }
 
-// This is the smallest table, by texel count, whose nearest-neighbor cells have a maximum
+// This is the smallest table, by texel count, whose nearest-neighbor lookup error has a maximum
 // deltaEOK of 0.002 across the UI's worst-case lightness range (0.0..=1.0) and maximum chroma
-// (0.2). The bound is
-// hypot(2 * chroma / (chroma_size - 1), lightness_range / (lightness_size - 1)).
-const COLOR_TABLE_CHROMA_SIZE: usize = 286;
-const COLOR_TABLE_LIGHTNESS_SIZE: usize = 703;
+// (0.2), while using an odd chroma size so that centered audio maps to an exactly neutral row.
+// The lookup-error bound is
+// hypot(chroma / (chroma_size - 1), lightness_range / (2 * (lightness_size - 1))).
+const COLOR_TABLE_CHROMA_SIZE: usize = 139;
+const COLOR_TABLE_LIGHTNESS_SIZE: usize = 364;
 
 impl ColorTable {
     fn new() -> Self {
@@ -1730,6 +1731,39 @@ pub(crate) fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn color_table_dimensions_bound_lookup_error_and_preserve_neutral_center() {
+        const MAX_LOOKUP_ERROR: f32 = 0.002;
+        const MAX_CHROMA: f32 = 0.2;
+        const MAX_LIGHTNESS_RANGE: f32 = 1.0;
+
+        assert_eq!(COLOR_TABLE_CHROMA_SIZE % 2, 1);
+        let lookup_error = (MAX_CHROMA / (COLOR_TABLE_CHROMA_SIZE - 1) as f32)
+            .hypot(MAX_LIGHTNESS_RANGE / (2.0 * (COLOR_TABLE_LIGHTNESS_SIZE - 1) as f32));
+        assert!(lookup_error <= MAX_LOOKUP_ERROR);
+
+        // No smaller table with an odd chroma dimension can meet the same bound.
+        let texels = COLOR_TABLE_CHROMA_SIZE * COLOR_TABLE_LIGHTNESS_SIZE;
+        for chroma_size in (3..=texels / 2).step_by(2) {
+            let lightness_size = (texels - 1) / chroma_size;
+            if lightness_size < 2 {
+                continue;
+            }
+            let candidate_error = (MAX_CHROMA / (chroma_size - 1) as f32)
+                .hypot(MAX_LIGHTNESS_RANGE / (2.0 * (lightness_size - 1) as f32));
+            assert!(candidate_error > MAX_LOOKUP_ERROR);
+        }
+
+        let mut table = ColorTable::new();
+        table.build(0.0, 180.0, 0.0, 1.0, MAX_CHROMA);
+        let center_row = COLOR_TABLE_CHROMA_SIZE / 2;
+        for intensity in 0..COLOR_TABLE_LIGHTNESS_SIZE {
+            let (r, g, b) = table.table[center_row * COLOR_TABLE_LIGHTNESS_SIZE + intensity];
+            assert_eq!(r, g);
+            assert_eq!(g, b);
+        }
+    }
 
     fn push_masking_row(spectrogram: &mut Spectrogram, duration: Duration, masking_mean: f32) {
         spectrogram.update_with(|row| {

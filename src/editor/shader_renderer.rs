@@ -62,8 +62,8 @@ float map_amplitude(float amplitude) {
 
 vec3 lookup_color(float pan, float intensity) {
     ivec2 size = textureSize(u_lut, 0);
-    int x = int(round(clamp(intensity, 0.0, 1.0) * float(size.x - 1)));
-    int y = int(round(clamp(pan * 0.5 + 0.5, 0.0, 1.0) * float(size.y - 1)));
+    int x = int(floor(clamp(intensity, 0.0, 1.0) * float(size.x - 1) + 0.5));
+    int y = int(floor(clamp(pan * 0.5 + 0.5, 0.0, 1.0) * float(size.y - 1) + 0.5));
     return texelFetch(u_lut, ivec2(x, y), 0).rgb;
 }
 
@@ -2109,11 +2109,12 @@ mod tests {
                 (intensity * max.1).round() as usize,
             );
             let shader = (
-                ((pan * 0.5 + 0.5) * max.0).round() as usize,
-                (intensity * max.1).round() as usize,
+                ((pan * 0.5 + 0.5) * max.0 + 0.5).floor() as usize,
+                (intensity * max.1 + 0.5).floor() as usize,
             );
             assert_eq!(cpu, shader);
         }
+        assert_eq!((0.5 * max.0 + 0.5).floor() as usize, max.0 as usize / 2);
     }
 
     #[test]
