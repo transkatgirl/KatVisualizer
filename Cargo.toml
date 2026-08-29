@@ -1,6 +1,6 @@
 [package]
 name    = "katvisualizer"
-version = "0.17.10"
+version = "0.18.0"
 edition = "2024"
 
 [workspace]
@@ -28,11 +28,13 @@ force-mono-to-stereo = [
 mute-output = [  ]
 
 [dependencies]
-bytemuck  = "1.25.0"
-color     = "0.3.3"
+bytemuck = "1.25.0"
+color = "0.3.3"
 egui_glow = "0.33.3"
 fast-math = "0.1.1"
-half      = { version = "2.7.1", features = ["bytemuck"] }
+half = { version = "2.7.1", features = [
+	"bytemuck",
+] }
 parking_lot = "0.12.5"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

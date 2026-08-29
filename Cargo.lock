@@ -2037,7 +2037,7 @@ dependencies = [
 
 [[package]]
 name = "katvisualizer"
-version = "0.17.10"
+version = "0.18.0"
 dependencies = [
  "arc-swap",
  "audio_thread_priority",
