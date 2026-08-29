@@ -8,6 +8,9 @@ members = [
 	"xtask",
 ]
 
+[patch."https://github.com/RustAudio/baseview.git"]
+baseview = { git = "https://github.com/transkatgirl/baseview.git", rev = "b6e66adf378d9de4820881491e705ae6b9ca52cd" }
+
 [lib]
 crate-type = [
 	"cdylib",

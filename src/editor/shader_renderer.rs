@@ -66,26 +66,29 @@ vec3 lookup_color(float pan, float intensity) {
     return texelFetch(u_lut, ivec2(x, y), 0).rgb;
 }
 
-vec4 color_history_texel(int frequency, int age) {
-    if (u_valid_rows <= 0) {
-        return vec4(0.0, 0.0, 0.0, 1.0);
-    }
-    frequency = clamp(frequency, 0, u_history_size.x - 1);
-    age = clamp(age, 0, u_history_size.y - 1);
+float masking_range(int frequency) {
+    return u_use_smr != 0
+        ? texelFetch(u_masking_ranges, ivec2(frequency, 0), 0).r
+        : 1.0;
+}
+
+vec4 color_history_texel(int frequency, int age, float smr_range) {
     if (age >= u_valid_rows) {
         return vec4(0.0, 0.0, 0.0, 1.0);
     }
-    int physical_row = (u_history_head + age) % u_history_size.y;
-    vec4 analysis = texelFetch(u_history, ivec2(frequency, physical_row), 0);
-    if (analysis.a < 0.5) {
-        return vec4(0.0, 0.0, 0.0, 1.0);
+
+    // The sum is less than twice the texture height, so wrapping with a
+    // subtraction avoids an integer division for every source texel.
+    int physical_row = u_history_head + age;
+    if (physical_row >= u_history_size.y) {
+        physical_row -= u_history_size.y;
     }
+    vec4 analysis = texelFetch(u_history, ivec2(frequency, physical_row), 0);
 
     float volume_intensity = map_amplitude(analysis.g);
     float intensity = volume_intensity;
     if (u_use_smr != 0) {
-        float range = texelFetch(u_masking_ranges, ivec2(frequency, 0), 0).r;
-        float smr_intensity = clamp((analysis.g - analysis.b) / range, 0.0, 1.0);
+        float smr_intensity = clamp((analysis.g - analysis.b) / smr_range, 0.0, 1.0);
         intensity = min(volume_intensity,
             mix(volume_intensity, smr_intensity, u_smr_strength));
     }
@@ -93,19 +96,30 @@ vec4 color_history_texel(int frequency, int age) {
 }
 
 vec4 sample_history(vec2 uv) {
+    if (u_valid_rows <= 0) {
+        return vec4(0.0, 0.0, 0.0, 1.0);
+    }
+
     if (u_nearest != 0) {
         ivec2 coordinate = ivec2(floor(uv * vec2(u_history_size)));
         coordinate = clamp(coordinate, ivec2(0), u_history_size - ivec2(1));
-        return color_history_texel(coordinate.x, coordinate.y);
+        return color_history_texel(
+            coordinate.x,
+            coordinate.y,
+            masking_range(coordinate.x));
     }
 
     vec2 position = uv * vec2(u_history_size) - vec2(0.5);
     ivec2 low = ivec2(floor(position));
     vec2 weight = fract(position);
-    vec4 top = mix(color_history_texel(low.x, low.y),
-                   color_history_texel(low.x + 1, low.y), weight.x);
-    vec4 bottom = mix(color_history_texel(low.x, low.y + 1),
-                      color_history_texel(low.x + 1, low.y + 1), weight.x);
+    ivec2 high = clamp(low + ivec2(1), ivec2(0), u_history_size - ivec2(1));
+    low = clamp(low, ivec2(0), u_history_size - ivec2(1));
+    float low_range = masking_range(low.x);
+    float high_range = masking_range(high.x);
+    vec4 top = mix(color_history_texel(low.x, low.y, low_range),
+                   color_history_texel(high.x, low.y, high_range), weight.x);
+    vec4 bottom = mix(color_history_texel(low.x, high.y, low_range),
+                      color_history_texel(high.x, high.y, high_range), weight.x);
     return mix(top, bottom, weight.y);
 }
 
@@ -475,13 +489,15 @@ impl ShaderRenderer {
                 target_duration,
             );
             self.history_head = 0;
-            resize_zeroed(&mut self.history_staging, width * valid_rows * 4);
+            resize_for_overwrite(&mut self.history_staging, width * valid_rows * 3);
             for age in 0..valid_rows {
                 write_history_row(
                     &mut self.history_staging,
                     age,
                     width,
-                    spectrogram.at_age(age),
+                    spectrogram
+                        .at_age(age)
+                        .expect("validated history rows are retained"),
                 );
             }
             self.pending_history = PendingHistory {
@@ -521,13 +537,15 @@ impl ShaderRenderer {
                 } else {
                     new_valid_rows
                 };
-                resize_zeroed(&mut self.history_staging, width * new_valid_rows * 4);
+                resize_for_overwrite(&mut self.history_staging, width * new_valid_rows * 3);
                 for age in 0..new_valid_rows {
                     write_history_row(
                         &mut self.history_staging,
                         age,
                         width,
-                        spectrogram.at_age(age),
+                        spectrogram
+                            .at_age(age)
+                            .expect("validated history rows are retained"),
                     );
                 }
                 let target_head = (self.history_head + height - changed) % height;
@@ -694,9 +712,8 @@ fn frequency_centers_changed(cached: &[f32], frequencies: &[(f32, f32, f32)]) ->
             .any(|(cached, frequency)| cached.to_bits() != frequency.1.to_bits())
 }
 
-fn resize_zeroed(buffer: &mut Vec<f16>, length: usize) {
+fn resize_for_overwrite(buffer: &mut Vec<f16>, length: usize) {
     buffer.resize(length, f16::ZERO);
-    buffer.fill(f16::ZERO);
 }
 
 fn contiguous_history_rows(
@@ -720,16 +737,13 @@ fn write_history_row(
     buffer: &mut [f16],
     target_row: usize,
     width: usize,
-    analysis: Option<&crate::analyzer::BetterAnalysis>,
+    analysis: &crate::analyzer::BetterAnalysis,
 ) {
-    let Some(analysis) =
-        analysis.filter(|analysis| analysis.data.len() == width && analysis.masking.len() == width)
-    else {
-        return;
-    };
-    let output = &mut buffer[target_row * width * 4..(target_row + 1) * width * 4];
+    debug_assert_eq!(analysis.data.len(), width);
+    debug_assert_eq!(analysis.masking.len(), width);
+    let output = &mut buffer[target_row * width * 3..(target_row + 1) * width * 3];
     // Treat each texel as one item so channel writes need no bounds checks.
-    let (output, remainder) = output.as_chunks_mut::<4>();
+    let (output, remainder) = output.as_chunks_mut::<3>();
     debug_assert!(remainder.is_empty());
     for (output, (&(pan, amplitude), &(_, masking))) in output
         .iter_mut()
@@ -739,7 +753,6 @@ fn write_history_row(
             f16::from_f32(pan),
             finite_half(amplitude),
             finite_half(masking),
-            f16::ONE,
         ];
     }
 }
@@ -1008,7 +1021,7 @@ fn prepare_bar_row(
             }
         }
     }
-    resize_zeroed(output, bins * 4);
+    resize_for_overwrite(output, bins * 4);
     for index in 0..bins {
         let base = index * 4;
         output[base] = f16::from_f32(average_data[index].0 / count);
@@ -1081,7 +1094,7 @@ unsafe fn create_resources(gl: &glow::Context) -> Result<GlResources, String> {
         let bar = gl.create_texture()?;
         let lut = gl.create_texture()?;
         let masking_ranges = gl.create_texture()?;
-        allocate_half_texture(gl, history, 1, 1, glow::RGBA16F, glow::RGBA);
+        allocate_half_texture(gl, history, 1, 1, glow::RGB16F, glow::RGB);
         allocate_half_texture(gl, bar, 1, 1, glow::RGBA16F, glow::RGBA);
         allocate_half_texture(gl, masking_ranges, 1, 1, glow::R16F, glow::RED);
         configure_texture(gl, lut);
@@ -1175,8 +1188,8 @@ unsafe fn upload_pending(
                 resources.history,
                 resources.history_size.0,
                 resources.history_size.1,
-                glow::RGBA16F,
-                glow::RGBA,
+                glow::RGB16F,
+                glow::RGB,
             );
         }
         gl.bind_texture(glow::TEXTURE_2D, Some(resources.history));
@@ -1184,7 +1197,7 @@ unsafe fn upload_pending(
             if range.rows == 0 {
                 continue;
             }
-            let row_values = renderer.pending_history.width * 4;
+            let row_values = renderer.pending_history.width * 3;
             let values = &renderer.history_staging
                 [range.source_row * row_values..(range.source_row + range.rows) * row_values];
             gl.tex_sub_image_2d(
@@ -1194,7 +1207,7 @@ unsafe fn upload_pending(
                 range.target_row as i32,
                 renderer.pending_history.width as i32,
                 range.rows as i32,
-                glow::RGBA,
+                glow::RGB,
                 glow::HALF_FLOAT,
                 glow::PixelUnpackData::Slice(Some(cast_slice(values))),
             );
@@ -1477,7 +1490,7 @@ mod tests {
         let mut renderer = ShaderRenderer::default();
 
         renderer.prepare_history(&spectrogram, spectrogram.render_state(), 2, 8, false);
-        assert_eq!(renderer.history_staging.len(), 2 * 2 * 4);
+        assert_eq!(renderer.history_staging.len(), 2 * 2 * 3);
         assert_eq!(renderer.pending_history.ranges[0].unwrap().rows, 2);
 
         spectrogram.clear();

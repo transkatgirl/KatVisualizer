@@ -403,23 +403,6 @@ dependencies = [
 [[package]]
 name = "baseview"
 version = "0.1.0"
-source = "git+https://github.com/RustAudio/baseview.git?rev=579130ecb4f9f315ae52190af42f0ea46aeaa4a2#579130ecb4f9f315ae52190af42f0ea46aeaa4a2"
-dependencies = [
- "cocoa",
- "core-foundation 0.9.4",
- "keyboard-types",
- "nix 0.22.3",
- "objc",
- "raw-window-handle 0.5.2",
- "uuid 0.8.2",
- "winapi",
- "x11",
- "x11rb",
-]
-
-[[package]]
-name = "baseview"
-version = "0.1.0"
 source = "git+https://github.com/transkatgirl/baseview.git?rev=b6e66adf378d9de4820881491e705ae6b9ca52cd#b6e66adf378d9de4820881491e705ae6b9ca52cd"
 dependencies = [
  "cocoa",
@@ -1209,7 +1192,7 @@ name = "egui-baseview"
 version = "0.7.0"
 source = "git+https://github.com/transkatgirl/egui-baseview.git?rev=956484fa019cbdff6bd590300a3d04969bd4e0a8#956484fa019cbdff6bd590300a3d04969bd4e0a8"
 dependencies = [
- "baseview 0.1.0 (git+https://github.com/transkatgirl/baseview.git?rev=b6e66adf378d9de4820881491e705ae6b9ca52cd)",
+ "baseview",
  "copypasta",
  "egui",
  "egui_glow",
@@ -2365,7 +2348,7 @@ dependencies = [
  "atomic_float",
  "atomic_refcell",
  "backtrace",
- "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=579130ecb4f9f315ae52190af42f0ea46aeaa4a2)",
+ "baseview",
  "bitflags 1.3.2",
  "cfg-if",
  "clap",
@@ -2406,7 +2389,7 @@ name = "nih_plug_egui"
 version = "0.1.0"
 source = "git+https://github.com/transkatgirl/egui-baseview.git?rev=956484fa019cbdff6bd590300a3d04969bd4e0a8#956484fa019cbdff6bd590300a3d04969bd4e0a8"
 dependencies = [
- "baseview 0.1.0 (git+https://github.com/transkatgirl/baseview.git?rev=b6e66adf378d9de4820881491e705ae6b9ca52cd)",
+ "baseview",
  "crossbeam",
  "egui-baseview",
  "nih_plug",
@@ -4760,16 +4743,6 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
-
-[[package]]
-name = "x11"
-version = "2.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "502da5464ccd04011667b11c435cb992822c2c0dbde1770c988480d312a0db2e"
-dependencies = [
- "libc",
- "pkg-config",
-]
 
 [[package]]
 name = "x11-clipboard"
