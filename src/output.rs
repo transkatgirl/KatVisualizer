@@ -72,7 +72,7 @@ mod native {
     }
 
     struct AnalysisSlotRing {
-        slots: Box<[UnsafeCell<AnalysisPacket>]>,
+        slots: Box<[CachePadded<UnsafeCell<AnalysisPacket>>]>,
         published_sequence: CachePadded<AtomicU64>,
         consumer: CachePadded<ConsumerProgress>,
     }
@@ -91,13 +91,13 @@ mod native {
         fn new(slice_capacity: usize) -> Self {
             let slots = (0..TRANSPORT_CAPACITY)
                 .map(|_| {
-                    UnsafeCell::new(AnalysisPacket {
+                    CachePadded::new(UnsafeCell::new(AnalysisPacket {
                         analysis: BetterAnalysis::new(slice_capacity),
                         metrics: AnalysisMetrics::default(),
                         generation: 0,
                         start_ns: 0,
                         end_ns: 0,
-                    })
+                    }))
                 })
                 .collect();
             Self {

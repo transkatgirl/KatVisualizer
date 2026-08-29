@@ -522,9 +522,12 @@ impl SharedState {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn drain_analysis(&mut self) {
-        self.analysis_bridge
+        let mut bridge = self
+            .analysis_bridge
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        bridge.analysis_updates.service();
+        bridge
             .analysis_receiver
             .drain_into(&mut self.spectrogram, &mut self.metrics);
     }
@@ -612,15 +615,7 @@ pub(crate) fn render(
     let frame_elapsed = egui_ctx.input(|input| Duration::from_secs_f32(input.unstable_dt));
 
     #[cfg(not(target_arch = "wasm32"))]
-    {
-        shared_state
-            .analysis_bridge
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .analysis_updates
-            .service();
-        shared_state.drain_analysis();
-    }
+    shared_state.drain_analysis();
 
     #[cfg(not(target_arch = "wasm32"))]
     let frequency_snapshot = analysis_frequencies.load();
