@@ -22,7 +22,10 @@ use nih_plug_egui::{
 use std::{cell::Cell, collections::VecDeque};
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+#[cfg(not(target_arch = "wasm32"))]
+use parking_lot::Mutex;
 
 mod shader_renderer;
 use shader_renderer::ShaderRendererHandle;
@@ -513,7 +516,6 @@ impl SharedState {
         state
             .analysis_bridge
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .analysis_receiver
             .fresh_start(&mut state.spectrogram);
 
@@ -522,10 +524,7 @@ impl SharedState {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn drain_analysis(&mut self) {
-        let mut bridge = self
-            .analysis_bridge
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut bridge = self.analysis_bridge.lock();
         bridge.analysis_updates.service();
         bridge
             .analysis_receiver
@@ -1736,7 +1735,6 @@ pub(crate) fn render(
         shared_state
             .analysis_bridge
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .analysis_updates
             .stage(edited_analysis_settings, clear_history);
         #[cfg(target_arch = "wasm32")]

@@ -1,10 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
-use std::{
-    any::Any,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{any::Any, sync::Arc, time::Duration};
 
 use bytemuck::cast_slice;
 use egui_glow::{
@@ -12,6 +8,7 @@ use egui_glow::{
     glow::{self, HasContext as _},
 };
 use half::f16;
+use parking_lot::Mutex;
 
 use crate::analyzer::{Spectrogram, SpectrogramRenderState, scale_bark};
 
@@ -337,9 +334,7 @@ impl ShaderRendererHandle {
         let callback_state = Arc::clone(&state);
         let callback: Arc<dyn Any + Send + Sync> =
             Arc::new(CallbackFn::new(move |_info, painter| {
-                let mut renderer = callback_state
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let mut renderer = callback_state.lock();
                 if let Err(error) = renderer.paint(painter.gl()) {
                     renderer.error = Some(error);
                 }
@@ -353,10 +348,7 @@ impl ShaderRendererHandle {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn reset_context(&self) {
-        self.state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .reset_context();
+        self.state.lock().reset_context();
     }
 
     pub(super) fn prepare(
@@ -370,35 +362,25 @@ impl ShaderRendererHandle {
         min_db: f32,
         max_db: f32,
     ) {
-        self.state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .prepare(
-                spectrogram,
-                frequencies,
-                color_table,
-                color_revision,
-                settings,
-                masking_enabled,
-                min_db,
-                max_db,
-            );
+        self.state.lock().prepare(
+            spectrogram,
+            frequencies,
+            color_table,
+            color_revision,
+            settings,
+            masking_enabled,
+            min_db,
+            max_db,
+        );
     }
 
     #[cfg(target_arch = "wasm32")]
     pub(super) fn initialize(&self, gl: &glow::Context) -> Result<(), String> {
-        self.state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .initialize(gl)
+        self.state.lock().initialize(gl)
     }
 
     pub(super) fn error(&self) -> Option<String> {
-        self.state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .error
-            .clone()
+        self.state.lock().error.clone()
     }
 }
 

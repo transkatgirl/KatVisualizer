@@ -33,6 +33,7 @@ color     = "0.3.3"
 egui_glow = "0.33.3"
 fast-math = "0.1.1"
 half      = { version = "2.7.1", features = ["bytemuck"] }
+parking_lot = "0.12.5"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 arc-swap = "1.7.1"

@@ -6,7 +6,10 @@ use mimalloc::MiMalloc;
 use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+#[cfg(not(target_arch = "wasm32"))]
+use parking_lot::Mutex;
 
 #[cfg(not(target_arch = "wasm32"))]
 use arc_swap::{ArcSwap, ArcSwapOption};
@@ -882,9 +885,7 @@ mod update_tests {
             ..AnalysisChainConfig::default()
         };
         {
-            let mut bridge = bridge
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut bridge = bridge.lock();
             bridge.analysis_updates.last_queued = base;
             bridge.analysis_updates.desired_config.store(Arc::new(base));
         }
@@ -931,7 +932,6 @@ mod update_tests {
         std::thread::spawn(move || {
             first_render_bridge
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .analysis_updates
                 .stage(AnalysisChainConfig { gain: 1.0, ..base }, false);
         })
@@ -957,7 +957,6 @@ mod update_tests {
         std::thread::spawn(move || {
             second_render_bridge
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .analysis_updates
                 .stage(AnalysisChainConfig { gain: 2.0, ..base }, false);
         })
@@ -970,9 +969,7 @@ mod update_tests {
     #[test]
     fn runtime_update_preserves_structural_analyzers() {
         let (mut plugin, bridge, base) = configured_plugin();
-        let mut bridge = bridge
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut bridge = bridge.lock();
         let sender = &mut bridge.analysis_updates;
         let frequencies = plugin
             .analysis_chain
@@ -994,9 +991,7 @@ mod update_tests {
     #[test]
     fn structural_update_swaps_and_reclaims_on_ui_side() {
         let (mut plugin, bridge, base) = configured_plugin();
-        let mut bridge = bridge
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut bridge = bridge.lock();
         let sender = &mut bridge.analysis_updates;
         let updated = AnalysisChainConfig {
             resolution: 192,
@@ -1016,9 +1011,7 @@ mod update_tests {
     #[test]
     fn reinitialization_wins_over_stale_frequency_acknowledgement() {
         let (mut plugin, bridge, base) = configured_plugin();
-        let mut bridge = bridge
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut bridge = bridge.lock();
         let sender = &mut bridge.analysis_updates;
         sender.stage(
             AnalysisChainConfig {
@@ -1047,9 +1040,7 @@ mod update_tests {
     #[test]
     fn stale_structural_update_is_reclaimed_without_application() {
         let (mut plugin, bridge, base) = configured_plugin();
-        let mut bridge = bridge
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut bridge = bridge.lock();
         let sender = &mut bridge.analysis_updates;
         sender.stage(
             AnalysisChainConfig {
@@ -1070,9 +1061,7 @@ mod update_tests {
     #[test]
     fn structural_update_racing_reinitialization_is_reprepared() {
         let (mut plugin, bridge, base) = configured_plugin();
-        let mut bridge = bridge
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut bridge = bridge.lock();
         let sender = &mut bridge.analysis_updates;
 
         // `initialize()` may have already snapshotted the old desired config
@@ -1108,9 +1097,7 @@ mod update_tests {
     #[test]
     fn full_update_queue_coalesces_latest_and_retains_history_reset() {
         let (mut plugin, bridge, base) = configured_plugin();
-        let mut bridge = bridge
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut bridge = bridge.lock();
         let sender = &mut bridge.analysis_updates;
         sender.stage(AnalysisChainConfig { gain: 1.0, ..base }, false);
         sender.stage(AnalysisChainConfig { gain: 2.0, ..base }, true);
@@ -1128,9 +1115,7 @@ mod update_tests {
     #[test]
     fn structural_preparation_waits_for_update_queue_capacity() {
         let (mut plugin, bridge, base) = configured_plugin();
-        let mut bridge = bridge
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut bridge = bridge.lock();
         let sender = &mut bridge.analysis_updates;
         sender.stage(AnalysisChainConfig { gain: 1.0, ..base }, false);
         sender.stage(
@@ -1160,9 +1145,7 @@ mod update_tests {
     #[test]
     fn retained_structural_preparation_tracks_latest_chunk_size() {
         let (mut plugin, bridge, base) = configured_plugin();
-        let mut bridge = bridge
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut bridge = bridge.lock();
         let sender = &mut bridge.analysis_updates;
         let runtime = AnalysisChainConfig {
             update_rate_hz: 1_000.0,
@@ -1200,9 +1183,7 @@ mod update_tests {
     #[test]
     fn structural_update_waits_for_reclaim_capacity() {
         let (mut plugin, bridge, base) = configured_plugin();
-        let mut bridge = bridge
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut bridge = bridge.lock();
         let sender = &mut bridge.analysis_updates;
         sender.stage(
             AnalysisChainConfig {
@@ -1230,9 +1211,7 @@ mod update_tests {
     #[test]
     fn history_reset_occurs_at_update_block_boundary() {
         let (mut plugin, bridge, base) = configured_plugin();
-        let mut bridge = bridge
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut bridge = bridge.lock();
         let sender = &mut bridge.analysis_updates;
         let generation = plugin.analysis_sink.generation();
         sender.stage(AnalysisChainConfig { gain: 1.0, ..base }, true);

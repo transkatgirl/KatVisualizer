@@ -2053,6 +2053,7 @@ dependencies = [
  "mimalloc",
  "nih_plug",
  "nih_plug_egui",
+ "parking_lot",
  "rtrb 0.4.0",
  "wasm-bindgen",
  "wasm-bindgen-futures",
