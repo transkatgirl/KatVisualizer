@@ -19,7 +19,7 @@ use nih_plug_egui::{
     },
     resizable_window::paint_resize_corner,
 };
-use std::cell::Cell;
+use std::{cell::Cell, collections::VecDeque};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
@@ -48,33 +48,144 @@ use crate::{
     },
 };
 
-fn calculate_volume_min_max(settings: &RenderSettings, spectrogram: &Spectrogram) -> (f32, f32) {
+#[derive(Clone, Copy)]
+struct AutomaticGainEntry {
+    duration: Duration,
+    masking_mean: Option<f32>,
+}
+
+#[derive(Default)]
+struct AutomaticGainCache {
+    state: Option<crate::analyzer::SpectrogramRenderState>,
+    duration: Duration,
+    entries: VecDeque<AutomaticGainEntry>,
+    masking_sum: f64,
+    finite_rows: usize,
+    elapsed: Duration,
+}
+
+impl AutomaticGainCache {
+    fn invalidate(&mut self) {
+        self.state = None;
+        self.entries.clear();
+        self.masking_sum = 0.0;
+        self.finite_rows = 0;
+        self.elapsed = Duration::ZERO;
+    }
+
+    fn rebuild(&mut self, spectrogram: &Spectrogram, duration: Duration) {
+        self.invalidate();
+        self.duration = duration;
+        let state = spectrogram.render_state();
+        for row in spectrogram.newest_to_oldest().take(state.valid_rows) {
+            self.push_back(AutomaticGainEntry::from_analysis(row));
+            if self.elapsed >= duration {
+                break;
+            }
+        }
+        self.state = Some(state);
+    }
+
+    fn update(&mut self, spectrogram: &Spectrogram, duration: Duration) {
+        let state = spectrogram.render_state();
+        let Some(old_state) = self.state else {
+            self.rebuild(spectrogram, duration);
+            return;
+        };
+        let revision_overflow =
+            state.revision < old_state.revision && state.epoch == old_state.epoch;
+        let changed_u64 = state.revision.wrapping_sub(old_state.revision);
+        let changed = usize::try_from(changed_u64).ok();
+        if state.epoch != old_state.epoch
+            || revision_overflow
+            || self.duration != duration
+            || changed.is_none_or(|changed| changed >= state.retained_rows)
+        {
+            self.rebuild(spectrogram, duration);
+            return;
+        }
+
+        let changed = changed.unwrap();
+        if changed == 0 {
+            return;
+        }
+        for age in (0..changed.min(state.valid_rows)).rev() {
+            let row = spectrogram
+                .at_age(age)
+                .expect("new automatic-gain rows are retained");
+            self.push_front(AutomaticGainEntry::from_analysis(row));
+        }
+        while self.entries.len() > state.valid_rows {
+            self.pop_back();
+        }
+        while self.entries.len() > 1
+            && self
+                .entries
+                .back()
+                .is_some_and(|entry| self.elapsed.saturating_sub(entry.duration) >= duration)
+        {
+            self.pop_back();
+        }
+        self.state = Some(state);
+    }
+
+    fn push_front(&mut self, entry: AutomaticGainEntry) {
+        self.add(entry);
+        self.entries.push_front(entry);
+    }
+
+    fn push_back(&mut self, entry: AutomaticGainEntry) {
+        self.add(entry);
+        self.entries.push_back(entry);
+    }
+
+    fn pop_back(&mut self) {
+        if let Some(entry) = self.entries.pop_back() {
+            self.elapsed = self.elapsed.saturating_sub(entry.duration);
+            if let Some(masking) = entry.masking_mean {
+                self.masking_sum -= f64::from(masking);
+                self.finite_rows -= 1;
+            }
+        }
+    }
+
+    fn add(&mut self, entry: AutomaticGainEntry) {
+        self.elapsed = self.elapsed.saturating_add(entry.duration);
+        if let Some(masking) = entry.masking_mean {
+            self.masking_sum += f64::from(masking);
+            self.finite_rows += 1;
+        }
+    }
+}
+
+impl AutomaticGainEntry {
+    fn from_analysis(analysis: &crate::analyzer::BetterAnalysis) -> Self {
+        Self {
+            duration: analysis.duration,
+            masking_mean: analysis
+                .masking_mean
+                .is_finite()
+                .then_some(analysis.masking_mean),
+        }
+    }
+}
+
+fn calculate_volume_min_max(
+    settings: &RenderSettings,
+    spectrogram: &Spectrogram,
+    cache: &mut AutomaticGainCache,
+) -> (f32, f32) {
     if !settings.automatic_gain || !spectrogram.newest().masking_mean.is_finite() {
+        cache.invalidate();
         return (settings.min_db, settings.max_db);
     }
 
-    let mut elapsed = Duration::ZERO;
-
-    let mut masking_sum = 0.0;
-    let mut rows: usize = 0;
-
-    for row in spectrogram.newest_to_oldest() {
-        elapsed += row.duration;
-        if row.masking_mean.is_finite() {
-            masking_sum += row.masking_mean as f64;
-            rows += 1;
-        }
-
-        if elapsed >= settings.agc_duration {
-            break;
-        }
-    }
-
-    if rows == 0 {
+    cache.update(spectrogram, settings.agc_duration);
+    if cache.finite_rows == 0 {
         return (settings.min_db, settings.max_db);
     }
 
-    let masking = (masking_sum / rows as f64) as f32;
+    let masking = (cache.masking_sum / cache.finite_rows as f64) as f32;
 
     (
         (masking - settings.agc_below_masking).clamp(settings.agc_minimum, settings.agc_maximum),
@@ -367,6 +478,7 @@ pub(crate) struct SharedState {
     analysis_updates: AnalysisUpdateSender,
     shader_renderer: ShaderRendererHandle,
     color_table_revision: u64,
+    automatic_gain_cache: AutomaticGainCache,
 }
 
 impl SharedState {
@@ -401,6 +513,7 @@ impl SharedState {
             analysis_updates,
             shader_renderer: ShaderRendererHandle::new(),
             color_table_revision: 1,
+            automatic_gain_cache: AutomaticGainCache::default(),
         };
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -568,7 +681,11 @@ pub(crate) fn render(
         let processing_duration = metrics.processing;
         let chunk_duration = front.duration;
 
-        let (min_db, max_db) = calculate_volume_min_max(&settings, spectrogram);
+        let (min_db, max_db) = calculate_volume_min_max(
+            &settings,
+            spectrogram,
+            &mut shared_state.automatic_gain_cache,
+        );
 
         #[cfg(not(target_arch = "wasm32"))]
         let frequencies = frequency_snapshot.frequencies.as_slice();
@@ -1626,4 +1743,135 @@ pub(crate) fn render(
     }
 
     shared_state.rasterize_duration = start.elapsed();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn push_masking_row(spectrogram: &mut Spectrogram, duration: Duration, masking_mean: f32) {
+        spectrogram.update_with(|row| {
+            row.duration = duration;
+            row.data.resize(1, (0.0, masking_mean));
+            row.masking.resize(1, (0.0, masking_mean));
+            row.masking_mean = masking_mean;
+        });
+    }
+
+    fn reference_volume_min_max(
+        settings: &RenderSettings,
+        spectrogram: &Spectrogram,
+    ) -> (f32, f32) {
+        if !settings.automatic_gain || !spectrogram.newest().masking_mean.is_finite() {
+            return (settings.min_db, settings.max_db);
+        }
+
+        let mut elapsed = Duration::ZERO;
+        let mut masking_sum = 0.0;
+        let mut rows = 0usize;
+        for row in spectrogram.newest_to_oldest() {
+            elapsed += row.duration;
+            if row.masking_mean.is_finite() {
+                masking_sum += f64::from(row.masking_mean);
+                rows += 1;
+            }
+            if elapsed >= settings.agc_duration {
+                break;
+            }
+        }
+        if rows == 0 {
+            return (settings.min_db, settings.max_db);
+        }
+
+        let masking = (masking_sum / rows as f64) as f32;
+        (
+            (masking - settings.agc_below_masking)
+                .clamp(settings.agc_minimum, settings.agc_maximum),
+            (masking + settings.agc_above_masking)
+                .clamp(settings.agc_minimum, settings.agc_maximum),
+        )
+    }
+
+    fn assert_range_close(actual: (f32, f32), expected: (f32, f32)) {
+        assert!((actual.0 - expected.0).abs() < 0.000_01);
+        assert!((actual.1 - expected.1).abs() < 0.000_01);
+    }
+
+    #[test]
+    fn automatic_gain_cache_matches_full_scan_through_updates_and_eviction() {
+        let mut spectrogram = Spectrogram::new(4, 1);
+        let mut settings = RenderSettings {
+            agc_duration: Duration::from_millis(25),
+            ..RenderSettings::default()
+        };
+        let mut cache = AutomaticGainCache::default();
+
+        for (duration, masking) in [
+            (10, -40.0),
+            (10, -30.0),
+            (5, -20.0),
+            (20, -10.0),
+            (10, -50.0),
+            (5, -25.0),
+        ] {
+            push_masking_row(&mut spectrogram, Duration::from_millis(duration), masking);
+            let expected = reference_volume_min_max(&settings, &spectrogram);
+            let actual = calculate_volume_min_max(&settings, &spectrogram, &mut cache);
+            assert_range_close(actual, expected);
+
+            let state = cache.state;
+            let unchanged = calculate_volume_min_max(&settings, &spectrogram, &mut cache);
+            assert_range_close(unchanged, expected);
+            assert_eq!(cache.state, state);
+        }
+
+        settings.agc_duration = Duration::from_millis(60);
+        assert_range_close(
+            calculate_volume_min_max(&settings, &spectrogram, &mut cache),
+            reference_volume_min_max(&settings, &spectrogram),
+        );
+    }
+
+    #[test]
+    fn automatic_gain_cache_handles_blank_rows_clears_and_manual_mode() {
+        let mut spectrogram = Spectrogram::new(8, 1);
+        let mut settings = RenderSettings {
+            agc_duration: Duration::from_millis(35),
+            ..RenderSettings::default()
+        };
+        let mut cache = AutomaticGainCache::default();
+
+        push_masking_row(&mut spectrogram, Duration::from_millis(10), -30.0);
+        let _ = calculate_volume_min_max(&settings, &spectrogram, &mut cache);
+        push_masking_row(
+            &mut spectrogram,
+            Duration::from_millis(10),
+            f32::NEG_INFINITY,
+        );
+        assert_eq!(
+            calculate_volume_min_max(&settings, &spectrogram, &mut cache),
+            (settings.min_db, settings.max_db)
+        );
+        assert!(cache.state.is_none());
+
+        push_masking_row(&mut spectrogram, Duration::from_millis(10), -10.0);
+        assert_range_close(
+            calculate_volume_min_max(&settings, &spectrogram, &mut cache),
+            reference_volume_min_max(&settings, &spectrogram),
+        );
+
+        spectrogram.clear();
+        push_masking_row(&mut spectrogram, Duration::from_millis(5), -20.0);
+        assert_range_close(
+            calculate_volume_min_max(&settings, &spectrogram, &mut cache),
+            reference_volume_min_max(&settings, &spectrogram),
+        );
+
+        settings.automatic_gain = false;
+        assert_eq!(
+            calculate_volume_min_max(&settings, &spectrogram, &mut cache),
+            (settings.min_db, settings.max_db)
+        );
+        assert!(cache.state.is_none());
+    }
 }

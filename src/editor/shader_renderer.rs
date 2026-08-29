@@ -200,6 +200,21 @@ struct PendingHistory {
     target_duration: Option<Duration>,
 }
 
+#[derive(Default)]
+struct BarCache {
+    state: Option<SpectrogramRenderState>,
+    averaging: Duration,
+    include_masking: bool,
+    width: usize,
+    duration: Option<Duration>,
+    contiguous_rows: usize,
+    window_rows: usize,
+    data_sums: Vec<(f64, f64)>,
+    amplitude_non_finite: Vec<usize>,
+    masking_sums: Vec<f64>,
+    masking_non_finite: Vec<usize>,
+}
+
 struct GlResources {
     program: glow::Program,
     uniforms: Uniforms,
@@ -309,8 +324,7 @@ struct ShaderRenderer {
     max_texture_size: Option<usize>,
     history_staging: Vec<f16>,
     bar_staging: Vec<f16>,
-    average_data: Vec<(f32, f32)>,
-    average_masking: Vec<f32>,
+    bar_cache: BarCache,
     lut_staging: Vec<u8>,
     masking_staging: Vec<f16>,
     masking_centers: Vec<f32>,
@@ -323,8 +337,10 @@ struct ShaderRenderer {
     staged_duration: Option<Duration>,
     staged_height: usize,
     staged_width: usize,
+    staged_valid_rows: usize,
     history_head: usize,
     was_spectrogram_visible: bool,
+    was_bar_visible: bool,
     color_revision: Option<u64>,
     lut_size: (usize, usize),
 }
@@ -392,18 +408,18 @@ impl ShaderRenderer {
         }
 
         if show_bar {
-            prepare_bar_row(
+            let bar_changed = prepare_bar_row_cached(
                 spectrogram,
                 settings.bargraph_averaging,
                 self.frame.show_masking,
-                &mut self.average_data,
-                &mut self.average_masking,
+                &mut self.bar_cache,
                 &mut self.bar_staging,
             );
-            self.bar_dirty = true;
+            self.bar_dirty |= bar_changed || !self.was_bar_visible;
         } else {
             self.bar_dirty = false;
         }
+        self.was_bar_visible = show_bar;
 
         if show_spectrogram {
             let state = spectrogram.render_state();
@@ -441,16 +457,15 @@ impl ShaderRenderer {
             || height != self.staged_height
             || self.staged_duration != Some(target_duration);
 
-        let valid_rows = contiguous_history_rows(
-            spectrogram,
-            state.valid_rows.min(height),
-            width,
-            target_duration,
-        );
-
         if rebuild {
+            let valid_rows = contiguous_history_rows(
+                spectrogram,
+                state.valid_rows.min(height),
+                width,
+                target_duration,
+            );
             self.history_head = 0;
-            resize_zeroed(&mut self.history_staging, width * height * 4);
+            resize_zeroed(&mut self.history_staging, width * valid_rows * 4);
             for age in 0..valid_rows {
                 write_history_row(
                     &mut self.history_staging,
@@ -466,10 +481,10 @@ impl ShaderRenderer {
                 valid_rows,
                 rebuild: true,
                 ranges: [
-                    Some(UploadRange {
+                    (valid_rows > 0).then_some(UploadRange {
                         source_row: 0,
                         target_row: 0,
-                        rows: height,
+                        rows: valid_rows,
                     }),
                     None,
                 ],
@@ -480,13 +495,24 @@ impl ShaderRenderer {
             let old = previous.unwrap();
             let changed = state.revision.wrapping_sub(old.revision) as usize;
             if changed == 0 {
-                self.pending_history.valid_rows = valid_rows;
+                self.pending_history.valid_rows =
+                    self.staged_valid_rows.min(state.valid_rows).min(height);
             } else if changed >= height {
                 self.prepare_history(spectrogram, state, width, height, true);
-                return;
             } else {
-                resize_zeroed(&mut self.history_staging, width * changed * 4);
-                for age in 0..changed {
+                let changed_to_check = changed.min(state.valid_rows).min(height);
+                let new_valid_rows =
+                    contiguous_history_rows(spectrogram, changed_to_check, width, target_duration);
+                let valid_rows = if new_valid_rows == changed_to_check {
+                    changed
+                        .saturating_add(self.staged_valid_rows)
+                        .min(state.valid_rows)
+                        .min(height)
+                } else {
+                    new_valid_rows
+                };
+                resize_zeroed(&mut self.history_staging, width * new_valid_rows * 4);
+                for age in 0..new_valid_rows {
                     write_history_row(
                         &mut self.history_staging,
                         age,
@@ -495,8 +521,8 @@ impl ShaderRenderer {
                     );
                 }
                 let target_head = (self.history_head + height - changed) % height;
-                let first_rows = changed.min(height - target_head);
-                let second_rows = changed - first_rows;
+                let first_rows = new_valid_rows.min(height - target_head);
+                let second_rows = new_valid_rows - first_rows;
                 self.pending_history = PendingHistory {
                     width,
                     height,
@@ -504,7 +530,7 @@ impl ShaderRenderer {
                     valid_rows,
                     rebuild: false,
                     ranges: [
-                        Some(UploadRange {
+                        (first_rows > 0).then_some(UploadRange {
                             source_row: 0,
                             target_row: target_head,
                             rows: first_rows,
@@ -528,6 +554,7 @@ impl ShaderRenderer {
             self.staged_width = self.pending_history.width;
             self.staged_height = self.pending_history.height;
             self.history_head = self.pending_history.head;
+            self.staged_valid_rows = self.pending_history.valid_rows;
             self.staged_duration = self.pending_history.target_duration.take();
         }
     }
@@ -549,20 +576,7 @@ impl ShaderRenderer {
         }
         self.initialize(gl)?;
         if let Some(limit) = self.max_texture_size {
-            if self.pending_history.height > limit {
-                self.pending_history.height = limit;
-                self.pending_history.valid_rows = self.pending_history.valid_rows.min(limit);
-                self.pending_history.head = 0;
-                self.pending_history.rebuild = true;
-                self.pending_history.ranges = [
-                    Some(UploadRange {
-                        source_row: 0,
-                        target_row: 0,
-                        rows: limit,
-                    }),
-                    None,
-                ];
-            }
+            clamp_pending_history(&mut self.pending_history, limit);
         }
         let mut resources = self.gl.take().unwrap();
         unsafe {
@@ -627,6 +641,24 @@ impl ShaderRenderer {
         self.gl = Some(resources);
         Ok(())
     }
+}
+
+fn clamp_pending_history(pending: &mut PendingHistory, limit: usize) {
+    if pending.height <= limit {
+        return;
+    }
+    pending.height = limit;
+    pending.valid_rows = pending.valid_rows.min(limit);
+    pending.head = 0;
+    pending.rebuild = true;
+    pending.ranges = [
+        (pending.valid_rows > 0).then_some(UploadRange {
+            source_row: 0,
+            target_row: 0,
+            rows: pending.valid_rows,
+        }),
+        None,
+    ];
 }
 
 fn requested_history_height(
@@ -701,6 +733,216 @@ fn finite_half(value: f32) -> f16 {
     f16::from_f32(if value.is_finite() { value } else { -65504.0 })
 }
 
+fn prepare_bar_row_cached(
+    spectrogram: &Spectrogram,
+    averaging: Duration,
+    include_masking: bool,
+    cache: &mut BarCache,
+    output: &mut Vec<f16>,
+) -> bool {
+    let state = spectrogram.render_state();
+    let front = spectrogram.newest();
+    let width = front.data.len();
+    let duration = front.duration;
+
+    let Some(old_state) = cache.state else {
+        rebuild_bar_cache(spectrogram, averaging, include_masking, cache, output);
+        return true;
+    };
+    let same_key = old_state.epoch == state.epoch
+        && cache.averaging == averaging
+        && cache.include_masking == include_masking
+        && cache.width == width
+        && cache.duration == Some(duration);
+    let revision_overflow = state.revision < old_state.revision && state.epoch == old_state.epoch;
+    if !same_key || revision_overflow {
+        rebuild_bar_cache(spectrogram, averaging, include_masking, cache, output);
+        return true;
+    }
+
+    let changed_u64 = state.revision.wrapping_sub(old_state.revision);
+    if changed_u64 == 0 {
+        return false;
+    }
+    let Ok(changed) = usize::try_from(changed_u64) else {
+        rebuild_bar_cache(spectrogram, averaging, include_masking, cache, output);
+        return true;
+    };
+    if changed >= state.retained_rows {
+        rebuild_bar_cache(spectrogram, averaging, include_masking, cache, output);
+        return true;
+    }
+
+    let new_rows = changed.min(state.valid_rows);
+    let new_rows_are_contiguous = spectrogram
+        .newest_to_oldest()
+        .take(new_rows)
+        .all(|row| row.duration == duration && row.data.len() == width);
+    if !new_rows_are_contiguous || changed.saturating_add(cache.window_rows) > state.retained_rows {
+        rebuild_bar_cache(spectrogram, averaging, include_masking, cache, output);
+        return true;
+    }
+
+    let contiguous_rows = changed
+        .saturating_add(cache.contiguous_rows)
+        .min(state.valid_rows.max(1))
+        .min(state.retained_rows);
+    let window_rows = bar_window_rows(duration, averaging, contiguous_rows);
+    let retained_old_rows = cache.window_rows.min(window_rows.saturating_sub(changed));
+
+    for old_age in retained_old_rows..cache.window_rows {
+        let row = spectrogram
+            .at_age(changed + old_age)
+            .expect("incremental bar cache only uses retained rows");
+        accumulate_bar_row(cache, row, -1.0);
+    }
+    for age in 0..changed.min(window_rows) {
+        let row = spectrogram
+            .at_age(age)
+            .expect("new spectrogram rows are retained");
+        accumulate_bar_row(cache, row, 1.0);
+    }
+    for age in changed.saturating_add(cache.window_rows)..window_rows {
+        let row = spectrogram
+            .at_age(age)
+            .expect("expanded bar window rows are retained");
+        accumulate_bar_row(cache, row, 1.0);
+    }
+
+    cache.state = Some(state);
+    cache.contiguous_rows = contiguous_rows;
+    cache.window_rows = window_rows;
+    write_cached_bar_row(cache, state.valid_rows > 0, output);
+    true
+}
+
+fn rebuild_bar_cache(
+    spectrogram: &Spectrogram,
+    averaging: Duration,
+    include_masking: bool,
+    cache: &mut BarCache,
+    output: &mut Vec<f16>,
+) {
+    let state = spectrogram.render_state();
+    let front = spectrogram.newest();
+    let width = front.data.len();
+    let duration = front.duration;
+    let contiguous_rows = spectrogram
+        .newest_to_oldest()
+        .take(state.valid_rows.max(1).min(state.retained_rows))
+        .take_while(|row| row.duration == duration && row.data.len() == width)
+        .count();
+    let window_rows = bar_window_rows(duration, averaging, contiguous_rows);
+
+    cache.include_masking = include_masking;
+    cache.data_sums.resize(width, (0.0, 0.0));
+    cache.data_sums.fill((0.0, 0.0));
+    cache.amplitude_non_finite.resize(width, 0);
+    cache.amplitude_non_finite.fill(0);
+    if include_masking {
+        cache.masking_sums.resize(width, 0.0);
+        cache.masking_sums.fill(0.0);
+        cache.masking_non_finite.resize(width, 0);
+        cache.masking_non_finite.fill(0);
+    } else {
+        cache.masking_sums.clear();
+        cache.masking_non_finite.clear();
+    }
+    for age in 0..window_rows {
+        let row = spectrogram
+            .at_age(age)
+            .expect("bar window is bounded by retained history");
+        accumulate_bar_row(cache, row, 1.0);
+    }
+
+    cache.state = Some(state);
+    cache.averaging = averaging;
+    cache.width = width;
+    cache.duration = Some(duration);
+    cache.contiguous_rows = contiguous_rows;
+    cache.window_rows = window_rows;
+    write_cached_bar_row(cache, state.valid_rows > 0, output);
+}
+
+fn accumulate_bar_row(cache: &mut BarCache, row: &crate::analyzer::BetterAnalysis, sign: f64) {
+    for ((sum, non_finite), &(pan, amplitude)) in cache
+        .data_sums
+        .iter_mut()
+        .zip(&mut cache.amplitude_non_finite)
+        .zip(&row.data)
+    {
+        sum.0 += f64::from(pan) * sign;
+        accumulate_finite(&mut sum.1, non_finite, amplitude, sign);
+    }
+    if cache.include_masking {
+        for ((sum, non_finite), &(_, masking)) in cache
+            .masking_sums
+            .iter_mut()
+            .zip(&mut cache.masking_non_finite)
+            .zip(&row.masking)
+        {
+            accumulate_finite(sum, non_finite, masking, sign);
+        }
+    }
+}
+
+fn accumulate_finite(sum: &mut f64, non_finite: &mut usize, value: f32, sign: f64) {
+    if value.is_finite() {
+        *sum += f64::from(value) * sign;
+    } else if sign.is_sign_positive() {
+        *non_finite += 1;
+    } else {
+        *non_finite = non_finite.saturating_sub(1);
+    }
+}
+
+fn write_cached_bar_row(cache: &BarCache, valid: bool, output: &mut Vec<f16>) {
+    output.resize(cache.width * 4, f16::ZERO);
+    let count = cache.window_rows.max(1) as f64;
+    for index in 0..cache.width {
+        let base = index * 4;
+        output[base] = f16::from_f32((cache.data_sums[index].0 / count) as f32);
+        output[base + 1] = finite_half(if cache.amplitude_non_finite[index] == 0 {
+            (cache.data_sums[index].1 / count) as f32
+        } else {
+            f32::NEG_INFINITY
+        });
+        output[base + 2] = if cache.include_masking {
+            finite_half(if cache.masking_non_finite[index] == 0 {
+                (cache.masking_sums[index] / count) as f32
+            } else {
+                f32::NEG_INFINITY
+            })
+        } else {
+            f16::ZERO
+        };
+        output[base + 3] = if valid { f16::ONE } else { f16::ZERO };
+    }
+}
+
+fn bar_window_rows(duration: Duration, averaging: Duration, contiguous_rows: usize) -> usize {
+    if averaging.is_zero() {
+        return 1;
+    }
+    let eligible = if duration.is_zero() {
+        contiguous_rows
+    } else {
+        let mut max_index = (averaging.as_secs_f64() / duration.as_secs_f64()).floor() as usize;
+        max_index = max_index.min(contiguous_rows.saturating_sub(1));
+        while max_index > 0 && duration.mul_f32(max_index as f32) > averaging {
+            max_index -= 1;
+        }
+        while max_index + 1 < contiguous_rows
+            && duration.mul_f32((max_index + 1) as f32) <= averaging
+        {
+            max_index += 1;
+        }
+        max_index + 1
+    };
+    if eligible > 2 { eligible } else { 1 }
+}
+
+#[cfg(test)]
 fn prepare_bar_row(
     spectrogram: &Spectrogram,
     averaging: Duration,
@@ -747,6 +989,7 @@ fn prepare_bar_row(
     }
 }
 
+#[cfg(test)]
 fn averaging_count(spectrogram: &Spectrogram, averaging: Duration) -> usize {
     let front = spectrogram.newest();
     if averaging.is_zero() {
@@ -1176,6 +1419,10 @@ mod tests {
         renderer.pending_history.rebuild = false;
         renderer.pending_history.ranges = [None, None];
 
+        renderer.prepare_history(&spectrogram, spectrogram.render_state(), 2, 4, false);
+        assert!(!renderer.pending_history.rebuild);
+        assert!(renderer.pending_history.ranges.iter().all(Option::is_none));
+
         push_row(&mut spectrogram, Duration::from_millis(10), 3.0);
         renderer.prepare_history(&spectrogram, spectrogram.render_state(), 2, 4, false);
         assert!(!renderer.pending_history.rebuild);
@@ -1187,6 +1434,54 @@ mod tests {
         renderer.prepare_history(&spectrogram, spectrogram.render_state(), 2, 4, false);
         assert!(renderer.pending_history.rebuild);
         assert_eq!(renderer.pending_history.valid_rows, 0);
+    }
+
+    #[test]
+    fn history_rebuild_stages_and_uploads_only_valid_rows() {
+        let mut spectrogram = Spectrogram::new(8, 2);
+        push_row(&mut spectrogram, Duration::from_millis(10), 1.0);
+        push_row(&mut spectrogram, Duration::from_millis(10), 2.0);
+        let mut renderer = ShaderRenderer::default();
+
+        renderer.prepare_history(&spectrogram, spectrogram.render_state(), 2, 8, false);
+        assert_eq!(renderer.history_staging.len(), 2 * 2 * 4);
+        assert_eq!(renderer.pending_history.ranges[0].unwrap().rows, 2);
+
+        spectrogram.clear();
+        renderer.prepare_history(&spectrogram, spectrogram.render_state(), 2, 8, false);
+        assert!(renderer.history_staging.is_empty());
+        assert!(renderer.pending_history.ranges.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn hardware_clamp_never_uploads_more_than_valid_rows() {
+        let mut pending = PendingHistory {
+            width: 2,
+            height: 16,
+            head: 7,
+            valid_rows: 3,
+            rebuild: false,
+            ranges: [
+                Some(UploadRange {
+                    source_row: 0,
+                    target_row: 7,
+                    rows: 3,
+                }),
+                None,
+            ],
+            target_state: None,
+            target_duration: None,
+        };
+        clamp_pending_history(&mut pending, 8);
+        assert_eq!(pending.height, 8);
+        assert_eq!(pending.head, 0);
+        assert!(pending.rebuild);
+        assert_eq!(pending.ranges[0].unwrap().rows, 3);
+
+        pending.height = 16;
+        pending.valid_rows = 0;
+        clamp_pending_history(&mut pending, 8);
+        assert!(pending.ranges.iter().all(Option::is_none));
     }
 
     #[test]
@@ -1218,7 +1513,8 @@ mod tests {
 
     #[test]
     fn revision_overflow_forces_a_full_rebuild() {
-        let spectrogram = Spectrogram::new(4, 2);
+        let mut spectrogram = Spectrogram::new(4, 2);
+        push_row(&mut spectrogram, Duration::from_millis(10), 1.0);
         let mut renderer = ShaderRenderer::default();
         renderer.staged_state = Some(SpectrogramRenderState {
             epoch: 0,
@@ -1230,7 +1526,7 @@ mod tests {
         renderer.staged_height = 4;
         renderer.prepare_history(&spectrogram, spectrogram.render_state(), 2, 4, false);
         assert!(renderer.pending_history.rebuild);
-        assert_eq!(renderer.pending_history.ranges[0].unwrap().rows, 4);
+        assert_eq!(renderer.pending_history.ranges[0].unwrap().rows, 1);
     }
 
     #[test]
@@ -1284,6 +1580,178 @@ mod tests {
     }
 
     #[test]
+    fn cached_bar_matches_full_aggregation_and_skips_unchanged_revisions() {
+        let mut spectrogram = Spectrogram::new(8, 2);
+        let mut cache = BarCache::default();
+        let mut cached = Vec::new();
+
+        for value in 1..=12 {
+            push_row(&mut spectrogram, Duration::from_millis(10), value as f32);
+            assert!(prepare_bar_row_cached(
+                &spectrogram,
+                Duration::from_millis(35),
+                true,
+                &mut cache,
+                &mut cached,
+            ));
+
+            let mut data = Vec::new();
+            let mut masking = Vec::new();
+            let mut reference = Vec::new();
+            prepare_bar_row(
+                &spectrogram,
+                Duration::from_millis(35),
+                true,
+                &mut data,
+                &mut masking,
+                &mut reference,
+            );
+            assert_eq!(cached.len(), reference.len());
+            for (cached, reference) in cached.iter().zip(reference) {
+                assert!((cached.to_f32() - reference.to_f32()).abs() <= 0.002);
+            }
+
+            let unchanged = cached.clone();
+            assert!(!prepare_bar_row_cached(
+                &spectrogram,
+                Duration::from_millis(35),
+                true,
+                &mut cache,
+                &mut cached,
+            ));
+            assert_eq!(cached, unchanged);
+        }
+
+        assert!(prepare_bar_row_cached(
+            &spectrogram,
+            Duration::from_millis(20),
+            false,
+            &mut cache,
+            &mut cached,
+        ));
+        assert!(cache.masking_sums.is_empty());
+
+        spectrogram.clear();
+        push_row(&mut spectrogram, Duration::from_millis(10), 20.0);
+        assert!(prepare_bar_row_cached(
+            &spectrogram,
+            Duration::from_millis(20),
+            false,
+            &mut cache,
+            &mut cached,
+        ));
+        assert_eq!(cached[1].to_f32(), 20.0);
+    }
+
+    #[test]
+    fn cached_bar_recovers_after_non_finite_rows_leave_the_window() {
+        let mut spectrogram = Spectrogram::new(8, 2);
+        let mut cache = BarCache::default();
+        let mut cached = Vec::new();
+
+        for value in [1.0, f32::NEG_INFINITY, 3.0, 4.0, 5.0] {
+            spectrogram.update_with(|row| {
+                row.duration = Duration::from_millis(10);
+                row.data.resize(2, (0.0, value));
+                row.masking.resize(2, (0.0, value));
+                row.data.fill((0.0, value));
+                row.masking.fill((0.0, value));
+                row.masking_mean = value;
+            });
+            assert!(prepare_bar_row_cached(
+                &spectrogram,
+                Duration::from_millis(25),
+                true,
+                &mut cache,
+                &mut cached,
+            ));
+
+            let mut data = Vec::new();
+            let mut masking = Vec::new();
+            let mut reference = Vec::new();
+            prepare_bar_row(
+                &spectrogram,
+                Duration::from_millis(25),
+                true,
+                &mut data,
+                &mut masking,
+                &mut reference,
+            );
+            assert_eq!(cached, reference);
+        }
+        assert!(cached[1].to_f32().is_finite());
+        assert!(cached[2].to_f32().is_finite());
+    }
+
+    #[test]
+    fn cached_bar_window_count_matches_the_previous_float_boundary_rule() {
+        for duration in [
+            Duration::from_nanos(1),
+            Duration::from_nanos(333_333),
+            Duration::from_millis(10),
+        ] {
+            for rows in [1usize, 2, 3, 17, 257] {
+                for averaging in [
+                    Duration::ZERO,
+                    duration
+                        .saturating_mul(2)
+                        .saturating_sub(Duration::from_nanos(1)),
+                    duration.saturating_mul(2),
+                    duration.saturating_mul(16),
+                ] {
+                    let max_index = (0..rows)
+                        .take_while(|index| duration.mul_f32(*index as f32) <= averaging)
+                        .last()
+                        .unwrap_or(0);
+                    let expected = if averaging.is_zero() || max_index <= 1 {
+                        1
+                    } else {
+                        max_index + 1
+                    };
+                    assert_eq!(bar_window_rows(duration, averaging, rows), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unchanged_bar_does_not_dirty_a_completed_upload() {
+        let mut spectrogram = Spectrogram::new(4, 2);
+        push_row(&mut spectrogram, Duration::from_millis(10), 1.0);
+        let frequencies = [(20.0, 30.0, 40.0), (40.0, 50.0, 60.0)];
+        let color_table = test_color_table();
+        let settings = RenderSettings {
+            bargraph_height: 1.0,
+            ..RenderSettings::default()
+        };
+        let mut renderer = ShaderRenderer::default();
+
+        renderer.prepare(
+            &spectrogram,
+            &frequencies,
+            &color_table,
+            1,
+            &settings,
+            true,
+            -80.0,
+            0.0,
+        );
+        assert!(renderer.bar_dirty);
+        renderer.bar_dirty = false;
+        renderer.prepare(
+            &spectrogram,
+            &frequencies,
+            &color_table,
+            1,
+            &settings,
+            true,
+            -80.0,
+            0.0,
+        );
+        assert!(!renderer.bar_dirty);
+    }
+
+    #[test]
     fn hidden_and_disabled_paths_do_not_stage_uploads() {
         let mut spectrogram = Spectrogram::new(4, 2);
         push_row(&mut spectrogram, Duration::from_millis(10), 1.0);
@@ -1306,7 +1774,7 @@ mod tests {
         assert!(renderer.bar_dirty);
         assert!(!renderer.frame.show_masking);
         assert!(!renderer.frame.use_smr);
-        assert!(renderer.average_masking.is_empty());
+        assert!(renderer.bar_cache.masking_sums.is_empty());
         assert!(renderer.masking_staging.is_empty());
 
         let mut settings = settings;
@@ -1349,8 +1817,8 @@ mod tests {
         let capacities = (
             renderer.history_staging.capacity(),
             renderer.bar_staging.capacity(),
-            renderer.average_data.capacity(),
-            renderer.average_masking.capacity(),
+            renderer.bar_cache.data_sums.capacity(),
+            renderer.bar_cache.masking_sums.capacity(),
             renderer.lut_staging.capacity(),
         );
 
@@ -1370,8 +1838,8 @@ mod tests {
             (
                 renderer.history_staging.capacity(),
                 renderer.bar_staging.capacity(),
-                renderer.average_data.capacity(),
-                renderer.average_masking.capacity(),
+                renderer.bar_cache.data_sums.capacity(),
+                renderer.bar_cache.masking_sums.capacity(),
                 renderer.lut_staging.capacity(),
             )
         );
