@@ -98,7 +98,6 @@ If you experience performance issues out of the box, the settings with the large
 - Analysis Options -> Approximate spreading function (enabling it will hurt psychoacoustic accuracy)
 - Analysis Options -> Update rate (decreasing it may hurt readability)
 - Analysis Options -> Resolution (decreasing it may hurt readability)
-- Analysis Options -> Color lookup table size multiplier (decreasing it may hurt readability)
 - Analysis Options -> Perform simultaneous masking (disabling may hurt readability)
 - Render Options -> Spectrogram duration
 

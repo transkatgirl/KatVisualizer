@@ -335,7 +335,6 @@ struct RenderSettings {
     minimum_lightness: f32,
     maximum_lightness: f32,
     maximum_chroma: f32,
-    lookup_size: usize,
     automatic_gain: bool,
     agc_duration: Duration,
     agc_above_masking: f32,
@@ -367,10 +366,6 @@ impl Default for RenderSettings {
             maximum_lightness: 0.818, // Picked using maximum values on https://oklch.com that fit in sRGB w/ all hues
             maximum_chroma: 0.09, // Picked using maximum values on https://oklch.com that fit in sRGB w/ all hues
             automatic_gain: true,
-            #[cfg(not(target_arch = "wasm32"))]
-            lookup_size: 4, // (COLOR_TABLE_BASE_CHROMA_SIZE * 4) * (COLOR_TABLE_BASE_LIGHTNESS_SIZE * 4) * 3 bytes = ~393 kB
-            #[cfg(target_arch = "wasm32")]
-            lookup_size: 2, // (COLOR_TABLE_BASE_CHROMA_SIZE * 2) * (COLOR_TABLE_BASE_LIGHTNESS_SIZE * 2) * 3 bytes = ~98 kB
             agc_duration: Duration::from_secs_f32(1.0),
             agc_above_masking: 35.0, // Determined using peak of sawtooth wave @ 440hz
             agc_below_masking: 45.0 - 35.0, // 45dB of dynamic range
@@ -404,15 +399,22 @@ struct ColorTable {
     max: (f32, f32),
 }
 
-const COLOR_TABLE_BASE_CHROMA_SIZE: usize = 64;
-const COLOR_TABLE_BASE_LIGHTNESS_SIZE: usize = 128;
+// This is the smallest table, by texel count, whose nearest-neighbor cells have a maximum
+// deltaEOK of 0.002 across the UI's worst-case lightness range (0.0..=1.0) and maximum chroma
+// (0.2). The bound is
+// hypot(2 * chroma / (chroma_size - 1), lightness_range / (lightness_size - 1)).
+const COLOR_TABLE_CHROMA_SIZE: usize = 286;
+const COLOR_TABLE_LIGHTNESS_SIZE: usize = 703;
 
 impl ColorTable {
-    fn new(chroma_size: usize, lightness_size: usize) -> Self {
+    fn new() -> Self {
         Self {
-            table: vec![(0, 0, 0); chroma_size * lightness_size],
-            size: (chroma_size, lightness_size),
-            max: ((chroma_size - 1) as f32, (lightness_size - 1) as f32),
+            table: vec![(0, 0, 0); COLOR_TABLE_CHROMA_SIZE * COLOR_TABLE_LIGHTNESS_SIZE],
+            size: (COLOR_TABLE_CHROMA_SIZE, COLOR_TABLE_LIGHTNESS_SIZE),
+            max: (
+                (COLOR_TABLE_CHROMA_SIZE - 1) as f32,
+                (COLOR_TABLE_LIGHTNESS_SIZE - 1) as f32,
+            ),
         }
     }
     fn build(
@@ -485,10 +487,7 @@ impl SharedState {
         #[cfg(not(target_arch = "wasm32"))] analysis_bridge: Arc<Mutex<RenderAnalysisBridge>>,
     ) -> Self {
         let settings = RenderSettings::default();
-        let mut color_table = ColorTable::new(
-            COLOR_TABLE_BASE_CHROMA_SIZE * settings.lookup_size,
-            COLOR_TABLE_BASE_LIGHTNESS_SIZE * settings.lookup_size,
-        );
+        let mut color_table = ColorTable::new();
         color_table.build(
             settings.left_hue,
             settings.right_hue,
@@ -990,7 +989,6 @@ pub(crate) fn render(
     let mut edited_analysis_settings = shared_state.cached_analysis_settings;
     let analysis_action = Cell::new(None::<bool>);
     let rebuild_color_table = Cell::new(false);
-    let resize_color_table = Cell::new(false);
 
     egui::Window::new("Settings")
         .id(egui::Id::new("settings"))
@@ -1057,19 +1055,6 @@ pub(crate) fn render(
                     )
                     .changed()
                 {
-                    rebuild_color_table.set(true);
-                };
-
-                if ui
-                    .add(
-                        egui::Slider::new(&mut render_settings.lookup_size, 1..=8)
-                            .logarithmic(true)
-                            .clamping(egui::SliderClamping::Always)
-                            .text("Color lookup table size multiplier"),
-                    )
-                    .changed()
-                {
-                    resize_color_table.set(true);
                     rebuild_color_table.set(true);
                 };
 
@@ -1234,7 +1219,6 @@ pub(crate) fn render(
                             f32::NEG_INFINITY;
                         render_settings.agc_maximum = f32::INFINITY;
                     }
-                    resize_color_table.set(true);
                     rebuild_color_table.set(true);
                 }
             });
@@ -1714,12 +1698,6 @@ pub(crate) fn render(
 
     shared_state.settings = edited_render_settings;
     shared_state.cached_analysis_settings = edited_analysis_settings;
-    if resize_color_table.get() {
-        shared_state.color_table = ColorTable::new(
-            COLOR_TABLE_BASE_CHROMA_SIZE * edited_render_settings.lookup_size,
-            COLOR_TABLE_BASE_LIGHTNESS_SIZE * edited_render_settings.lookup_size,
-        );
-    }
     if rebuild_color_table.get() {
         shared_state.color_table.build(
             edited_render_settings.left_hue,

@@ -1484,7 +1484,7 @@ mod tests {
     }
 
     fn test_color_table() -> ColorTable {
-        let mut table = ColorTable::new(4, 8);
+        let mut table = ColorTable::new();
         table.build(195.0, 328.0, 0.13, 0.818, 0.09);
         table
     }
@@ -2099,7 +2099,10 @@ mod tests {
 
     #[test]
     fn lut_addressing_matches_cpu_rounding() {
-        let max = (255.0_f32, 511.0_f32);
+        let max = (
+            (super::super::COLOR_TABLE_CHROMA_SIZE - 1) as f32,
+            (super::super::COLOR_TABLE_LIGHTNESS_SIZE - 1) as f32,
+        );
         for (pan, intensity) in [(-1.0, 0.0), (-0.2, 0.33), (0.0, 0.5), (1.0, 1.0)] {
             let cpu = (
                 ((pan + 1.0) * 0.5 * max.0).round() as usize,
