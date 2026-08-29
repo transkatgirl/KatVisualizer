@@ -1336,25 +1336,51 @@ pub(crate) fn render(
                     };
                 }
 
-                if ui
-                    .add(
-                        egui::Slider::new(
-                            &mut analysis_settings.resolution,
-                            128..=MAX_FREQUENCY_BINS,
-                        )
-                        .clamping(egui::SliderClamping::Always)
-                        .suffix(" bins")
-                        .step_by(64.0)
-                        .fixed_decimals(0)
-                        .text("Resolution"),
-                    )
-                    .on_hover_text("In order to convert data into frequency domain, the selected frequency range needs to be split into a set number of frequency bins. This setting allows you to adjust the number of bins used, effectively setting the horizontal resolution of the spectrogram and bargraph (and the associated amount of CPU usage required).\n\nThis setting does not increase the width of the transform's filters beyond the time resolution setting.")
-                    .changed()
+                #[cfg(not(target_arch = "wasm32"))]
                 {
-                    update_and_clear();
-                    egui_ctx.request_discard("Changed setting");
-                    return;
-                };
+                    if ui
+                        .add(
+                            egui::Slider::new(
+                                &mut analysis_settings.resolution,
+                                128..=MAX_FREQUENCY_BINS,
+                            )
+                            .clamping(egui::SliderClamping::Always)
+                            .suffix(" bins")
+                            .step_by(64.0)
+                            .fixed_decimals(0)
+                            .text("Resolution"),
+                        )
+                        .on_hover_text("In order to convert data into frequency domain, the selected frequency range needs to be split into a set number of frequency bins. This setting allows you to adjust the number of bins used, effectively setting the horizontal resolution of the spectrogram and bargraph (and the associated amount of CPU usage required).\n\nThe default value for the setting is roughly the total number of perceptible pitch steps in human hearing.\n\nThis setting does not increase the width of the transform's filters beyond the time resolution setting.")
+                        .changed()
+                    {
+                        update_and_clear();
+                        egui_ctx.request_discard("Changed setting");
+                        return;
+                    };
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    if ui
+                        .add(
+                            egui::Slider::new(
+                                &mut analysis_settings.resolution,
+                                128..=MAX_FREQUENCY_BINS,
+                            )
+                            .clamping(egui::SliderClamping::Always)
+                            .suffix(" bins")
+                            .step_by(64.0)
+                            .fixed_decimals(0)
+                            .text("Resolution"),
+                        )
+                        .on_hover_text("In order to convert data into frequency domain, the selected frequency range needs to be split into a set number of frequency bins. This setting allows you to adjust the number of bins used, effectively setting the horizontal resolution of the spectrogram and bargraph (and the associated amount of CPU usage required).\n\nThis setting does not increase the width of the transform's filters beyond the time resolution setting.")
+                        .changed()
+                    {
+                        update_and_clear();
+                        egui_ctx.request_discard("Changed setting");
+                        return;
+                    };
+                }
 
                 let mut frame = egui::Frame::group(ui.style()).inner_margin(4.0).begin(ui);
 
