@@ -40,19 +40,21 @@ out vec4 f_color;
 uniform sampler2D u_history;
 uniform sampler2D u_bar;
 uniform sampler2D u_lut;
+#ifdef USE_SMR
 uniform sampler2D u_masking_ranges;
+#endif
 uniform ivec2 u_history_size;
 uniform int u_history_head;
 uniform int u_valid_rows;
 uniform int u_horizontal;
-uniform int u_nearest;
 uniform int u_show_spectrogram;
 uniform int u_show_bar;
-uniform int u_use_smr;
 uniform int u_show_masking;
 uniform float u_bar_proportion;
 uniform vec2 u_db_range;
+#ifdef USE_SMR
 uniform float u_smr_strength;
+#endif
 uniform vec4 u_masking_color;
 
 float map_amplitude(float amplitude) {
@@ -67,9 +69,11 @@ vec3 lookup_color(float pan, float intensity) {
 }
 
 float masking_range(int frequency) {
-    return u_use_smr != 0
-        ? texelFetch(u_masking_ranges, ivec2(frequency, 0), 0).r
-        : 1.0;
+#ifdef USE_SMR
+    return texelFetch(u_masking_ranges, ivec2(frequency, 0), 0).r;
+#else
+    return 1.0;
+#endif
 }
 
 vec4 color_history_texel(int frequency, int age, float smr_range) {
@@ -87,11 +91,11 @@ vec4 color_history_texel(int frequency, int age, float smr_range) {
 
     float volume_intensity = map_amplitude(analysis.g);
     float intensity = volume_intensity;
-    if (u_use_smr != 0) {
-        float smr_intensity = clamp((analysis.g - analysis.b) / smr_range, 0.0, 1.0);
-        intensity = min(volume_intensity,
-            mix(volume_intensity, smr_intensity, u_smr_strength));
-    }
+#ifdef USE_SMR
+    float smr_intensity = clamp((analysis.g - analysis.b) / smr_range, 0.0, 1.0);
+    intensity = min(volume_intensity,
+        mix(volume_intensity, smr_intensity, u_smr_strength));
+#endif
     return vec4(lookup_color(analysis.r, intensity), 1.0);
 }
 
@@ -100,15 +104,14 @@ vec4 sample_history(vec2 uv) {
         return vec4(0.0, 0.0, 0.0, 1.0);
     }
 
-    if (u_nearest != 0) {
-        ivec2 coordinate = ivec2(floor(uv * vec2(u_history_size)));
-        coordinate = clamp(coordinate, ivec2(0), u_history_size - ivec2(1));
-        return color_history_texel(
-            coordinate.x,
-            coordinate.y,
-            masking_range(coordinate.x));
-    }
-
+#ifdef HISTORY_NEAREST
+    ivec2 coordinate = ivec2(floor(uv * vec2(u_history_size)));
+    coordinate = clamp(coordinate, ivec2(0), u_history_size - ivec2(1));
+    return color_history_texel(
+        coordinate.x,
+        coordinate.y,
+        masking_range(coordinate.x));
+#else
     vec2 position = uv * vec2(u_history_size) - vec2(0.5);
     ivec2 low = ivec2(floor(position));
     vec2 weight = fract(position);
@@ -121,6 +124,7 @@ vec4 sample_history(vec2 uv) {
     vec4 bottom = mix(color_history_texel(low.x, high.y, low_range),
                       color_history_texel(high.x, high.y, high_range), weight.x);
     return mix(top, bottom, weight.y);
+#endif
 }
 
 float interleaved_gradient_noise(vec2 n) {
@@ -239,9 +243,58 @@ struct FiniteSum {
     non_finite: usize,
 }
 
-struct GlResources {
-    program: glow::Program,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(usize)]
+enum HistoryShaderVariant {
+    Linear,
+    LinearSmr,
+    Nearest,
+    NearestSmr,
+}
+
+impl HistoryShaderVariant {
+    const ALL: [Self; 4] = [
+        Self::Linear,
+        Self::LinearSmr,
+        Self::Nearest,
+        Self::NearestSmr,
+    ];
+
+    fn new(nearest: bool, use_smr: bool) -> Self {
+        match (nearest, use_smr) {
+            (false, false) => Self::Linear,
+            (false, true) => Self::LinearSmr,
+            (true, false) => Self::Nearest,
+            (true, true) => Self::NearestSmr,
+        }
+    }
+
+    fn shader_defines(self) -> &'static str {
+        match self {
+            Self::Linear => "",
+            Self::LinearSmr => "#define USE_SMR\n",
+            Self::Nearest => "#define HISTORY_NEAREST\n",
+            Self::NearestSmr => "#define HISTORY_NEAREST\n#define USE_SMR\n",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Linear => "linear",
+            Self::LinearSmr => "linear SMR",
+            Self::Nearest => "nearest",
+            Self::NearestSmr => "nearest SMR",
+        }
+    }
+}
+
+struct GlProgram {
+    handle: glow::Program,
     uniforms: Uniforms,
+}
+
+struct GlResources {
+    programs: [GlProgram; 4],
     vertex_array: glow::VertexArray,
     history: glow::Texture,
     bar: glow::Texture,
@@ -262,10 +315,8 @@ struct Uniforms {
     history_head: Option<glow::UniformLocation>,
     valid_rows: Option<glow::UniformLocation>,
     horizontal: Option<glow::UniformLocation>,
-    nearest: Option<glow::UniformLocation>,
     show_spectrogram: Option<glow::UniformLocation>,
     show_bar: Option<glow::UniformLocation>,
-    use_smr: Option<glow::UniformLocation>,
     show_masking: Option<glow::UniformLocation>,
     bar_proportion: Option<glow::UniformLocation>,
     db_range: Option<glow::UniformLocation>,
@@ -612,18 +663,24 @@ impl ShaderRenderer {
             gl.disable(glow::BLEND);
             gl.disable(glow::DEPTH_TEST);
             gl.disable(glow::CULL_FACE);
-            gl.use_program(Some(resources.program));
+            let variant = HistoryShaderVariant::new(self.frame.nearest, self.frame.use_smr);
+            let program = &resources.programs[variant as usize];
+            gl.use_program(Some(program.handle));
             gl.bind_vertex_array(Some(resources.vertex_array));
 
             bind_texture(gl, resources.history, 0);
             bind_texture(gl, resources.bar, 1);
             bind_texture(gl, resources.lut, 2);
-            bind_texture(gl, resources.masking_ranges, 3);
-            let uniforms = &resources.uniforms;
+            if self.frame.use_smr {
+                bind_texture(gl, resources.masking_ranges, 3);
+            }
+            let uniforms = &program.uniforms;
             gl.uniform_1_i32(uniforms.history.as_ref(), 0);
             gl.uniform_1_i32(uniforms.bar.as_ref(), 1);
             gl.uniform_1_i32(uniforms.lut.as_ref(), 2);
-            gl.uniform_1_i32(uniforms.masking_ranges.as_ref(), 3);
+            if self.frame.use_smr {
+                gl.uniform_1_i32(uniforms.masking_ranges.as_ref(), 3);
+            }
             gl.uniform_2_i32(
                 uniforms.history_size.as_ref(),
                 self.pending_history.width as i32,
@@ -638,13 +695,11 @@ impl ShaderRenderer {
                 self.pending_history.valid_rows as i32,
             );
             gl.uniform_1_i32(uniforms.horizontal.as_ref(), self.frame.horizontal as i32);
-            gl.uniform_1_i32(uniforms.nearest.as_ref(), self.frame.nearest as i32);
             gl.uniform_1_i32(
                 uniforms.show_spectrogram.as_ref(),
                 self.frame.show_spectrogram as i32,
             );
             gl.uniform_1_i32(uniforms.show_bar.as_ref(), self.frame.show_bar as i32);
-            gl.uniform_1_i32(uniforms.use_smr.as_ref(), self.frame.use_smr as i32);
             gl.uniform_1_i32(
                 uniforms.show_masking.as_ref(),
                 self.frame.show_masking as i32,
@@ -655,7 +710,9 @@ impl ShaderRenderer {
                 self.frame.min_db,
                 self.frame.max_db,
             );
-            gl.uniform_1_f32(uniforms.smr_strength.as_ref(), self.frame.smr_strength);
+            if self.frame.use_smr {
+                gl.uniform_1_f32(uniforms.smr_strength.as_ref(), self.frame.smr_strength);
+            }
             gl.uniform_4_f32(
                 uniforms.masking_color.as_ref(),
                 self.frame.masking_color[0],
@@ -1069,26 +1126,50 @@ fn color32_to_array(color: super::Color32) -> [f32; 4] {
 
 unsafe fn create_resources(gl: &glow::Context) -> Result<GlResources, String> {
     unsafe {
-        let program = gl.create_program()?;
         let version = if cfg!(target_arch = "wasm32") {
             "#version 300 es\n"
         } else {
             "#version 150 core\n"
         };
-        let vertex = compile_shader(gl, glow::VERTEX_SHADER, version, VERTEX_SHADER)?;
-        let fragment = compile_shader(gl, glow::FRAGMENT_SHADER, version, FRAGMENT_SHADER)?;
-        gl.attach_shader(program, vertex);
-        gl.attach_shader(program, fragment);
-        gl.link_program(program);
-        gl.detach_shader(program, vertex);
-        gl.detach_shader(program, fragment);
-        gl.delete_shader(vertex);
-        gl.delete_shader(fragment);
-        if !gl.get_program_link_status(program) {
-            let error = gl.get_program_info_log(program);
-            gl.delete_program(program);
-            return Err(format!("spectrogram shader link failed: {error}"));
+        let vertex = compile_shader(gl, glow::VERTEX_SHADER, version, VERTEX_SHADER, "vertex")?;
+        let mut programs: Vec<GlProgram> = Vec::with_capacity(HistoryShaderVariant::ALL.len());
+        for variant in HistoryShaderVariant::ALL {
+            let fragment_prefix = format!("{version}{}", variant.shader_defines());
+            let fragment = match compile_shader(
+                gl,
+                glow::FRAGMENT_SHADER,
+                &fragment_prefix,
+                FRAGMENT_SHADER,
+                variant.label(),
+            ) {
+                Ok(fragment) => fragment,
+                Err(error) => {
+                    gl.delete_shader(vertex);
+                    for program in programs {
+                        gl.delete_program(program.handle);
+                    }
+                    return Err(error);
+                }
+            };
+            let program = link_program(gl, vertex, fragment, variant.label());
+            gl.delete_shader(fragment);
+            match program {
+                Ok(program) => programs.push(program),
+                Err(error) => {
+                    gl.delete_shader(vertex);
+                    for program in programs {
+                        gl.delete_program(program.handle);
+                    }
+                    return Err(error);
+                }
+            }
         }
+        gl.delete_shader(vertex);
+        let programs = match programs.try_into() {
+            Ok(programs) => programs,
+            Err(_) => unreachable!("all shader variants are compiled above"),
+        };
+
         let vertex_array = gl.create_vertex_array()?;
         let history = gl.create_texture()?;
         let bar = gl.create_texture()?;
@@ -1112,26 +1193,7 @@ unsafe fn create_resources(gl: &glow::Context) -> Result<GlResources, String> {
         );
 
         Ok(GlResources {
-            program,
-            uniforms: Uniforms {
-                history: gl.get_uniform_location(program, "u_history"),
-                bar: gl.get_uniform_location(program, "u_bar"),
-                lut: gl.get_uniform_location(program, "u_lut"),
-                masking_ranges: gl.get_uniform_location(program, "u_masking_ranges"),
-                history_size: gl.get_uniform_location(program, "u_history_size"),
-                history_head: gl.get_uniform_location(program, "u_history_head"),
-                valid_rows: gl.get_uniform_location(program, "u_valid_rows"),
-                horizontal: gl.get_uniform_location(program, "u_horizontal"),
-                nearest: gl.get_uniform_location(program, "u_nearest"),
-                show_spectrogram: gl.get_uniform_location(program, "u_show_spectrogram"),
-                show_bar: gl.get_uniform_location(program, "u_show_bar"),
-                use_smr: gl.get_uniform_location(program, "u_use_smr"),
-                show_masking: gl.get_uniform_location(program, "u_show_masking"),
-                bar_proportion: gl.get_uniform_location(program, "u_bar_proportion"),
-                db_range: gl.get_uniform_location(program, "u_db_range"),
-                smr_strength: gl.get_uniform_location(program, "u_smr_strength"),
-                masking_color: gl.get_uniform_location(program, "u_masking_color"),
-            },
+            programs,
             vertex_array,
             history,
             bar,
@@ -1145,22 +1207,67 @@ unsafe fn create_resources(gl: &glow::Context) -> Result<GlResources, String> {
     }
 }
 
+unsafe fn link_program(
+    gl: &glow::Context,
+    vertex: glow::Shader,
+    fragment: glow::Shader,
+    label: &str,
+) -> Result<GlProgram, String> {
+    unsafe {
+        let handle = gl.create_program()?;
+        gl.attach_shader(handle, vertex);
+        gl.attach_shader(handle, fragment);
+        gl.link_program(handle);
+        gl.detach_shader(handle, vertex);
+        gl.detach_shader(handle, fragment);
+        if !gl.get_program_link_status(handle) {
+            let error = gl.get_program_info_log(handle);
+            gl.delete_program(handle);
+            return Err(format!("spectrogram {label} shader link failed: {error}"));
+        }
+
+        Ok(GlProgram {
+            handle,
+            uniforms: Uniforms {
+                history: gl.get_uniform_location(handle, "u_history"),
+                bar: gl.get_uniform_location(handle, "u_bar"),
+                lut: gl.get_uniform_location(handle, "u_lut"),
+                masking_ranges: gl.get_uniform_location(handle, "u_masking_ranges"),
+                history_size: gl.get_uniform_location(handle, "u_history_size"),
+                history_head: gl.get_uniform_location(handle, "u_history_head"),
+                valid_rows: gl.get_uniform_location(handle, "u_valid_rows"),
+                horizontal: gl.get_uniform_location(handle, "u_horizontal"),
+                show_spectrogram: gl.get_uniform_location(handle, "u_show_spectrogram"),
+                show_bar: gl.get_uniform_location(handle, "u_show_bar"),
+                show_masking: gl.get_uniform_location(handle, "u_show_masking"),
+                bar_proportion: gl.get_uniform_location(handle, "u_bar_proportion"),
+                db_range: gl.get_uniform_location(handle, "u_db_range"),
+                smr_strength: gl.get_uniform_location(handle, "u_smr_strength"),
+                masking_color: gl.get_uniform_location(handle, "u_masking_color"),
+            },
+        })
+    }
+}
+
 unsafe fn compile_shader(
     gl: &glow::Context,
     kind: u32,
-    version: &str,
+    prefix: &str,
     source: &str,
+    label: &str,
 ) -> Result<glow::Shader, String> {
     unsafe {
         let shader = gl.create_shader(kind)?;
-        gl.shader_source(shader, &format!("{version}{source}"));
+        gl.shader_source(shader, &format!("{prefix}{source}"));
         gl.compile_shader(shader);
         if gl.get_shader_compile_status(shader) {
             Ok(shader)
         } else {
             let error = gl.get_shader_info_log(shader);
             gl.delete_shader(shader);
-            Err(format!("spectrogram shader compilation failed: {error}"))
+            Err(format!(
+                "spectrogram {label} shader compilation failed: {error}"
+            ))
         }
     }
 }
@@ -1363,6 +1470,29 @@ mod tests {
         let mut table = ColorTable::new(4, 8);
         table.build(195.0, 328.0, 0.13, 0.818, 0.09);
         table
+    }
+
+    #[test]
+    fn shader_variants_match_frame_flags_and_program_indices() {
+        for (index, variant) in HistoryShaderVariant::ALL.into_iter().enumerate() {
+            assert_eq!(variant as usize, index);
+        }
+        assert_eq!(
+            HistoryShaderVariant::new(false, false),
+            HistoryShaderVariant::Linear
+        );
+        assert_eq!(
+            HistoryShaderVariant::new(false, true),
+            HistoryShaderVariant::LinearSmr
+        );
+        assert_eq!(
+            HistoryShaderVariant::new(true, false),
+            HistoryShaderVariant::Nearest
+        );
+        assert_eq!(
+            HistoryShaderVariant::new(true, true),
+            HistoryShaderVariant::NearestSmr
+        );
     }
 
     #[test]
