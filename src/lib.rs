@@ -6,7 +6,7 @@ use mimalloc::MiMalloc;
 use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[cfg(not(target_arch = "wasm32"))]
 use arc_swap::{ArcSwap, ArcSwapOption};
@@ -154,6 +154,17 @@ pub(crate) struct AnalysisUpdateSender {
     desired_config: Arc<ArcSwap<AnalysisChainConfig>>,
     frequencies: Arc<ArcSwap<FrequencySnapshot>>,
     audio_state: Arc<ArcSwapOption<AudioState>>,
+}
+
+/// The render-side endpoints for communication with the analysis thread.
+///
+/// NIH-plug may destroy and recreate the thread running an editor. Keeping
+/// these endpoints on the plugin and only lending access to editor instances
+/// prevents a render-thread restart from permanently consuming either endpoint.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct RenderAnalysisBridge {
+    analysis_receiver: NativeAnalysisReceiver,
+    analysis_updates: AnalysisUpdateSender,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -571,12 +582,11 @@ pub struct MyPlugin {
     analysis_chain: Option<AnalysisChain>,
     analysis_updates: Consumer<AnalysisUpdate>,
     analysis_reclaims: Producer<ReclaimAcknowledgement>,
-    analysis_update_sender: Option<AnalysisUpdateSender>,
+    render_analysis_bridge: Arc<Mutex<RenderAnalysisBridge>>,
     desired_config: Arc<ArcSwap<AnalysisChainConfig>>,
     audio_format_generation: u64,
     latency_samples: u32,
     analysis_sink: NativeAnalysisSink,
-    analysis_receiver: Option<NativeAnalysisReceiver>,
     analysis_frequencies: Arc<ArcSwap<FrequencySnapshot>>,
     state_info: Arc<ArcSwapOption<AudioState>>,
     keepawake: Option<KeepAwake>,
@@ -619,20 +629,22 @@ impl Default for MyPlugin {
             analysis_chain: None,
             analysis_updates,
             analysis_reclaims,
-            analysis_update_sender: Some(AnalysisUpdateSender {
-                updates,
-                reclaims,
-                pending: None,
-                last_queued: AnalysisChainConfig::default(),
-                desired_config: desired_config.clone(),
-                frequencies: analysis_frequencies.clone(),
-                audio_state: state_info.clone(),
-            }),
+            render_analysis_bridge: Arc::new(Mutex::new(RenderAnalysisBridge {
+                analysis_receiver,
+                analysis_updates: AnalysisUpdateSender {
+                    updates,
+                    reclaims,
+                    pending: None,
+                    last_queued: AnalysisChainConfig::default(),
+                    desired_config: desired_config.clone(),
+                    frequencies: analysis_frequencies.clone(),
+                    audio_state: state_info.clone(),
+                },
+            })),
             desired_config,
             audio_format_generation: 0,
             latency_samples: 0,
             analysis_sink,
-            analysis_receiver: Some(analysis_receiver),
             analysis_frequencies,
             state_info,
             keepawake: None,
@@ -725,13 +737,9 @@ impl Plugin for MyPlugin {
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        let analysis_receiver = self.analysis_receiver.take()?;
-        let analysis_update_sender = self.analysis_update_sender.take()?;
-
         editor::create(
             self.params.clone(),
-            analysis_update_sender,
-            analysis_receiver,
+            Arc::clone(&self.render_analysis_bridge),
             self.analysis_frequencies.clone(),
             self.state_info.clone(),
         )
@@ -860,17 +868,26 @@ mod update_tests {
         assert!(!use_realtime_analysis_worker(ProcessMode::Offline));
     }
 
-    fn configured_plugin() -> (MyPlugin, AnalysisUpdateSender, AnalysisChainConfig) {
+    fn configured_plugin() -> (
+        MyPlugin,
+        Arc<Mutex<RenderAnalysisBridge>>,
+        AnalysisChainConfig,
+    ) {
         let mut plugin = MyPlugin::default();
-        let mut sender = plugin.analysis_update_sender.take().unwrap();
+        let bridge = Arc::clone(&plugin.render_analysis_bridge);
         let base = AnalysisChainConfig {
             resolution: 128,
             masking: false,
             normalize_amplitude: false,
             ..AnalysisChainConfig::default()
         };
-        sender.last_queued = base;
-        sender.desired_config.store(Arc::new(base));
+        {
+            let mut bridge = bridge
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            bridge.analysis_updates.last_queued = base;
+            bridge.analysis_updates.desired_config.store(Arc::new(base));
+        }
         plugin.audio_format_generation = 1;
         plugin.analysis_chain = Some(AnalysisChain::new(&base, 48_000.0, false));
         plugin
@@ -893,7 +910,7 @@ mod update_tests {
             output_channels: 2,
             generation: 1,
         })));
-        (plugin, sender, base)
+        (plugin, bridge, base)
     }
 
     fn apply(plugin: &mut MyPlugin) -> bool {
@@ -907,8 +924,56 @@ mod update_tests {
     }
 
     #[test]
+    fn render_bridge_survives_render_and_analysis_thread_replacement() {
+        let (mut plugin, bridge, base) = configured_plugin();
+
+        let first_render_bridge = Arc::clone(&bridge);
+        std::thread::spawn(move || {
+            first_render_bridge
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .analysis_updates
+                .stage(AnalysisChainConfig { gain: 1.0, ..base }, false);
+        })
+        .join()
+        .expect("first render thread did not panic");
+        assert!(apply(&mut plugin));
+
+        // Model NIH-plug replacing the processing thread and its analysis
+        // chain while the editor-side bridge stays owned by the plugin.
+        plugin.audio_format_generation = 2;
+        plugin.analysis_chain = Some(AnalysisChain::new(&base, 96_000.0, false));
+        plugin.state_info.store(Some(Arc::new(AudioState {
+            buffer_size_range: (32, 512),
+            sample_rate: 96_000.0,
+            process_mode_title: "Realtime".to_owned(),
+            realtime: true,
+            input_channels: 2,
+            output_channels: 2,
+            generation: 2,
+        })));
+
+        let second_render_bridge = Arc::clone(&bridge);
+        std::thread::spawn(move || {
+            second_render_bridge
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .analysis_updates
+                .stage(AnalysisChainConfig { gain: 2.0, ..base }, false);
+        })
+        .join()
+        .expect("replacement render thread did not panic");
+        assert!(apply(&mut plugin));
+        assert_eq!(plugin.analysis_chain.as_ref().unwrap().config().gain, 2.0);
+    }
+
+    #[test]
     fn runtime_update_preserves_structural_analyzers() {
-        let (mut plugin, mut sender, base) = configured_plugin();
+        let (mut plugin, bridge, base) = configured_plugin();
+        let mut bridge = bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sender = &mut bridge.analysis_updates;
         let frequencies = plugin
             .analysis_chain
             .as_ref()
@@ -928,7 +993,11 @@ mod update_tests {
 
     #[test]
     fn structural_update_swaps_and_reclaims_on_ui_side() {
-        let (mut plugin, mut sender, base) = configured_plugin();
+        let (mut plugin, bridge, base) = configured_plugin();
+        let mut bridge = bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sender = &mut bridge.analysis_updates;
         let updated = AnalysisChainConfig {
             resolution: 192,
             ..base
@@ -946,7 +1015,11 @@ mod update_tests {
 
     #[test]
     fn reinitialization_wins_over_stale_frequency_acknowledgement() {
-        let (mut plugin, mut sender, base) = configured_plugin();
+        let (mut plugin, bridge, base) = configured_plugin();
+        let mut bridge = bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sender = &mut bridge.analysis_updates;
         sender.stage(
             AnalysisChainConfig {
                 resolution: 192,
@@ -973,7 +1046,11 @@ mod update_tests {
 
     #[test]
     fn stale_structural_update_is_reclaimed_without_application() {
-        let (mut plugin, mut sender, base) = configured_plugin();
+        let (mut plugin, bridge, base) = configured_plugin();
+        let mut bridge = bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sender = &mut bridge.analysis_updates;
         sender.stage(
             AnalysisChainConfig {
                 resolution: 192,
@@ -992,7 +1069,11 @@ mod update_tests {
 
     #[test]
     fn structural_update_racing_reinitialization_is_reprepared() {
-        let (mut plugin, mut sender, base) = configured_plugin();
+        let (mut plugin, bridge, base) = configured_plugin();
+        let mut bridge = bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sender = &mut bridge.analysis_updates;
 
         // `initialize()` may have already snapshotted the old desired config
         // while the editor still sees the previous audio format generation.
@@ -1026,7 +1107,11 @@ mod update_tests {
 
     #[test]
     fn full_update_queue_coalesces_latest_and_retains_history_reset() {
-        let (mut plugin, mut sender, base) = configured_plugin();
+        let (mut plugin, bridge, base) = configured_plugin();
+        let mut bridge = bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sender = &mut bridge.analysis_updates;
         sender.stage(AnalysisChainConfig { gain: 1.0, ..base }, false);
         sender.stage(AnalysisChainConfig { gain: 2.0, ..base }, true);
         sender.stage(AnalysisChainConfig { gain: 3.0, ..base }, false);
@@ -1042,7 +1127,11 @@ mod update_tests {
 
     #[test]
     fn structural_preparation_waits_for_update_queue_capacity() {
-        let (mut plugin, mut sender, base) = configured_plugin();
+        let (mut plugin, bridge, base) = configured_plugin();
+        let mut bridge = bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sender = &mut bridge.analysis_updates;
         sender.stage(AnalysisChainConfig { gain: 1.0, ..base }, false);
         sender.stage(
             AnalysisChainConfig {
@@ -1070,7 +1159,11 @@ mod update_tests {
 
     #[test]
     fn retained_structural_preparation_tracks_latest_chunk_size() {
-        let (mut plugin, mut sender, base) = configured_plugin();
+        let (mut plugin, bridge, base) = configured_plugin();
+        let mut bridge = bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sender = &mut bridge.analysis_updates;
         let runtime = AnalysisChainConfig {
             update_rate_hz: 1_000.0,
             ..base
@@ -1106,7 +1199,11 @@ mod update_tests {
 
     #[test]
     fn structural_update_waits_for_reclaim_capacity() {
-        let (mut plugin, mut sender, base) = configured_plugin();
+        let (mut plugin, bridge, base) = configured_plugin();
+        let mut bridge = bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sender = &mut bridge.analysis_updates;
         sender.stage(
             AnalysisChainConfig {
                 resolution: 192,
@@ -1132,7 +1229,11 @@ mod update_tests {
 
     #[test]
     fn history_reset_occurs_at_update_block_boundary() {
-        let (mut plugin, mut sender, base) = configured_plugin();
+        let (mut plugin, bridge, base) = configured_plugin();
+        let mut bridge = bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sender = &mut bridge.analysis_updates;
         let generation = plugin.analysis_sink.generation();
         sender.stage(AnalysisChainConfig { gain: 1.0, ..base }, true);
         assert_eq!(plugin.analysis_sink.generation(), generation);

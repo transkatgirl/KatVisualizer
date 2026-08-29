@@ -351,6 +351,14 @@ impl ShaderRendererHandle {
         Arc::clone(&self.callback)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn reset_context(&self) {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .reset_context();
+    }
+
     pub(super) fn prepare(
         &self,
         spectrogram: &Spectrogram,
@@ -423,6 +431,31 @@ struct ShaderRenderer {
 }
 
 impl ShaderRenderer {
+    fn reset_context(&mut self) {
+        // A native editor can be spawned more than once. Each spawn owns a new
+        // GL context, so handles created for the previous window must not be
+        // used by the new one. The old context has already been destroyed and
+        // owns the cleanup of those resources.
+        self.gl = None;
+        self.error = None;
+        self.max_texture_size = None;
+
+        // Keep the CPU-side caches and staging allocations, but invalidate all
+        // state that described uploads to the previous context.
+        self.pending_history = PendingHistory::default();
+        self.staged_state = None;
+        self.staged_duration = None;
+        self.staged_height = 0;
+        self.staged_width = 0;
+        self.staged_valid_rows = 0;
+        self.history_head = 0;
+        self.was_spectrogram_visible = false;
+        self.was_bar_visible = false;
+        self.bar_dirty = !self.bar_staging.is_empty();
+        self.lut_dirty = !self.lut_staging.is_empty();
+        self.masking_dirty = !self.masking_staging.is_empty();
+    }
+
     fn prepare(
         &mut self,
         spectrogram: &Spectrogram,
@@ -1929,6 +1962,62 @@ mod tests {
             0.0,
         );
         assert!(!renderer.bar_dirty);
+    }
+
+    #[test]
+    fn context_reset_forces_all_visible_gpu_data_to_be_uploaded_again() {
+        let mut spectrogram = Spectrogram::new(4, 2);
+        push_row(&mut spectrogram, Duration::from_millis(10), 1.0);
+        let frequencies = [(20.0, 30.0, 40.0), (40.0, 50.0, 60.0)];
+        let color_table = test_color_table();
+        let settings = RenderSettings::default();
+        let mut renderer = ShaderRenderer::default();
+
+        renderer.prepare(
+            &spectrogram,
+            &frequencies,
+            &color_table,
+            1,
+            &settings,
+            true,
+            -80.0,
+            0.0,
+        );
+        renderer.commit_history_upload();
+        renderer.pending_history.ranges = [None, None];
+        renderer.pending_history.rebuild = false;
+        renderer.bar_dirty = false;
+        renderer.lut_dirty = false;
+        renderer.masking_dirty = false;
+        renderer.error = Some("old context error".to_owned());
+        renderer.max_texture_size = Some(1024);
+
+        renderer.reset_context();
+
+        assert!(renderer.error.is_none());
+        assert!(renderer.max_texture_size.is_none());
+        assert!(renderer.staged_state.is_none());
+        assert!(!renderer.was_spectrogram_visible);
+        assert!(!renderer.was_bar_visible);
+        assert!(renderer.bar_dirty);
+        assert!(renderer.lut_dirty);
+        assert!(renderer.masking_dirty);
+
+        renderer.prepare(
+            &spectrogram,
+            &frequencies,
+            &color_table,
+            1,
+            &settings,
+            true,
+            -80.0,
+            0.0,
+        );
+        assert!(renderer.pending_history.rebuild);
+        assert!(renderer.pending_history.ranges.iter().any(Option::is_some));
+        assert!(renderer.bar_dirty);
+        assert!(renderer.lut_dirty);
+        assert!(renderer.masking_dirty);
     }
 
     #[test]

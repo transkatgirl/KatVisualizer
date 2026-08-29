@@ -22,7 +22,7 @@ use nih_plug_egui::{
 use std::{cell::Cell, collections::VecDeque};
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 mod shader_renderer;
 use shader_renderer::ShaderRendererHandle;
@@ -34,9 +34,7 @@ use std::time::{Duration, Instant};
 use web_time::{Duration, Instant};
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::output::NativeAnalysisReceiver;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::{AnalysisUpdateSender, FrequencySnapshot, PluginParams};
+use crate::{FrequencySnapshot, PluginParams, RenderAnalysisBridge};
 
 #[cfg(target_arch = "wasm32")]
 use crate::AnalysisChain;
@@ -473,9 +471,7 @@ pub(crate) struct SharedState {
     pub(crate) spectrogram: Spectrogram,
     pub(crate) metrics: AnalysisMetrics,
     #[cfg(not(target_arch = "wasm32"))]
-    analysis_receiver: NativeAnalysisReceiver,
-    #[cfg(not(target_arch = "wasm32"))]
-    analysis_updates: AnalysisUpdateSender,
+    analysis_bridge: Arc<Mutex<RenderAnalysisBridge>>,
     shader_renderer: ShaderRendererHandle,
     color_table_revision: u64,
     automatic_gain_cache: AutomaticGainCache,
@@ -483,8 +479,7 @@ pub(crate) struct SharedState {
 
 impl SharedState {
     pub(crate) fn new(
-        #[cfg(not(target_arch = "wasm32"))] analysis_receiver: NativeAnalysisReceiver,
-        #[cfg(not(target_arch = "wasm32"))] analysis_updates: AnalysisUpdateSender,
+        #[cfg(not(target_arch = "wasm32"))] analysis_bridge: Arc<Mutex<RenderAnalysisBridge>>,
     ) -> Self {
         let settings = RenderSettings::default();
         let mut color_table = ColorTable::new(
@@ -508,23 +503,29 @@ impl SharedState {
             spectrogram: Spectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
             metrics: AnalysisMetrics::default(),
             #[cfg(not(target_arch = "wasm32"))]
-            analysis_receiver,
-            #[cfg(not(target_arch = "wasm32"))]
-            analysis_updates,
+            analysis_bridge,
             shader_renderer: ShaderRendererHandle::new(),
             color_table_revision: 1,
             automatic_gain_cache: AutomaticGainCache::default(),
         };
 
         #[cfg(not(target_arch = "wasm32"))]
-        state.analysis_receiver.fresh_start(&mut state.spectrogram);
+        state
+            .analysis_bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .analysis_receiver
+            .fresh_start(&mut state.spectrogram);
 
         state
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn drain_analysis(&mut self) {
-        self.analysis_receiver
+        self.analysis_bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .analysis_receiver
             .drain_into(&mut self.spectrogram, &mut self.metrics);
     }
 
@@ -545,14 +546,13 @@ const BASELINE_TARGET_FRAME_SECS: f32 = 1.0 / BASELINE_TARGET_FPS;
 #[cfg(not(target_arch = "wasm32"))]
 pub fn create(
     params: Arc<PluginParams>,
-    analysis_updates: AnalysisUpdateSender,
-    analysis_receiver: NativeAnalysisReceiver,
+    analysis_bridge: Arc<Mutex<RenderAnalysisBridge>>,
     analysis_frequencies: Arc<ArcSwap<FrequencySnapshot>>,
     audio_state: Arc<ArcSwapOption<AudioState>>,
 ) -> Option<Box<dyn Editor>> {
     let egui_state = params.editor_state.clone();
 
-    let shared_state = SharedState::new(analysis_receiver, analysis_updates);
+    let shared_state = SharedState::new(analysis_bridge);
 
     create_egui_editor(
         egui_state.clone(),
@@ -568,7 +568,10 @@ pub fn create(
                 ..Default::default()
             },
         },
-        move |egui_ctx, _, _shared_state| {
+        move |egui_ctx, _, shared_state| {
+            // The editor object can outlive its native window. Reopening it
+            // creates a new GL context while retaining `SharedState`.
+            shared_state.shader_renderer.reset_context();
             build(egui_ctx);
         },
         move |egui_ctx, _setter, _, shared_state| {
@@ -610,7 +613,12 @@ pub(crate) fn render(
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        shared_state.analysis_updates.service();
+        shared_state
+            .analysis_bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .analysis_updates
+            .service();
         shared_state.drain_analysis();
     }
 
@@ -1731,6 +1739,9 @@ pub(crate) fn render(
     if let Some(clear_history) = analysis_action.get() {
         #[cfg(not(target_arch = "wasm32"))]
         shared_state
+            .analysis_bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .analysis_updates
             .stage(edited_analysis_settings, clear_history);
         #[cfg(target_arch = "wasm32")]
