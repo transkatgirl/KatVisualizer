@@ -7,6 +7,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc::{SyncSender, sync_channel},
     },
     thread::{self, JoinHandle, Thread},
     time::{Duration, Instant},
@@ -27,12 +28,12 @@ use crate::{
 
 mod chunker;
 
-/// One stereo job transferred from the audio thread to the persistent analysis
-/// worker. The pointed-to values stay alive and are not accessed by the audio
-/// thread until the worker publishes completion.
+/// One job transferred from the audio thread to the persistent analysis worker.
+/// The pointed-to values stay alive and are not accessed by the audio thread
+/// until the worker publishes completion.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy)]
-struct StereoJob {
+struct AnalysisJob {
     analyzer: *mut BetterAnalyzer,
     samples: *const f32,
     sample_count: usize,
@@ -40,7 +41,7 @@ struct StereoJob {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl StereoJob {
+impl AnalysisJob {
     const EMPTY: Self = Self {
         analyzer: ptr::null_mut(),
         samples: ptr::null(),
@@ -50,10 +51,10 @@ impl StereoJob {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-struct StereoWorkerShared {
-    submission: CachePadded<StereoSubmission>,
-    completion: CachePadded<StereoCompletion>,
-    control: CachePadded<StereoControl>,
+struct AnalysisWorkerShared {
+    submission: CachePadded<AnalysisSubmission>,
+    completion: CachePadded<AnalysisCompletion>,
+    control: CachePadded<AnalysisControl>,
     #[cfg(test)]
     force_failure: AtomicBool,
     #[cfg(test)]
@@ -63,62 +64,108 @@ struct StereoWorkerShared {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-struct StereoSubmission {
+struct AnalysisSubmission {
     sequence: AtomicU64,
-    job: UnsafeCell<StereoJob>,
+    job: UnsafeCell<AnalysisJob>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-struct StereoCompletion {
+struct AnalysisCompletion {
     sequence: AtomicU64,
     failed: AtomicBool,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-struct StereoControl {
+struct AnalysisControl {
     batch_active: AtomicBool,
     stop: AtomicBool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkerScheduling {
+    Normal,
+    #[cfg(not(target_arch = "wasm32"))]
+    Realtime {
+        max_buffer_frames: u32,
+        sample_rate_hz: u32,
+        #[cfg(test)]
+        force_failure: bool,
+    },
+}
+
+impl WorkerScheduling {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn realtime(max_buffer_frames: u32, sample_rate: f32) -> Self {
+        Self::Realtime {
+            max_buffer_frames,
+            sample_rate_hz: sample_rate.round() as u32,
+            #[cfg(test)]
+            force_failure: false,
+        }
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    fn realtime_with_forced_failure(max_buffer_frames: u32, sample_rate: f32) -> Self {
+        Self::Realtime {
+            max_buffer_frames,
+            sample_rate_hz: sample_rate.round() as u32,
+            force_failure: true,
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn requests_promotion(self) -> bool {
+        matches!(self, Self::Realtime { .. })
+    }
+}
+
 // SAFETY: the audio thread writes `job` only after observing completion of the
 // previous sequence. Its release store transfers the initialized job and its
-// pointed-to right analyzer to the worker, which only reads it after acquiring
-// that sequence. Completion transfers ownership back before the slot is reused.
+// pointed-to analyzer to the worker, which only reads it after acquiring that
+// sequence. Completion transfers ownership back before the slot is reused.
 #[cfg(not(target_arch = "wasm32"))]
-unsafe impl Send for StereoWorkerShared {}
+unsafe impl Send for AnalysisWorkerShared {}
 // SAFETY: access to the only interior-mutable non-atomic field follows the same
 // single-producer/single-consumer release/acquire protocol.
 #[cfg(not(target_arch = "wasm32"))]
-unsafe impl Sync for StereoWorkerShared {}
+unsafe impl Sync for AnalysisWorkerShared {}
 
-/// A persistent right-channel worker. The audio thread wakes it, analyzes the
-/// left channel itself, and waits for the right channel to finish.
+/// A persistent analysis worker. For stereo, the audio thread analyzes the left
+/// channel concurrently. For mono, it waits while the worker analyzes the input.
 #[cfg(not(target_arch = "wasm32"))]
-struct StereoWorker {
-    shared: Arc<StereoWorkerShared>,
+struct AnalysisWorker {
+    shared: Arc<AnalysisWorkerShared>,
     thread: Thread,
     submitted_sequence: Cell<u64>,
     batch_woken: Cell<bool>,
     join_handle: Option<JoinHandle<()>>,
+    #[cfg(test)]
+    promotion_requested: bool,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl StereoWorker {
+impl AnalysisWorker {
+    #[cfg(test)]
     fn new() -> Self {
-        Self::new_at_sequence(0)
+        Self::new_with_scheduling(0, WorkerScheduling::Normal)
     }
 
+    #[cfg(test)]
     fn new_at_sequence(initial_sequence: u64) -> Self {
-        let shared = Arc::new(StereoWorkerShared {
-            submission: CachePadded::new(StereoSubmission {
+        Self::new_with_scheduling(initial_sequence, WorkerScheduling::Normal)
+    }
+
+    fn new_with_scheduling(initial_sequence: u64, scheduling: WorkerScheduling) -> Self {
+        let shared = Arc::new(AnalysisWorkerShared {
+            submission: CachePadded::new(AnalysisSubmission {
                 sequence: AtomicU64::new(initial_sequence),
-                job: UnsafeCell::new(StereoJob::EMPTY),
+                job: UnsafeCell::new(AnalysisJob::EMPTY),
             }),
-            completion: CachePadded::new(StereoCompletion {
+            completion: CachePadded::new(AnalysisCompletion {
                 sequence: AtomicU64::new(initial_sequence),
                 failed: AtomicBool::new(false),
             }),
-            control: CachePadded::new(StereoControl {
+            control: CachePadded::new(AnalysisControl {
                 batch_active: AtomicBool::new(false),
                 stop: AtomicBool::new(false),
             }),
@@ -130,11 +177,20 @@ impl StereoWorker {
             park_count: std::sync::atomic::AtomicU64::new(0),
         });
         let worker_shared = Arc::clone(&shared);
+        let (startup_sender, startup_receiver) = sync_channel(1);
         let join_handle = thread::Builder::new()
             .name("katvisualizer-analysis".to_owned())
-            .spawn(move || Self::run(worker_shared, initial_sequence))
+            .spawn(move || Self::run(worker_shared, initial_sequence, scheduling, startup_sender))
             .expect("private analysis worker can be created");
         let thread = join_handle.thread().clone();
+        if let Err(error) = startup_receiver
+            .recv()
+            .expect("private analysis worker reports startup status")
+        {
+            nih_plug::nih_warn!(
+                "Could not promote the analysis worker to realtime priority: {error}"
+            );
+        }
 
         Self {
             shared,
@@ -142,10 +198,70 @@ impl StereoWorker {
             submitted_sequence: Cell::new(initial_sequence),
             batch_woken: Cell::new(false),
             join_handle: Some(join_handle),
+            #[cfg(test)]
+            promotion_requested: scheduling.requests_promotion(),
         }
     }
 
-    fn run(shared: Arc<StereoWorkerShared>, initial_sequence: u64) {
+    fn run(
+        shared: Arc<AnalysisWorkerShared>,
+        initial_sequence: u64,
+        scheduling: WorkerScheduling,
+        startup_sender: SyncSender<Result<(), String>>,
+    ) {
+        let priority_handle = match scheduling {
+            WorkerScheduling::Normal => {
+                let _ = startup_sender.send(Ok(()));
+                None
+            }
+            WorkerScheduling::Realtime {
+                max_buffer_frames,
+                sample_rate_hz,
+                #[cfg(test)]
+                force_failure,
+            } => {
+                #[cfg(test)]
+                let promotion = if force_failure {
+                    Err("forced analysis worker priority promotion failure".to_owned())
+                } else {
+                    audio_thread_priority::promote_current_thread_to_real_time(
+                        max_buffer_frames,
+                        sample_rate_hz,
+                    )
+                    .map_err(|error| error.to_string())
+                };
+                #[cfg(not(test))]
+                let promotion = audio_thread_priority::promote_current_thread_to_real_time(
+                    max_buffer_frames,
+                    sample_rate_hz,
+                )
+                .map_err(|error| error.to_string());
+
+                match promotion {
+                    Ok(handle) => {
+                        let _ = startup_sender.send(Ok(()));
+                        Some(handle)
+                    }
+                    Err(error) => {
+                        let _ = startup_sender.send(Err(error));
+                        None
+                    }
+                }
+            }
+        };
+
+        Self::run_loop(shared, initial_sequence);
+
+        if let Some(handle) = priority_handle
+            && let Err(error) = audio_thread_priority::demote_current_thread_from_real_time(handle)
+        {
+            nih_plug::nih_warn!(
+                "Could not demote the analysis worker from realtime priority: {error}"
+            );
+        }
+    }
+
+    fn run_loop(shared: Arc<AnalysisWorkerShared>, initial_sequence: u64) {
         let mut completed_sequence = initial_sequence;
 
         loop {
@@ -165,7 +281,7 @@ impl StereoWorker {
                 let forced_failure = false;
 
                 // SAFETY: acquiring a new submission sequence transfers the
-                // initialized job and exclusive access to its right analyzer.
+                // initialized job and exclusive access to its analyzer.
                 let job = unsafe { *shared.submission.job.get() };
                 let result = if forced_failure {
                     Err(Box::new("forced analysis worker failure") as Box<dyn std::any::Any + Send>)
@@ -223,10 +339,10 @@ impl StereoWorker {
 
     fn analyze(
         &self,
-        right_analyzer: &mut BetterAnalyzer,
-        right_samples: &[f32],
+        analyzer: &mut BetterAnalyzer,
+        samples: &[f32],
         listening_volume: Option<f32>,
-        analyze_left: impl FnOnce(),
+        concurrent_analysis: impl FnOnce(),
     ) {
         let previous_sequence = self.submitted_sequence.get();
         assert_eq!(
@@ -239,10 +355,10 @@ impl StereoWorker {
         // SAFETY: completion of the preceding sequence grants the audio thread
         // sole access to the preallocated slot. The release store publishes it.
         unsafe {
-            self.shared.submission.job.get().write(StereoJob {
-                analyzer: right_analyzer,
-                samples: right_samples.as_ptr(),
-                sample_count: right_samples.len(),
+            self.shared.submission.job.get().write(AnalysisJob {
+                analyzer,
+                samples: samples.as_ptr(),
+                sample_count: samples.len(),
                 listening_volume,
             });
         }
@@ -257,7 +373,7 @@ impl StereoWorker {
             self.thread.unpark();
         }
 
-        analyze_left();
+        concurrent_analysis();
 
         loop {
             if self.shared.completion.sequence.load(Ordering::Relaxed) == submitted_sequence
@@ -268,7 +384,7 @@ impl StereoWorker {
             hint::spin_loop();
         }
         if self.shared.completion.failed.load(Ordering::Relaxed) {
-            panic!("right-channel analysis worker failed");
+            panic!("analysis worker failed");
         }
     }
 
@@ -304,10 +420,15 @@ impl StereoWorker {
     fn park_count(&self) -> u64 {
         self.shared.park_count.load(Ordering::Relaxed)
     }
+
+    #[cfg(test)]
+    fn promotion_requested(&self) -> bool {
+        self.promotion_requested
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl Drop for StereoWorker {
+impl Drop for AnalysisWorker {
     fn drop(&mut self) {
         self.shared.control.stop.store(true, Ordering::Relaxed);
         self.thread.unpark();
@@ -452,10 +573,10 @@ impl AnalyzerPair {
 
 pub(crate) struct AnalysisChain {
     chunker: StftHelper<0>,
-    // This field must be dropped before `analyzers`, whose right-hand member is
+    // This field must be dropped before `analyzers`, whose members can be
     // borrowed by jobs running on the worker.
     #[cfg(not(target_arch = "wasm32"))]
-    stereo_worker: Option<StereoWorker>,
+    analysis_worker: Option<AnalysisWorker>,
     analyzers: Box<AnalyzerPair>,
     gain: f32,
     internal_buffering: bool,
@@ -473,9 +594,35 @@ pub(crate) struct AnalysisChain {
 
 impl AnalysisChain {
     pub(crate) fn new(config: &AnalysisChainConfig, sample_rate: f32, single_input: bool) -> Self {
+        Self::new_with_scheduling(config, sample_rate, single_input, WorkerScheduling::Normal)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn new_realtime(
+        config: &AnalysisChainConfig,
+        sample_rate: f32,
+        single_input: bool,
+        max_buffer_frames: u32,
+    ) -> Self {
+        Self::new_with_scheduling(
+            config,
+            sample_rate,
+            single_input,
+            WorkerScheduling::realtime(max_buffer_frames, sample_rate),
+        )
+    }
+
+    fn new_with_scheduling(
+        config: &AnalysisChainConfig,
+        sample_rate: f32,
+        single_input: bool,
+        worker_scheduling: WorkerScheduling,
+    ) -> Self {
         let mut chunker = StftHelper::new(2, sample_rate.ceil() as usize, 0);
         let chunk_size = (sample_rate as f64 / config.update_rate_hz).round() as usize;
         chunker.set_block_size(chunk_size);
+        #[cfg(target_arch = "wasm32")]
+        let _ = worker_scheduling;
 
         Self {
             sample_rate,
@@ -489,7 +636,8 @@ impl AnalysisChain {
             additional_latency: config.latency_offset,
             chunker,
             #[cfg(not(target_arch = "wasm32"))]
-            stereo_worker: (!single_input).then(StereoWorker::new),
+            analysis_worker: (!single_input || worker_scheduling.requests_promotion())
+                .then(|| AnalysisWorker::new_with_scheduling(0, worker_scheduling)),
             analyzers: Box::new(AnalyzerPair::new(config, sample_rate)),
             gain: config.gain,
             update_rate: config.update_rate_hz,
@@ -509,12 +657,15 @@ impl AnalysisChain {
         self.analyzers.frequencies()
     }
     pub(crate) fn analyze<S: AnalysisSink>(&mut self, buffer: &mut [&mut [f32]], output: &mut S) {
-        assert!(buffer.num_channels() == 1 || buffer.num_channels() == 2);
+        assert!(
+            (self.single_input && (buffer.num_channels() == 1 || buffer.num_channels() == 2))
+                || (!self.single_input && buffer.num_channels() == 2)
+        );
 
         output.begin_batch();
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(stereo_worker) = &self.stereo_worker {
-            stereo_worker.begin_batch();
+        if let Some(analysis_worker) = &self.analysis_worker {
+            analysis_worker.begin_batch();
         }
         if self.internal_buffering {
             self.analyze_buffered(buffer, output);
@@ -522,8 +673,8 @@ impl AnalysisChain {
             self.analyze_unbuffered(buffer, output);
         }
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(stereo_worker) = &self.stereo_worker {
-            stereo_worker.finish_batch();
+        if let Some(analysis_worker) = &self.analysis_worker {
+            analysis_worker.finish_batch();
         }
         output.finish_batch();
     }
@@ -535,13 +686,22 @@ impl AnalysisChain {
         let gain = self.gain;
         let chunk_duration = self.chunk_duration;
         #[cfg(not(target_arch = "wasm32"))]
-        let stereo_worker = self.stereo_worker.as_ref();
+        let analysis_worker = self.analysis_worker.as_ref();
         let mut callback = |channel_idx, buffer: &[f32]| {
             if channel_idx == 1 && single_input {
                 return;
             }
 
             if single_input {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(analysis_worker) = analysis_worker {
+                    analysis_worker.analyze(&mut analyzers.left, buffer, listening_volume, || {});
+                } else {
+                    analyzers
+                        .left
+                        .analyze(buffer.iter().copied(), listening_volume);
+                }
+                #[cfg(target_arch = "wasm32")]
                 analyzers
                     .left
                     .analyze(buffer.iter().copied(), listening_volume);
@@ -560,7 +720,7 @@ impl AnalysisChain {
                 } = analyzers;
 
                 #[cfg(not(target_arch = "wasm32"))]
-                stereo_worker
+                analysis_worker
                     .expect("stereo chains have an analysis worker")
                     .analyze(right, right_buffer, listening_volume, || {
                         left.analyze(left_buffer.iter().copied(), listening_volume);
@@ -624,6 +784,20 @@ impl AnalysisChain {
         let analyzers = &mut *self.analyzers;
 
         if self.single_input {
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(analysis_worker) = &self.analysis_worker {
+                analysis_worker.analyze(
+                    &mut analyzers.left,
+                    buffer[0],
+                    self.listening_volume,
+                    || {},
+                );
+            } else {
+                analyzers
+                    .left
+                    .analyze(buffer[0].iter().copied(), self.listening_volume);
+            }
+            #[cfg(target_arch = "wasm32")]
             analyzers
                 .left
                 .analyze(buffer[0].iter().copied(), self.listening_volume);
@@ -633,7 +807,7 @@ impl AnalysisChain {
             let listening_volume = self.listening_volume;
 
             #[cfg(not(target_arch = "wasm32"))]
-            self.stereo_worker
+            self.analysis_worker
                 .as_ref()
                 .expect("stereo chains have an analysis worker")
                 .analyze(
@@ -754,10 +928,10 @@ impl AnalysisChain {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn replace_analyzers(&mut self, analyzers: Box<AnalyzerPair>) -> Box<AnalyzerPair> {
         debug_assert!(
-            self.stereo_worker
+            self.analysis_worker
                 .as_ref()
-                .is_none_or(StereoWorker::is_idle),
-            "analyzers cannot be replaced while the stereo worker is active"
+                .is_none_or(AnalysisWorker::is_idle),
+            "analyzers cannot be replaced while the analysis worker is active"
         );
         std::mem::replace(&mut self.analyzers, analyzers)
     }
@@ -900,15 +1074,16 @@ mod tests {
     fn worker_lifecycle_matches_channel_layout() {
         let config = test_config(false);
         let mono = AnalysisChain::new(&config, 48_000.0, true);
-        assert!(mono.stereo_worker.is_none());
+        assert!(mono.analysis_worker.is_none());
 
         let mut stereo = AnalysisChain::new(&config, 48_000.0, false);
         let worker = stereo
-            .stereo_worker
+            .analysis_worker
             .as_ref()
             .expect("stereo chain has a worker");
         assert_ne!(worker.thread_id(), thread::current().id());
         assert!(worker.is_idle());
+        assert!(!worker.promotion_requested());
 
         let mut left = samples(64, 0.07);
         let mut right = samples(64, 0.11);
@@ -922,10 +1097,118 @@ mod tests {
 
         assert!(
             stereo
-                .stereo_worker
+                .analysis_worker
                 .as_ref()
                 .expect("stereo chain still has its worker")
                 .is_idle()
+        );
+    }
+
+    #[test]
+    fn promotion_failure_keeps_stereo_worker_available() {
+        let config = test_config(false);
+        let scheduling = WorkerScheduling::realtime_with_forced_failure(512, 48_000.0);
+        let mut chain = AnalysisChain::new_with_scheduling(&config, 48_000.0, false, scheduling);
+        assert!(
+            chain
+                .analysis_worker
+                .as_ref()
+                .expect("stereo chain has a worker")
+                .promotion_requested()
+        );
+
+        let mut left = samples(64, 0.07);
+        let mut right = samples(64, 0.11);
+        let mut spectrogram = Spectrogram::new(2, config.resolution);
+        let mut metrics = AnalysisMetrics::default();
+        let mut sink = DirectAnalysisSink {
+            spectrogram: &mut spectrogram,
+            metrics: &mut metrics,
+        };
+        chain.analyze(&mut [&mut left, &mut right], &mut sink);
+
+        assert_eq!(
+            spectrogram.newest().duration,
+            Duration::from_secs_f64(left.len() as f64 / 48_000.0)
+        );
+        assert!(
+            chain
+                .analysis_worker
+                .as_ref()
+                .expect("stereo chain still has its worker")
+                .is_idle()
+        );
+
+        drop(chain);
+    }
+
+    #[test]
+    fn promotion_failure_keeps_mono_worker_available() {
+        let config = test_config(false);
+        let scheduling = WorkerScheduling::realtime_with_forced_failure(512, 48_000.0);
+        let mut chain = AnalysisChain::new_with_scheduling(&config, 48_000.0, true, scheduling);
+        let worker = chain
+            .analysis_worker
+            .as_ref()
+            .expect("realtime mono chain has a worker");
+        assert!(worker.promotion_requested());
+        assert!(worker.is_idle());
+
+        let mut left = samples(64, 0.07);
+        let mut spectrogram = Spectrogram::new(2, config.resolution);
+        let mut metrics = AnalysisMetrics::default();
+        let mut sink = DirectAnalysisSink {
+            spectrogram: &mut spectrogram,
+            metrics: &mut metrics,
+        };
+        chain.analyze(&mut [&mut left], &mut sink);
+
+        let mut analyzer = BetterAnalyzer::new(config.analyzer_config(48_000.0));
+        analyzer.analyze(left.iter().copied(), None);
+        let mut expected = BetterAnalysis::new(config.resolution);
+        expected.update_mono(
+            &analyzer,
+            config.gain,
+            None,
+            Duration::from_secs_f64(left.len() as f64 / 48_000.0),
+        );
+        assert_analysis_eq(spectrogram.newest(), &expected);
+        assert!(
+            chain
+                .analysis_worker
+                .as_ref()
+                .expect("realtime mono chain still has its worker")
+                .is_idle()
+        );
+
+        drop(chain);
+    }
+
+    #[test]
+    fn buffered_realtime_mono_batch_wakes_worker_once() {
+        let config = test_config(true);
+        let chunk_size = (48_000.0 / config.update_rate_hz).round() as usize;
+        let chunk_count = 4;
+        let scheduling = WorkerScheduling::realtime_with_forced_failure(512, 48_000.0);
+        let mut chain = AnalysisChain::new_with_scheduling(&config, 48_000.0, true, scheduling);
+        let mut left = samples(chunk_size * chunk_count, 0.07);
+        let mut spectrogram = Spectrogram::new(chunk_count + 1, config.resolution);
+        let mut metrics = AnalysisMetrics::default();
+        let mut sink = DirectAnalysisSink {
+            spectrogram: &mut spectrogram,
+            metrics: &mut metrics,
+        };
+
+        chain.analyze(&mut [&mut left], &mut sink);
+
+        let worker = chain.analysis_worker.as_ref().unwrap();
+        assert_eq!(worker.wake_count(), 1);
+        assert!(worker.is_idle());
+        assert!(
+            spectrogram
+                .newest_to_oldest()
+                .take(chunk_count)
+                .all(|analysis| analysis.duration == chain.chunk_duration)
         );
     }
 
@@ -946,7 +1229,7 @@ mod tests {
 
         chain.analyze(&mut [&mut left, &mut right], &mut sink);
 
-        let worker = chain.stereo_worker.as_ref().unwrap();
+        let worker = chain.analysis_worker.as_ref().unwrap();
         assert_eq!(worker.wake_count(), 1);
         assert!(worker.is_idle());
         assert!(
@@ -961,7 +1244,7 @@ mod tests {
     fn structural_swap_reuses_worker_across_repeated_jobs() {
         let config = test_config(false);
         let mut chain = AnalysisChain::new(&config, 48_000.0, false);
-        let worker_id = chain.stereo_worker.as_ref().unwrap().thread_id();
+        let worker_id = chain.analysis_worker.as_ref().unwrap().thread_id();
         let old = chain.replace_analyzers(Box::new(AnalyzerPair::new(&config, 48_000.0)));
         drop(old);
 
@@ -977,7 +1260,7 @@ mod tests {
             chain.analyze(&mut [&mut left, &mut right], &mut sink);
         }
 
-        let worker = chain.stereo_worker.as_ref().unwrap();
+        let worker = chain.analysis_worker.as_ref().unwrap();
         assert_eq!(worker.thread_id(), worker_id);
         assert!(worker.is_idle());
     }
@@ -987,7 +1270,7 @@ mod tests {
         let config = test_config(false);
         let mut chain = AnalysisChain::new(&config, 48_000.0, false);
         chain
-            .stereo_worker
+            .analysis_worker
             .as_ref()
             .expect("stereo chain has a worker")
             .force_failure();
@@ -1010,7 +1293,7 @@ mod tests {
     #[test]
     fn worker_sequences_wrap_without_losing_a_job() {
         let config = test_config(false);
-        let worker = StereoWorker::new_at_sequence(u64::MAX - 1);
+        let worker = AnalysisWorker::new_at_sequence(u64::MAX - 1);
         let analyzer_config = config.analyzer_config(48_000.0);
         let mut left_analyzer = BetterAnalyzer::new(analyzer_config.clone());
         let mut right_analyzer = BetterAnalyzer::new(analyzer_config);
@@ -1048,7 +1331,7 @@ mod tests {
             chain.analyze(&mut [&mut left, &mut right], &mut sink);
         }
 
-        let worker = chain.stereo_worker.as_ref().unwrap();
+        let worker = chain.analysis_worker.as_ref().unwrap();
         assert_eq!(worker.wake_count(), BATCHES);
         assert!(worker.is_idle());
     }
@@ -1070,19 +1353,19 @@ mod tests {
         let old = chain.replace_analyzers(Box::new(AnalyzerPair::new(&config, 48_000.0)));
 
         drop(old);
-        assert!(chain.stereo_worker.as_ref().unwrap().is_idle());
+        assert!(chain.analysis_worker.as_ref().unwrap().is_idle());
     }
 
     #[test]
     fn parked_worker_shuts_down_cleanly() {
-        let worker = StereoWorker::new();
+        let worker = AnalysisWorker::new();
         std::thread::yield_now();
         drop(worker);
     }
 
     #[test]
     fn idle_worker_reparks_after_stale_wake_token() {
-        let worker = StereoWorker::new();
+        let worker = AnalysisWorker::new();
         let deadline = Instant::now() + Duration::from_secs(5);
 
         while worker.park_count() < 1 {

@@ -153,9 +153,9 @@ impl<const NUM_SIDECHAIN_INPUTS: usize> StftHelper<NUM_SIDECHAIN_INPUTS> {
         S: StftInput,
         F: FnMut(usize, Option<usize>, &mut [f32]),
     {
-        assert_eq!(
-            main_buffer.num_channels(),
-            self.main_input_ring_buffers.len()
+        assert!(
+            (1..=self.main_input_ring_buffers.len()).contains(&main_buffer.num_channels()),
+            "the main buffer channel count exceeds the configured channel count"
         );
         assert!(overlap_times > 0);
 
@@ -301,7 +301,10 @@ impl<const NUM_SIDECHAIN_INPUTS: usize> StftHelper<NUM_SIDECHAIN_INPUTS> {
         B: StftInput + ?Sized,
         F: FnMut(usize, &mut [f32]),
     {
-        assert_eq!(buffer.num_channels(), self.main_input_ring_buffers.len());
+        assert!(
+            (1..=self.main_input_ring_buffers.len()).contains(&buffer.num_channels()),
+            "the main buffer channel count exceeds the configured channel count"
+        );
         assert!(overlap_times > 0);
 
         let main_buffer_len = buffer.num_samples();

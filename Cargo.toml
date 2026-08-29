@@ -36,6 +36,7 @@ half      = { version = "2.7.1", features = ["bytemuck"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 arc-swap = "1.7.1"
+audio_thread_priority = "0.37.0"
 crossbeam-utils = "0.8.21"
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95", features = [
 	"assert_process_allocs",

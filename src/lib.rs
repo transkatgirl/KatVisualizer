@@ -110,6 +110,11 @@ impl AudioState {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn use_realtime_analysis_worker(process_mode: ProcessMode) -> bool {
+    process_mode == ProcessMode::Realtime
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct PreparedAnalyzers {
     generation: u64,
     config: AnalysisChainConfig,
@@ -740,12 +745,18 @@ impl Plugin for MyPlugin {
     ) -> bool {
         self.audio_format_generation = self.audio_format_generation.wrapping_add(1);
         let analysis_config = **self.desired_config.load();
+        let single_input = audio_io_layout.main_input_channels == NonZero::new(1);
 
-        let new_chain = AnalysisChain::new(
-            &analysis_config,
-            buffer_config.sample_rate,
-            audio_io_layout.main_input_channels == NonZero::new(1),
-        );
+        let new_chain = if use_realtime_analysis_worker(buffer_config.process_mode) {
+            AnalysisChain::new_realtime(
+                &analysis_config,
+                buffer_config.sample_rate,
+                single_input,
+                buffer_config.max_buffer_size,
+            )
+        } else {
+            AnalysisChain::new(&analysis_config, buffer_config.sample_rate, single_input)
+        };
         context.set_latency_samples(new_chain.latency_samples);
         self.latency_samples = new_chain.latency_samples;
         self.analysis_frequencies.store(Arc::new(FrequencySnapshot {
@@ -841,6 +852,13 @@ nih_export_vst3!(MyPlugin);
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod update_tests {
     use super::*;
+
+    #[test]
+    fn only_realtime_process_mode_requests_realtime_worker() {
+        assert!(use_realtime_analysis_worker(ProcessMode::Realtime));
+        assert!(!use_realtime_analysis_worker(ProcessMode::Buffered));
+        assert!(!use_realtime_analysis_worker(ProcessMode::Offline));
+    }
 
     fn configured_plugin() -> (MyPlugin, AnalysisUpdateSender, AnalysisChainConfig) {
         let mut plugin = MyPlugin::default();
