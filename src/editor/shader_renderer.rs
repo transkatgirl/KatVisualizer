@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use std::{
     any::Any,
     sync::{Arc, Mutex},
@@ -1691,15 +1693,17 @@ mod tests {
     fn revision_overflow_forces_a_full_rebuild() {
         let mut spectrogram = Spectrogram::new(4, 2);
         push_row(&mut spectrogram, Duration::from_millis(10), 1.0);
-        let mut renderer = ShaderRenderer::default();
-        renderer.staged_state = Some(SpectrogramRenderState {
-            epoch: 0,
-            revision: u64::MAX,
-            valid_rows: 4,
-            retained_rows: 4,
-        });
-        renderer.staged_width = 2;
-        renderer.staged_height = 4;
+        let mut renderer = ShaderRenderer {
+            staged_state: Some(SpectrogramRenderState {
+                epoch: 0,
+                revision: u64::MAX,
+                valid_rows: 4,
+                retained_rows: 4,
+            }),
+            staged_width: 2,
+            staged_height: 4,
+            ..Default::default()
+        };
         renderer.prepare_history(&spectrogram, spectrogram.render_state(), 2, 4, false);
         assert!(renderer.pending_history.rebuild);
         assert_eq!(renderer.pending_history.ranges[0].unwrap().rows, 1);
@@ -1933,8 +1937,10 @@ mod tests {
         push_row(&mut spectrogram, Duration::from_millis(10), 1.0);
         let frequencies = [(20.0, 30.0, 40.0), (40.0, 50.0, 60.0)];
         let color_table = test_color_table();
-        let mut settings = RenderSettings::default();
-        settings.bargraph_height = 1.0;
+        let mut settings = RenderSettings {
+            bargraph_height: 1.0,
+            ..Default::default()
+        };
         let mut renderer = ShaderRenderer::default();
         renderer.prepare(
             &spectrogram,
@@ -1953,7 +1959,6 @@ mod tests {
         assert!(renderer.bar_cache.masking_sums.is_empty());
         assert!(renderer.masking_staging.is_empty());
 
-        let mut settings = settings;
         settings.bargraph_height = 0.0;
         renderer.bar_dirty = false;
         renderer.prepare(
