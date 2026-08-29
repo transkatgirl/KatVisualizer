@@ -83,8 +83,8 @@ If you'd like to start improving the visualization's readability further, the se
 - Render Options -> Range above masking mean
 - Render Options -> Range below masking mean
 - Analysis Options -> ERB bandwidth divisor (ideal value depends on what you're trying to analyze; if in doubt, the default value is usually a good middle ground)
-- Analysis Options -> Resolution (increasing it may hurt performance)
 - Analysis Options -> Update rate (increasing it may hurt performance)
+- Analysis Options -> Resolution (increasing it may hurt performance)
 
 If you'd like to start improving this visualization's psychoacoustic accuracy further, the settings with the largest impact are:
 - Render Options -> Use signal-to-mask ratio to clamp spectrogram shading
