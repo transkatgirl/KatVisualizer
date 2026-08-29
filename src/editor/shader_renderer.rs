@@ -752,8 +752,10 @@ fn averaging_count(spectrogram: &Spectrogram, averaging: Duration) -> usize {
     if averaging.is_zero() {
         return 1;
     }
+    let valid_rows = spectrogram.render_state().valid_rows.max(1);
     let max_index = spectrogram
         .newest_to_oldest()
+        .take(valid_rows)
         .enumerate()
         .take_while(|(index, row)| {
             row.duration.mul_f32(*index as f32) <= averaging
@@ -1253,6 +1255,32 @@ mod tests {
             assert!((output[bin * 4 + 1].to_f32() - 2.0).abs() < 0.001);
             assert!((output[bin * 4 + 2].to_f32() - 1.0).abs() < 0.001);
         }
+    }
+
+    #[test]
+    fn bar_averaging_excludes_rows_invalidated_by_a_clear() {
+        let mut spectrogram = Spectrogram::new(4, 2);
+        for value in 1..=4 {
+            push_row(&mut spectrogram, Duration::from_millis(10), value as f32);
+        }
+        spectrogram.clear();
+        push_row(&mut spectrogram, Duration::from_millis(10), 10.0);
+
+        assert_eq!(averaging_count(&spectrogram, Duration::from_millis(30)), 1);
+
+        let mut data = Vec::new();
+        let mut masking = Vec::new();
+        let mut output = Vec::new();
+        prepare_bar_row(
+            &spectrogram,
+            Duration::from_millis(30),
+            true,
+            &mut data,
+            &mut masking,
+            &mut output,
+        );
+        assert_eq!(output[1].to_f32(), 10.0);
+        assert_eq!(output[2].to_f32(), 9.0);
     }
 
     #[test]

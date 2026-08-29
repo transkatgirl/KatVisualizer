@@ -60,14 +60,18 @@ fn calculate_volume_min_max(settings: &RenderSettings, spectrogram: &Spectrogram
 
     for row in spectrogram.newest_to_oldest() {
         elapsed += row.duration;
-        if elapsed > settings.agc_duration {
-            break;
-        }
-
         if row.masking_mean.is_finite() {
             masking_sum += row.masking_mean as f64;
             rows += 1;
         }
+
+        if elapsed >= settings.agc_duration {
+            break;
+        }
+    }
+
+    if rows == 0 {
+        return (settings.min_db, settings.max_db);
     }
 
     let masking = (masking_sum / rows as f64) as f32;
@@ -76,6 +80,15 @@ fn calculate_volume_min_max(settings: &RenderSettings, spectrogram: &Spectrogram
         (masking - settings.agc_below_masking).clamp(settings.agc_minimum, settings.agc_maximum),
         (masking + settings.agc_above_masking).clamp(settings.agc_minimum, settings.agc_maximum),
     )
+}
+
+fn axis_index(value: f32, start: f32, end: f32, length: usize) -> Option<usize> {
+    if length == 0 || start == end {
+        return None;
+    }
+
+    let normalized = ((value - start) / (end - start)).clamp(0.0, 1.0);
+    Some(((normalized * length as f32).floor() as usize).min(length - 1))
 }
 
 struct UnderCursor {
@@ -96,28 +109,28 @@ fn get_under_cursor(
     (bargraph_max_db, bargraph_min_db): (f32, f32),
     spectrogram_height: usize,
 ) -> Option<UnderCursor> {
-    let max_frequency = (frequencies.len() - 1) as f32;
+    let valid_rows = spectrogram.render_state().valid_rows;
+    if frequencies.is_empty() || valid_rows == 0 {
+        return None;
+    }
 
     if bargraph_bounds.contains(cursor) {
-        let frequency = frequencies[if !horizontal {
-            map_value(
+        let frequency_index = if !horizontal {
+            axis_index(
                 cursor.x,
                 bargraph_bounds.min.x,
                 bargraph_bounds.max.x,
-                0.0,
-                max_frequency,
+                frequencies.len(),
             )
-            .floor() as usize
         } else {
-            map_value(
+            axis_index(
                 cursor.y,
                 bargraph_bounds.max.y,
-                bargraph_bounds.min.x,
-                0.0,
-                max_frequency,
+                bargraph_bounds.min.y,
+                frequencies.len(),
             )
-            .floor() as usize
-        }];
+        }?;
+        let frequency = frequencies[frequency_index];
         let amplitude = if !horizontal {
             map_value(
                 bargraph_bounds.max.y - cursor.y,
@@ -145,43 +158,39 @@ fn get_under_cursor(
     } else if spectrogram_bounds.contains(cursor) {
         let (x, y) = if !horizontal {
             (
-                map_value(
+                axis_index(
                     cursor.x,
                     spectrogram_bounds.min.x,
                     spectrogram_bounds.max.x,
-                    0.0,
-                    max_frequency,
-                )
-                .floor() as usize,
-                map_value(
+                    frequencies.len(),
+                )?,
+                axis_index(
                     cursor.y,
                     spectrogram_bounds.min.y,
                     spectrogram_bounds.max.y,
-                    0.0,
-                    (spectrogram_height - 1) as f32,
-                )
-                .floor() as usize,
+                    spectrogram_height,
+                )?,
             )
         } else {
             (
-                map_value(
+                axis_index(
                     cursor.y,
                     spectrogram_bounds.max.y,
                     spectrogram_bounds.min.y,
-                    0.0,
-                    max_frequency,
-                )
-                .floor() as usize,
-                map_value(
+                    frequencies.len(),
+                )?,
+                axis_index(
                     cursor.x,
                     spectrogram_bounds.min.x,
                     spectrogram_bounds.max.x,
-                    0.0,
-                    (spectrogram_height - 1) as f32,
-                )
-                .floor() as usize,
+                    spectrogram_height,
+                )?,
             )
         };
+
+        if y >= valid_rows.min(spectrogram_height) {
+            return None;
+        }
 
         let frequency = frequencies[x];
         let duration = spectrogram.newest().duration;
