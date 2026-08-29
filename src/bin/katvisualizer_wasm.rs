@@ -5,7 +5,10 @@ fn main() {}
 fn main() {
     use eframe::wasm_bindgen::JsCast as _;
 
-    let web_options = eframe::WebOptions::default();
+    let web_options = eframe::WebOptions {
+        webgl_context_option: eframe::WebGlContextOption::WebGl2,
+        ..Default::default()
+    };
 
     wasm_bindgen_futures::spawn_local(async {
         let document = web_sys::window()
@@ -23,7 +26,11 @@ fn main() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|cc| Ok(Box::new(katvisualizer::WasmApp::new(cc)))),
+                Box::new(|cc| {
+                    katvisualizer::WasmApp::new(cc)
+                        .map(|app| Box::new(app) as Box<dyn eframe::App>)
+                        .map_err(Into::into)
+                }),
             )
             .await;
 

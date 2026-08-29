@@ -712,6 +712,17 @@ impl BetterAnalysis {
 /// Render-owned analysis history. The newest slice is always at age zero.
 pub(crate) struct Spectrogram {
     data: VecDeque<BetterAnalysis>,
+    revision: u64,
+    clear_epoch: u64,
+    valid_rows: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct SpectrogramRenderState {
+    pub(crate) epoch: u64,
+    pub(crate) revision: u64,
+    pub(crate) valid_rows: usize,
+    pub(crate) retained_rows: usize,
 }
 
 impl Spectrogram {
@@ -730,7 +741,26 @@ impl Spectrogram {
                 analysis.duration = Duration::from_secs(1);
                 analysis
             })),
+            revision: 0,
+            clear_epoch: 0,
+            valid_rows: 0,
         }
+    }
+
+    #[inline]
+    pub(crate) fn render_state(&self) -> SpectrogramRenderState {
+        SpectrogramRenderState {
+            epoch: self.clear_epoch,
+            revision: self.revision,
+            valid_rows: self.valid_rows,
+            retained_rows: self.data.len(),
+        }
+    }
+
+    #[inline]
+    fn record_row(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+        self.valid_rows = self.valid_rows.saturating_add(1).min(self.data.len());
     }
 
     #[inline]
@@ -760,6 +790,7 @@ impl Spectrogram {
         let evicted = self.data.pop_back().expect("spectrogram is never empty");
         let incoming = std::mem::replace(analysis, evicted);
         self.data.push_front(incoming);
+        self.record_row();
     }
 
     /// Reuses the oldest render-owned allocation and makes it the newest slice.
@@ -767,6 +798,7 @@ impl Spectrogram {
         let mut analysis = self.data.pop_back().expect("spectrogram is never empty");
         update(&mut analysis);
         self.data.push_front(analysis);
+        self.record_row();
     }
 
     /// Inserts zero-amplitude rows for missing analyzed time.
@@ -799,6 +831,8 @@ impl Spectrogram {
             let bins = analysis.data.len();
             analysis.make_blank(duration, bins);
         }
+        self.valid_rows = 0;
+        self.clear_epoch = self.clear_epoch.wrapping_add(1);
     }
 }
 
@@ -810,6 +844,55 @@ impl BetterAnalysis {
         self.data.fill((0.0, f32::NEG_INFINITY));
         self.masking.fill((0.0, f32::NEG_INFINITY));
         self.masking_mean = f32::NEG_INFINITY;
+    }
+}
+
+#[cfg(test)]
+mod spectrogram_render_state_tests {
+    use super::*;
+
+    #[test]
+    fn rows_advance_revision_and_validity() {
+        let mut spectrogram = Spectrogram::new(3, 2);
+        assert_eq!(
+            spectrogram.render_state(),
+            SpectrogramRenderState {
+                epoch: 0,
+                revision: 0,
+                valid_rows: 0,
+                retained_rows: 3,
+            }
+        );
+
+        spectrogram.update_with(|row| row.make_blank(Duration::from_millis(10), 2));
+        spectrogram.insert_blank_span(Duration::from_millis(20), Duration::from_millis(10), 2);
+        assert_eq!(spectrogram.render_state().revision, 3);
+        assert_eq!(spectrogram.render_state().valid_rows, 3);
+
+        spectrogram.update_with(|row| row.make_blank(Duration::from_millis(10), 2));
+        assert_eq!(spectrogram.render_state().revision, 4);
+        assert_eq!(spectrogram.render_state().valid_rows, 3);
+    }
+
+    #[test]
+    fn clear_advances_epoch_and_resets_validity_without_revising_rows() {
+        let mut spectrogram = Spectrogram::new(2, 1);
+        spectrogram.update_with(|row| row.make_blank(Duration::from_millis(5), 1));
+        let revision = spectrogram.render_state().revision;
+        spectrogram.clear();
+        assert_eq!(spectrogram.render_state().epoch, 1);
+        assert_eq!(spectrogram.render_state().revision, revision);
+        assert_eq!(spectrogram.render_state().valid_rows, 0);
+    }
+
+    #[test]
+    fn revision_wraps_without_affecting_the_clear_epoch() {
+        let mut spectrogram = Spectrogram::new(2, 1);
+        spectrogram.revision = u64::MAX;
+        spectrogram.update_with(|row| row.make_blank(Duration::from_millis(5), 1));
+        assert_eq!(spectrogram.render_state().revision, 0);
+        assert_eq!(spectrogram.render_state().epoch, 0);
+        assert_eq!(spectrogram.render_state().valid_rows, 1);
     }
 }
 

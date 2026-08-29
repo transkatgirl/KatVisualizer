@@ -390,7 +390,7 @@ impl Default for AnalysisChainConfig {
             internal_buffering: true,
             strict_synchronization: true,
             #[cfg(not(target_arch = "wasm32"))]
-            update_rate_hz: 1536.0, // round((1408 * ((1400 / 900) * 0.75)) / 256) * 256
+            update_rate_hz: 2048.0, // roughly 0.5x JND for determining if two auditory events are simultaneous
             #[cfg(target_arch = "wasm32")]
             update_rate_hz: 512.0,
             #[cfg(not(target_arch = "wasm32"))]

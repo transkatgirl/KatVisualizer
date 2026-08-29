@@ -486,10 +486,15 @@ pub struct WasmApp {
 
 #[cfg(target_arch = "wasm32")]
 impl WasmApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let mut shared_state = SharedState::new();
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, String> {
+        let shared_state = SharedState::new();
 
-        build(&cc.egui_ctx, &mut shared_state.spectrogram_texture);
+        build(&cc.egui_ctx);
+        let gl = cc
+            .gl
+            .as_deref()
+            .ok_or_else(|| "WebGL2 renderer was not initialized".to_owned())?;
+        shared_state.initialize_renderer(gl)?;
 
         let analysis_chain = AnalysisChain::new(
             &AnalysisChainConfig::default(),
@@ -497,13 +502,13 @@ impl WasmApp {
             false,
         );
 
-        Self {
+        Ok(Self {
             analysis_chain,
             state_info: AudioState::default(),
             last_single_input: AudioState::default().input_channels == 1,
             last_sample_rate: AudioState::default().sample_rate,
             shared_state,
-        }
+        })
     }
     fn update_config(&mut self, single_input: bool, sample_rate: f32) {
         let analysis_config = self.analysis_chain.config();
@@ -580,7 +585,7 @@ pub struct PluginParams {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-const MAX_FREQUENCY_BINS: usize = 2048;
+const MAX_FREQUENCY_BINS: usize = 4096;
 
 #[cfg(target_arch = "wasm32")]
 const MAX_FREQUENCY_BINS: usize = 1024;

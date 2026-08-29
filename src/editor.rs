@@ -6,9 +6,7 @@ use arc_swap::{ArcSwap, ArcSwapOption};
 use color::{ColorSpaceTag, DynamicColor, Flags, Rgba8, Srgb};
 #[cfg(target_arch = "wasm32")]
 use eframe::egui::{
-    self, Align2, Color32, ColorImage, Context, FontId, ImageData, Mesh, Pos2, Rect, Shape,
-    TextureId, TextureOptions, ThemePreference, Vec2,
-    epaint::{ImageDelta, Vertex, WHITE_UV},
+    self, Align2, Color32, Context, FontId, PaintCallback, Pos2, Rect, Shape, ThemePreference,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use nih_plug::editor::Editor;
@@ -16,13 +14,18 @@ use nih_plug::editor::Editor;
 use nih_plug_egui::{
     EguiSettings, EguiState, GlConfig, GraphicsConfig, create_egui_editor,
     egui::{
-        self, Align2, Color32, ColorImage, Context, FontId, Id, ImageData, Mesh, Pos2, Rect, Sense,
-        Shape, TextureId, TextureOptions, ThemePreference, UiBuilder, Vec2,
-        epaint::{ImageDelta, Vertex, WHITE_UV},
+        self, Align2, Color32, Context, FontId, Id, PaintCallback, Pos2, Rect, Sense, Shape,
+        ThemePreference, UiBuilder, Vec2,
     },
     resizable_window::paint_resize_corner,
 };
-use std::{cell::Cell, sync::Arc};
+use std::cell::Cell;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
+mod shader_renderer;
+use shader_renderer::ShaderRendererHandle;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
@@ -40,8 +43,8 @@ use crate::AnalysisChain;
 use crate::{
     AnalysisChainConfig, AnalysisMetrics, AudioState, MAX_FREQUENCY_BINS, SPECTROGRAM_SLICES,
     analyzer::{
-        BetterAnalysis, HEARING_THRESHOLD_PHON, MAX_COMPLETE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON,
-        MIN_COMPLETE_NORM_PHON, Spectrogram, map_value, scale_bark,
+        HEARING_THRESHOLD_PHON, MAX_COMPLETE_NORM_PHON, MAX_INFORMATIVE_NORM_PHON,
+        MIN_COMPLETE_NORM_PHON, Spectrogram, map_value,
     },
 };
 
@@ -73,983 +76,6 @@ fn calculate_volume_min_max(settings: &RenderSettings, spectrogram: &Spectrogram
         (masking - settings.agc_below_masking).clamp(settings.agc_minimum, settings.agc_maximum),
         (masking + settings.agc_above_masking).clamp(settings.agc_minimum, settings.agc_maximum),
     )
-}
-
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::type_complexity)]
-fn draw_bargraph(
-    mesh: &mut Mesh,
-    spectrogram: &Spectrogram,
-    buffer: (Vec<(f32, f32)>, Vec<f32>),
-    horizontal: bool,
-    bounds: Rect,
-    color_table: &ColorTable,
-    masking_color: Option<Color32>,
-    (max_db, min_db): (f32, f32),
-    averaging: Duration,
-) {
-    let front = spectrogram.newest();
-
-    if !averaging.is_zero() {
-        assert_eq!(front.data.len(), buffer.0.len());
-
-        let target_len = front.data.len();
-        let target_duration = front.duration;
-
-        let max_index = spectrogram
-            .newest_to_oldest()
-            .enumerate()
-            .take_while(|(i, row)| {
-                row.duration.mul_f32(*i as f32) <= averaging
-                    && row.data.len() == target_len
-                    && row.duration == target_duration
-            })
-            .map(|(i, _)| i)
-            .last()
-            .unwrap_or(1);
-
-        if max_index > 1 {
-            draw_averaged_bargraph(
-                mesh,
-                spectrogram,
-                buffer,
-                horizontal,
-                bounds,
-                color_table,
-                masking_color,
-                (max_db, min_db),
-                front,
-                max_index,
-            );
-
-            return;
-        }
-    }
-
-    draw_bargraph_from(
-        mesh,
-        &front.data,
-        horizontal,
-        bounds,
-        color_table,
-        (max_db, min_db),
-    );
-    if let Some(masking_color) = masking_color {
-        draw_secondary_bargraph_from_pairs(
-            mesh,
-            &front.masking,
-            horizontal,
-            bounds,
-            masking_color,
-            (max_db, min_db),
-        );
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::type_complexity)]
-fn draw_averaged_bargraph(
-    mesh: &mut Mesh,
-    spectrogram: &Spectrogram,
-    mut buffer: (Vec<(f32, f32)>, Vec<f32>),
-    horizontal: bool,
-    bounds: Rect,
-    color_table: &ColorTable,
-    masking_color: Option<Color32>,
-    (max_db, min_db): (f32, f32),
-    front: &BetterAnalysis,
-    max_index: usize,
-) {
-    let count = max_index as f32 + 1.0;
-
-    for i in 0..=max_index {
-        for (spectrogram_chunk, output_chunk) in unsafe {
-            spectrogram
-                .at_age(i)
-                .unwrap_unchecked()
-                .data
-                .as_chunks_unchecked::<64>()
-        }
-        .iter()
-        .zip(unsafe { buffer.0.as_chunks_unchecked_mut::<64>() })
-        {
-            for (data, output) in spectrogram_chunk.iter().zip(output_chunk) {
-                *output = (
-                    output.0.algebraic_add(data.0),
-                    output.1.algebraic_add(data.1),
-                )
-            }
-        }
-    }
-
-    for chunk in unsafe { buffer.0.as_chunks_unchecked_mut::<64>() } {
-        for item in chunk {
-            *item = (item.0.algebraic_div(count), item.1.algebraic_div(count));
-        }
-    }
-
-    draw_bargraph_from(
-        mesh,
-        &buffer.0,
-        horizontal,
-        bounds,
-        color_table,
-        (max_db, min_db),
-    );
-
-    if let Some(masking_color) = masking_color {
-        assert_eq!(front.masking.len(), buffer.1.len());
-
-        for i in 0..=max_index {
-            for (spectrogram_chunk, output_chunk) in unsafe {
-                spectrogram
-                    .at_age(i)
-                    .unwrap_unchecked()
-                    .masking
-                    .as_chunks_unchecked::<64>()
-            }
-            .iter()
-            .zip(unsafe { buffer.1.as_chunks_unchecked_mut::<64>() })
-            {
-                for (data, output) in spectrogram_chunk.iter().zip(output_chunk) {
-                    *output = output.algebraic_add(data.1);
-                }
-            }
-        }
-
-        for chunk in unsafe { buffer.1.as_chunks_unchecked_mut::<64>() } {
-            for item in chunk {
-                *item = item.algebraic_div(count);
-            }
-        }
-
-        draw_secondary_bargraph(
-            mesh,
-            &buffer.1,
-            horizontal,
-            bounds,
-            masking_color,
-            (max_db, min_db),
-        );
-    }
-}
-
-fn draw_bargraph_from(
-    mesh: &mut Mesh,
-    analysis: &[(f32, f32)],
-    horizontal: bool,
-    bounds: Rect,
-    color_table: &ColorTable,
-    (max_db, min_db): (f32, f32),
-) {
-    if !horizontal {
-        draw_vertical_bargraph_from(mesh, analysis, bounds, color_table, (max_db, min_db));
-    } else {
-        draw_horizontal_bargraph_from(mesh, analysis, bounds, color_table, (max_db, min_db));
-    }
-}
-
-#[inline(never)]
-fn draw_horizontal_bargraph_from(
-    mesh: &mut Mesh,
-    analysis: &[(f32, f32)],
-    bounds: Rect,
-    color_table: &ColorTable,
-    (max_db, min_db): (f32, f32),
-) {
-    let width = bounds.max.x - bounds.min.x;
-    let height = bounds.max.y - bounds.min.y;
-
-    let mut vertices = mesh.vertices.len() as u32;
-
-    let band_height = height / analysis.len() as f32;
-
-    let mut buffer = [(0, Rect::ZERO); 64];
-
-    for (ci, chunk) in unsafe { analysis.as_chunks_unchecked::<64>() }
-        .iter()
-        .enumerate()
-    {
-        let offset = ci * 64;
-
-        for (ii, ((pan, volume), output)) in
-            chunk.iter().copied().zip(buffer.iter_mut()).enumerate()
-        {
-            let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
-
-            let end_y = bounds
-                .max
-                .y
-                .algebraic_sub(((offset + ii) as f32).algebraic_mul(band_height));
-
-            let rect = Rect {
-                min: Pos2 {
-                    x: bounds.max.x.algebraic_sub(intensity.algebraic_mul(width)),
-                    y: end_y,
-                },
-                max: Pos2 {
-                    x: bounds.max.x,
-                    y: end_y.algebraic_sub(band_height),
-                },
-            };
-
-            let index = color_table.calculate_index(pan, intensity);
-
-            *output = (index, rect);
-        }
-
-        for _ in 0..64 {
-            mesh.indices.extend_from_slice(&[
-                vertices,
-                vertices + 1,
-                vertices + 2,
-                vertices + 2,
-                vertices + 1,
-                vertices + 3,
-            ]);
-            vertices += 4;
-        }
-
-        for (index, rect) in buffer {
-            let color = unsafe { color_table.get_unchecked(index) };
-
-            mesh.vertices.extend_from_slice(&[
-                Vertex {
-                    pos: rect.left_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.left_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-            ]);
-        }
-    }
-}
-
-#[inline(never)]
-fn draw_vertical_bargraph_from(
-    mesh: &mut Mesh,
-    analysis: &[(f32, f32)],
-    bounds: Rect,
-    color_table: &ColorTable,
-    (max_db, min_db): (f32, f32),
-) {
-    let width = bounds.max.x - bounds.min.x;
-    let height = bounds.max.y - bounds.min.y;
-
-    let mut vertices = mesh.vertices.len() as u32;
-
-    let band_width = width / analysis.len() as f32;
-
-    let mut buffer = [(0, Rect::ZERO); 64];
-
-    for (ci, chunk) in unsafe { analysis.as_chunks_unchecked::<64>() }
-        .iter()
-        .enumerate()
-    {
-        let offset = ci * 64;
-
-        for (ii, ((pan, volume), output)) in
-            chunk.iter().copied().zip(buffer.iter_mut()).enumerate()
-        {
-            let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
-
-            let start_x = bounds
-                .min
-                .x
-                .algebraic_add(((offset + ii) as f32).algebraic_mul(band_width));
-
-            let rect = Rect {
-                min: Pos2 {
-                    x: start_x,
-                    y: bounds.max.y.algebraic_sub(intensity.algebraic_mul(height)),
-                },
-                max: Pos2 {
-                    x: start_x.algebraic_add(band_width),
-                    y: bounds.max.y,
-                },
-            };
-
-            let index = color_table.calculate_index(pan, intensity);
-
-            *output = (index, rect);
-        }
-
-        for _ in 0..64 {
-            mesh.indices.extend_from_slice(&[
-                vertices,
-                vertices + 1,
-                vertices + 2,
-                vertices + 2,
-                vertices + 1,
-                vertices + 3,
-            ]);
-            vertices += 4;
-        }
-
-        for (index, rect) in buffer {
-            let color = unsafe { color_table.get_unchecked(index) };
-
-            mesh.vertices.extend_from_slice(&[
-                Vertex {
-                    pos: rect.left_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.left_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-            ]);
-        }
-    }
-}
-
-fn draw_secondary_bargraph(
-    mesh: &mut Mesh,
-    analysis: &[f32],
-    horizontal: bool,
-    bounds: Rect,
-    color: Color32,
-    (max_db, min_db): (f32, f32),
-) {
-    if !horizontal {
-        draw_vertical_secondary_bargraph(mesh, analysis, bounds, color, (max_db, min_db));
-    } else {
-        draw_horizontal_secondary_bargraph(mesh, analysis, bounds, color, (max_db, min_db));
-    }
-}
-
-#[inline(never)]
-fn draw_horizontal_secondary_bargraph(
-    mesh: &mut Mesh,
-    analysis: &[f32],
-    bounds: Rect,
-    color: Color32,
-    (max_db, min_db): (f32, f32),
-) {
-    let width = bounds.max.x - bounds.min.x;
-    let height = bounds.max.y - bounds.min.y;
-
-    let mut vertices = mesh.vertices.len() as u32;
-
-    let band_height = height / analysis.len() as f32;
-
-    let mut buffer = [Rect::ZERO; 64];
-
-    for (ci, chunk) in unsafe { analysis.as_chunks_unchecked::<64>() }
-        .iter()
-        .enumerate()
-    {
-        let offset = ci * 64;
-
-        for (ii, (volume, output)) in chunk.iter().copied().zip(buffer.iter_mut()).enumerate() {
-            let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
-
-            let end_y = bounds
-                .max
-                .y
-                .algebraic_sub(((offset + ii) as f32).algebraic_mul(band_height));
-
-            let rect = Rect {
-                min: Pos2 {
-                    x: bounds.max.x.algebraic_sub(intensity.algebraic_mul(width)),
-                    y: end_y,
-                },
-                max: Pos2 {
-                    x: bounds.max.x,
-                    y: end_y.algebraic_sub(band_height),
-                },
-            };
-
-            *output = rect;
-        }
-
-        for _ in 0..64 {
-            mesh.indices.extend_from_slice(&[
-                vertices,
-                vertices + 1,
-                vertices + 2,
-                vertices + 2,
-                vertices + 1,
-                vertices + 3,
-            ]);
-            vertices += 4;
-        }
-
-        for rect in buffer {
-            mesh.vertices.extend_from_slice(&[
-                Vertex {
-                    pos: rect.left_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.left_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-            ]);
-        }
-    }
-}
-
-#[inline(never)]
-fn draw_vertical_secondary_bargraph(
-    mesh: &mut Mesh,
-    analysis: &[f32],
-    bounds: Rect,
-    color: Color32,
-    (max_db, min_db): (f32, f32),
-) {
-    let width = bounds.max.x - bounds.min.x;
-    let height = bounds.max.y - bounds.min.y;
-
-    let mut vertices = mesh.vertices.len() as u32;
-
-    let band_width = width / analysis.len() as f32;
-
-    let mut buffer = [Rect::ZERO; 64];
-
-    for (ci, chunk) in unsafe { analysis.as_chunks_unchecked::<64>() }
-        .iter()
-        .enumerate()
-    {
-        let offset = ci * 64;
-
-        for (ii, (volume, output)) in chunk.iter().copied().zip(buffer.iter_mut()).enumerate() {
-            let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
-
-            let start_x = bounds
-                .min
-                .x
-                .algebraic_add(((offset + ii) as f32).algebraic_mul(band_width));
-
-            let rect = Rect {
-                min: Pos2 {
-                    x: start_x,
-                    y: bounds.max.y.algebraic_sub(intensity.algebraic_mul(height)),
-                },
-                max: Pos2 {
-                    x: start_x.algebraic_add(band_width),
-                    y: bounds.max.y,
-                },
-            };
-
-            *output = rect;
-        }
-
-        for _ in 0..64 {
-            mesh.indices.extend_from_slice(&[
-                vertices,
-                vertices + 1,
-                vertices + 2,
-                vertices + 2,
-                vertices + 1,
-                vertices + 3,
-            ]);
-            vertices += 4;
-        }
-
-        for rect in buffer {
-            mesh.vertices.extend_from_slice(&[
-                Vertex {
-                    pos: rect.left_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.left_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-            ]);
-        }
-    }
-}
-
-fn draw_secondary_bargraph_from_pairs(
-    mesh: &mut Mesh,
-    analysis: &[(f32, f32)],
-    horizontal: bool,
-    bounds: Rect,
-    color: Color32,
-    (max_db, min_db): (f32, f32),
-) {
-    if !horizontal {
-        draw_vertical_secondary_bargraph_from_pairs(
-            mesh,
-            analysis,
-            bounds,
-            color,
-            (max_db, min_db),
-        );
-    } else {
-        draw_horizontal_secondary_bargraph_from_pairs(
-            mesh,
-            analysis,
-            bounds,
-            color,
-            (max_db, min_db),
-        );
-    }
-}
-
-#[inline(never)]
-fn draw_horizontal_secondary_bargraph_from_pairs(
-    mesh: &mut Mesh,
-    analysis: &[(f32, f32)],
-    bounds: Rect,
-    color: Color32,
-    (max_db, min_db): (f32, f32),
-) {
-    let width = bounds.max.x - bounds.min.x;
-    let height = bounds.max.y - bounds.min.y;
-
-    let mut vertices = mesh.vertices.len() as u32;
-
-    let band_height = height / analysis.len() as f32;
-
-    let mut buffer = [Rect::ZERO; 64];
-
-    for (ci, chunk) in unsafe { analysis.as_chunks_unchecked::<64>() }
-        .iter()
-        .enumerate()
-    {
-        let offset = ci * 64;
-
-        for (ii, ((_, volume), output)) in chunk.iter().copied().zip(buffer.iter_mut()).enumerate()
-        {
-            let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
-
-            let end_y = bounds
-                .max
-                .y
-                .algebraic_sub(((offset + ii) as f32).algebraic_mul(band_height));
-
-            let rect = Rect {
-                min: Pos2 {
-                    x: bounds.max.x.algebraic_sub(intensity.algebraic_mul(width)),
-                    y: end_y,
-                },
-                max: Pos2 {
-                    x: bounds.max.x,
-                    y: end_y.algebraic_sub(band_height),
-                },
-            };
-
-            *output = rect;
-        }
-
-        for _ in 0..64 {
-            mesh.indices.extend_from_slice(&[
-                vertices,
-                vertices + 1,
-                vertices + 2,
-                vertices + 2,
-                vertices + 1,
-                vertices + 3,
-            ]);
-            vertices += 4;
-        }
-
-        for rect in buffer {
-            mesh.vertices.extend_from_slice(&[
-                Vertex {
-                    pos: rect.left_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.left_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-            ]);
-        }
-    }
-}
-
-#[inline(never)]
-fn draw_vertical_secondary_bargraph_from_pairs(
-    mesh: &mut Mesh,
-    analysis: &[(f32, f32)],
-    bounds: Rect,
-    color: Color32,
-    (max_db, min_db): (f32, f32),
-) {
-    let width = bounds.max.x - bounds.min.x;
-    let height = bounds.max.y - bounds.min.y;
-
-    let mut vertices = mesh.vertices.len() as u32;
-
-    let band_width = width / analysis.len() as f32;
-
-    let mut buffer = [Rect::ZERO; 64];
-
-    for (ci, chunk) in unsafe { analysis.as_chunks_unchecked::<64>() }
-        .iter()
-        .enumerate()
-    {
-        let offset = ci * 64;
-
-        for (ii, ((_, volume), output)) in chunk.iter().copied().zip(buffer.iter_mut()).enumerate()
-        {
-            let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).clamp(0.0, 1.0);
-
-            let start_x = bounds
-                .min
-                .x
-                .algebraic_add(((offset + ii) as f32).algebraic_mul(band_width));
-
-            let rect = Rect {
-                min: Pos2 {
-                    x: start_x,
-                    y: bounds.max.y.algebraic_sub(intensity.algebraic_mul(height)),
-                },
-                max: Pos2 {
-                    x: start_x.algebraic_add(band_width),
-                    y: bounds.max.y,
-                },
-            };
-
-            *output = rect;
-        }
-
-        for _ in 0..64 {
-            mesh.indices.extend_from_slice(&[
-                vertices,
-                vertices + 1,
-                vertices + 2,
-                vertices + 2,
-                vertices + 1,
-                vertices + 3,
-            ]);
-            vertices += 4;
-        }
-
-        for rect in buffer {
-            mesh.vertices.extend_from_slice(&[
-                Vertex {
-                    pos: rect.left_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_top(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.left_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-                Vertex {
-                    pos: rect.right_bottom(),
-                    uv: WHITE_UV,
-                    color,
-                },
-            ]);
-        }
-    }
-}
-
-fn draw_spectrogram_image(
-    image: &mut ColorImage,
-    spectrogram: &Spectrogram,
-    frequencies: &[(f32, f32, f32)],
-    color_table: &ColorTable,
-    (max_db, min_db): (f32, f32),
-    clamp_using_smr: bool,
-    blending_proportion: f32,
-) {
-    let target_duration = spectrogram.newest().duration;
-
-    let image_width = image.width();
-    let image_height = image.height();
-
-    assert!(image_width.is_multiple_of(64));
-
-    if clamp_using_smr && blending_proportion < 1.0 {
-        let masking_ranges: Vec<f32> = unsafe { frequencies.as_chunks_unchecked::<64>() }
-            .iter()
-            .flat_map(|chunk| {
-                chunk.iter().copied().map(|(_, center, _)| {
-                    27.0_f32.algebraic_sub(
-                        6.025_f32.algebraic_sub(0.275_f32.algebraic_mul(scale_bark(center))),
-                    )
-                })
-            })
-            .collect();
-
-        assert!(masking_ranges.len().is_multiple_of(64));
-
-        if blending_proportion > 0.0 {
-            draw_spectrogram_smr_blended(
-                image,
-                spectrogram,
-                color_table,
-                (max_db, min_db),
-                (image_width, image_height),
-                target_duration,
-                &masking_ranges,
-                blending_proportion,
-            );
-        } else {
-            draw_spectrogram_smr_unblended(
-                image,
-                spectrogram,
-                color_table,
-                (max_db, min_db),
-                (image_width, image_height),
-                target_duration,
-                &masking_ranges,
-            );
-        }
-    } else {
-        draw_spectrogram_nosmr(
-            image,
-            spectrogram,
-            color_table,
-            (max_db, min_db),
-            (image_width, image_height),
-            target_duration,
-        );
-    }
-}
-
-#[inline(never)]
-fn draw_spectrogram_smr_unblended(
-    image: &mut ColorImage,
-    spectrogram: &Spectrogram,
-    color_table: &ColorTable,
-    (max_db, min_db): (f32, f32),
-    (image_width, image_height): (usize, usize),
-    target_duration: Duration,
-    masking_ranges: &[f32],
-) {
-    let mut buffer = [0; 64];
-
-    for (y, analysis) in spectrogram.newest_to_oldest().enumerate() {
-        if analysis.data.len() != image_width
-            || y == image_height
-            || analysis.duration != target_duration
-        {
-            break;
-        }
-
-        for (analysis_chunk, (masking_chunk, (masking_range_chunk, pixel_chunk))) in
-            unsafe { analysis.data.as_chunks_unchecked::<64>() }
-                .iter()
-                .zip(
-                    unsafe { analysis.masking.as_chunks_unchecked::<64>() }
-                        .iter()
-                        .zip(
-                            unsafe { masking_ranges.as_chunks_unchecked::<64>() }
-                                .iter()
-                                .zip(unsafe {
-                                    image
-                                        .pixels
-                                        .get_unchecked_mut(
-                                            (image_width * y)..(image_width * (y + 1)),
-                                        )
-                                        .as_chunks_unchecked_mut::<64>()
-                                }),
-                        ),
-                )
-        {
-            for ((pan, volume), (((_, masking), range), output)) in
-                analysis_chunk.iter().copied().zip(
-                    masking_chunk
-                        .iter()
-                        .copied()
-                        .zip(masking_range_chunk.iter().copied())
-                        .zip(buffer.iter_mut()),
-                )
-            {
-                let intensity = map_value(volume, min_db, max_db, 0.0, 1.0).min(map_value(
-                    volume.algebraic_sub(masking),
-                    0.0,
-                    range,
-                    0.0,
-                    1.0,
-                ));
-
-                *output = color_table.calculate_index(pan, intensity);
-            }
-
-            for (index, pixel) in buffer.into_iter().zip(pixel_chunk) {
-                *pixel = unsafe { color_table.get_unchecked(index) };
-            }
-        }
-    }
-}
-
-#[inline(never)]
-#[allow(clippy::too_many_arguments)]
-fn draw_spectrogram_smr_blended(
-    image: &mut ColorImage,
-    spectrogram: &Spectrogram,
-    color_table: &ColorTable,
-    (max_db, min_db): (f32, f32),
-    (image_width, image_height): (usize, usize),
-    target_duration: Duration,
-    masking_ranges: &[f32],
-    blending_proportion: f32,
-) {
-    let mut buffer = [0; 64];
-    let blending_inv = 1.0 - blending_proportion;
-
-    for (y, analysis) in spectrogram.newest_to_oldest().enumerate() {
-        if analysis.data.len() != image_width
-            || y == image_height
-            || analysis.duration != target_duration
-        {
-            break;
-        }
-
-        for (analysis_chunk, (masking_chunk, (masking_range_chunk, pixel_chunk))) in
-            unsafe { analysis.data.as_chunks_unchecked::<64>() }
-                .iter()
-                .zip(
-                    unsafe { analysis.masking.as_chunks_unchecked::<64>() }
-                        .iter()
-                        .zip(
-                            unsafe { masking_ranges.as_chunks_unchecked::<64>() }
-                                .iter()
-                                .zip(unsafe {
-                                    image
-                                        .pixels
-                                        .get_unchecked_mut(
-                                            (image_width * y)..(image_width * (y + 1)),
-                                        )
-                                        .as_chunks_unchecked_mut::<64>()
-                                }),
-                        ),
-                )
-        {
-            for ((pan, volume), (((_, masking), range), output)) in
-                analysis_chunk.iter().copied().zip(
-                    masking_chunk
-                        .iter()
-                        .copied()
-                        .zip(masking_range_chunk.iter().copied())
-                        .zip(buffer.iter_mut()),
-                )
-            {
-                let volume_intensity = map_value(volume, min_db, max_db, 0.0, 1.0);
-                let clamp_intensity =
-                    map_value(volume.algebraic_sub(masking), 0.0, range, 0.0, 1.0);
-
-                let intensity = volume_intensity.min(
-                    clamp_intensity
-                        .algebraic_mul(blending_inv)
-                        .algebraic_add(volume_intensity.algebraic_mul(blending_proportion)),
-                );
-
-                *output = color_table.calculate_index(pan, intensity);
-            }
-
-            for (index, pixel) in buffer.into_iter().zip(pixel_chunk) {
-                *pixel = unsafe { color_table.get_unchecked(index) };
-            }
-        }
-    }
-}
-
-#[inline(never)]
-fn draw_spectrogram_nosmr(
-    image: &mut ColorImage,
-    spectrogram: &Spectrogram,
-    color_table: &ColorTable,
-    (max_db, min_db): (f32, f32),
-    (image_width, image_height): (usize, usize),
-    target_duration: Duration,
-) {
-    let mut buffer = [0; 64];
-
-    for (y, analysis) in spectrogram.newest_to_oldest().enumerate() {
-        if analysis.data.len() != image_width
-            || y == image_height
-            || analysis.duration != target_duration
-        {
-            break;
-        }
-
-        for (analysis_chunk, pixel_chunk) in unsafe { analysis.data.as_chunks_unchecked::<64>() }
-            .iter()
-            .zip(unsafe {
-                image
-                    .pixels
-                    .get_unchecked_mut((image_width * y)..(image_width * (y + 1)))
-                    .as_chunks_unchecked_mut::<64>()
-            })
-        {
-            for ((pan, volume), output) in analysis_chunk.iter().copied().zip(buffer.iter_mut()) {
-                let intensity = map_value(volume, min_db, max_db, 0.0, 1.0);
-                *output = color_table.calculate_index(pan, intensity);
-            }
-
-            for (index, pixel) in buffer.into_iter().zip(pixel_chunk) {
-                *pixel = unsafe { color_table.get_unchecked(index) };
-            }
-        }
-    }
 }
 
 struct UnderCursor {
@@ -1317,42 +343,6 @@ impl ColorTable {
             }
         }
     }
-    /*fn lookup(&self, split: f32, intensity: f32) -> Color32 {
-        let location = (
-            map_value(split, -1.0, 1.0, 0.0, self.max.0)
-                .round()
-                .clamp(0.0, self.max.0) as usize,
-            map_value(intensity, 0.0, 1.0, 0.0, self.max.1)
-                .round()
-                .clamp(0.0, self.max.1) as usize,
-        );
-
-        let color = unsafe {
-            *self
-                .table
-                .get_unchecked((location.0 * self.size.1) + location.1)
-        };
-
-        //let color = self.table[(location.0 * self.size.1) + location.1];
-
-        Color32::from_rgb(color.0, color.1, color.2)
-    }*/
-    fn calculate_index(&self, split: f32, intensity: f32) -> usize {
-        let location = (
-            map_value(split, -1.0, 1.0, 0.0, self.max.0)
-                .round()
-                .clamp(0.0, self.max.0) as usize,
-            map_value(intensity, 0.0, 1.0, 0.0, self.max.1)
-                .round()
-                .clamp(0.0, self.max.1) as usize,
-        );
-
-        (location.0 * self.size.1) + location.1
-    }
-    unsafe fn get_unchecked(&self, index: usize) -> Color32 {
-        let color = unsafe { *self.table.get_unchecked(index) };
-        Color32::from_rgb(color.0, color.1, color.2)
-    }
 }
 
 pub(crate) struct SharedState {
@@ -1366,7 +356,8 @@ pub(crate) struct SharedState {
     analysis_receiver: NativeAnalysisReceiver,
     #[cfg(not(target_arch = "wasm32"))]
     analysis_updates: AnalysisUpdateSender,
-    pub(crate) spectrogram_texture: Option<TextureId>,
+    shader_renderer: ShaderRendererHandle,
+    color_table_revision: u64,
 }
 
 impl SharedState {
@@ -1399,7 +390,8 @@ impl SharedState {
             analysis_receiver,
             #[cfg(not(target_arch = "wasm32"))]
             analysis_updates,
-            spectrogram_texture: None,
+            shader_renderer: ShaderRendererHandle::new(),
+            color_table_revision: 1,
         };
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -1417,6 +409,11 @@ impl SharedState {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn invalidate_analysis_history(&mut self) {
         self.spectrogram.clear();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn initialize_renderer(&self, gl: &egui_glow::glow::Context) -> Result<(), String> {
+        self.shader_renderer.initialize(gl)
     }
 }
 
@@ -1449,8 +446,8 @@ pub fn create(
                 ..Default::default()
             },
         },
-        move |egui_ctx, _, shared_state| {
-            build(egui_ctx, &mut shared_state.spectrogram_texture);
+        move |egui_ctx, _, _shared_state| {
+            build(egui_ctx);
         },
         move |egui_ctx, _setter, _, shared_state| {
             render(
@@ -1465,27 +462,7 @@ pub fn create(
     )
 }
 
-pub(crate) fn build(egui_ctx: &Context, spectrogram_texture: &mut Option<TextureId>) {
-    let manager = egui_ctx.tex_manager();
-    let mut manager = manager.write();
-
-    if let Some(ref id) = *spectrogram_texture {
-        if manager.meta(*id).is_some() {
-            manager.free(*id);
-        }
-    }
-
-    *spectrogram_texture = Some(manager.alloc(
-        "spectrogram".to_string(),
-        ImageData::Color(Arc::new(ColorImage::filled([1, 1], Color32::TRANSPARENT))),
-        TextureOptions {
-            magnification: egui::TextureFilter::Linear,
-            minification: egui::TextureFilter::Linear,
-            wrap_mode: egui::TextureWrapMode::ClampToEdge,
-            mipmap_mode: None,
-        },
-    ));
-
+pub(crate) fn build(egui_ctx: &Context) {
     egui_ctx.tessellation_options_mut(|options| {
         options.coarse_tessellation_culling = false;
     });
@@ -1570,25 +547,13 @@ pub(crate) fn render(
         let front = spectrogram.newest();
 
         let spectrogram_width = front.data.len();
-        let spectrogram_height = (settings.spectrogram_duration.as_secs_f32()
-            / front.duration.as_secs_f32())
-        .round() as usize;
-
-        let mut bargraph_mesh = Mesh::default();
-        bargraph_mesh.reserve_triangles(spectrogram_width * 2 * 2);
-        bargraph_mesh.reserve_vertices(spectrogram_width * 4 * 2);
-
-        let mut spectrogram_image = ColorImage {
-            size: [spectrogram_width, spectrogram_height],
-            source_size: Vec2 {
-                x: spectrogram_width as f32,
-                y: spectrogram_height as f32,
-            },
-            pixels: vec![Color32::TRANSPARENT; spectrogram_width * spectrogram_height],
-        };
-
-        let bargraph_buffer_1 = vec![(0.0, 0.0); spectrogram_width];
-        let bargraph_buffer_2 = vec![0.0; spectrogram_width];
+        let spectrogram_height = if front.duration.is_zero() {
+            1
+        } else {
+            (settings.spectrogram_duration.as_secs_f64() / front.duration.as_secs_f64()).round()
+                as usize
+        }
+        .clamp(1, spectrogram.render_state().retained_rows);
 
         let processing_duration = metrics.processing;
         let chunk_duration = front.duration;
@@ -1600,47 +565,21 @@ pub(crate) fn render(
         #[cfg(target_arch = "wasm32")]
         let frequencies = analysis_chain.frequencies();
 
-        {
-            if settings.bargraph_height != 0.0 {
-                if settings.show_masking {
-                    draw_bargraph(
-                        &mut bargraph_mesh,
-                        spectrogram,
-                        (bargraph_buffer_1, bargraph_buffer_2),
-                        settings.horizontal,
-                        bargraph_bounds,
-                        &shared_state.color_table,
-                        Some(settings.masking_color),
-                        (max_db, min_db),
-                        settings.bargraph_averaging,
-                    );
-                } else {
-                    draw_bargraph(
-                        &mut bargraph_mesh,
-                        spectrogram,
-                        (bargraph_buffer_1, bargraph_buffer_2),
-                        settings.horizontal,
-                        bargraph_bounds,
-                        &shared_state.color_table,
-                        None,
-                        (max_db, min_db),
-                        settings.bargraph_averaging,
-                    );
-                }
-            }
+        shared_state.shader_renderer.prepare(
+            spectrogram,
+            frequencies,
+            &shared_state.color_table,
+            shared_state.color_table_revision,
+            &settings,
+            shared_state.cached_analysis_settings.masking,
+            min_db,
+            max_db,
+        );
 
-            if settings.bargraph_height != 1.0 && frequencies.len() == spectrogram_width {
-                draw_spectrogram_image(
-                    &mut spectrogram_image,
-                    spectrogram,
-                    frequencies,
-                    &shared_state.color_table,
-                    (max_db, min_db),
-                    settings.clamp_using_smr,
-                    1.0 - settings.clamp_strength,
-                );
-            }
-        }
+        painter.add(Shape::Callback(PaintCallback {
+            rect: painter.clip_rect(),
+            callback: shared_state.shader_renderer.callback(),
+        }));
 
         let under_pointer = if settings.show_hover && frequencies.len() == spectrogram_width {
             if let Some(pointer) = egui_ctx.pointer_latest_pos() {
@@ -1661,86 +600,17 @@ pub(crate) fn render(
             None
         };
 
-        {
-            let spectrogram_texture = shared_state.spectrogram_texture.unwrap();
-
-            egui_ctx.tex_manager().write().set(
-                spectrogram_texture,
-                ImageDelta {
-                    image: ImageData::Color(Arc::new(spectrogram_image)),
-                    options: if settings.spectrogram_nearest_neighbor {
-                        TextureOptions {
-                            magnification: egui::TextureFilter::Nearest,
-                            minification: egui::TextureFilter::Nearest,
-                            wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                            mipmap_mode: None,
-                        }
-                    } else {
-                        TextureOptions {
-                            magnification: egui::TextureFilter::Linear,
-                            minification: egui::TextureFilter::Linear,
-                            wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                            mipmap_mode: None,
-                        }
-                    },
-                    pos: None,
+        if let Some(error) = shared_state.shader_renderer.error() {
+            painter.text(
+                Pos2 {
+                    x: 16.0,
+                    y: max_y - 16.0,
                 },
+                Align2::LEFT_BOTTOM,
+                format!("GPU renderer error: {error}"),
+                FontId::monospace(12.0),
+                Color32::RED,
             );
-
-            painter.extend([
-                Shape::Mesh(Arc::new(bargraph_mesh)),
-                Shape::Mesh(Arc::new(Mesh {
-                    indices: vec![0, 1, 2, 2, 1, 3],
-                    vertices: if !settings.horizontal {
-                        vec![
-                            Vertex {
-                                pos: spectrogram_bounds.left_top(),
-                                uv: Pos2 { x: 0.0, y: 0.0 },
-                                color: Color32::WHITE,
-                            },
-                            Vertex {
-                                pos: spectrogram_bounds.right_top(),
-                                uv: Pos2 { x: 1.0, y: 0.0 },
-                                color: Color32::WHITE,
-                            },
-                            Vertex {
-                                pos: spectrogram_bounds.left_bottom(),
-                                uv: Pos2 { x: 0.0, y: 1.0 },
-                                color: Color32::WHITE,
-                            },
-                            Vertex {
-                                pos: spectrogram_bounds.right_bottom(),
-                                uv: Pos2 { x: 1.0, y: 1.0 },
-                                color: Color32::WHITE,
-                            },
-                        ]
-                    } else {
-                        vec![
-                            Vertex {
-                                pos: spectrogram_bounds.left_top(),
-                                uv: Pos2 { x: 1.0, y: 0.0 },
-                                color: Color32::WHITE,
-                            },
-                            Vertex {
-                                pos: spectrogram_bounds.right_top(),
-                                uv: Pos2 { x: 1.0, y: 1.0 },
-                                color: Color32::WHITE,
-                            },
-                            Vertex {
-                                pos: spectrogram_bounds.left_bottom(),
-                                uv: Pos2 { x: 0.0, y: 0.0 },
-                                color: Color32::WHITE,
-                            },
-                            Vertex {
-                                pos: spectrogram_bounds.right_bottom(),
-                                uv: Pos2 { x: 0.0, y: 1.0 },
-                                color: Color32::WHITE,
-                            },
-                        ]
-                    },
-                    texture_id: spectrogram_texture,
-                })),
-            ]);
         }
 
         if let Some(under) = under_pointer {
@@ -2417,7 +1287,7 @@ pub(crate) fn render(
                         .add(
                             egui::Slider::new(
                                 &mut analysis_settings.update_rate_hz,
-                                128.0..=(SPECTROGRAM_SLICES as f64 / 2.0),
+                                128.0..=(SPECTROGRAM_SLICES as f64),
                             )
                             .clamping(egui::SliderClamping::Always)
                             .logarithmic(true)
@@ -2704,6 +1574,7 @@ pub(crate) fn render(
             edited_render_settings.maximum_lightness,
             edited_render_settings.maximum_chroma,
         );
+        shared_state.color_table_revision = shared_state.color_table_revision.wrapping_add(1);
     }
     if let Some(clear_history) = analysis_action.get() {
         #[cfg(not(target_arch = "wasm32"))]
