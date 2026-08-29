@@ -347,7 +347,7 @@ impl ColorTable {
 
 pub(crate) struct SharedState {
     settings: RenderSettings,
-    frame_timing: (Instant, Duration, Duration),
+    rasterize_duration: Duration,
     color_table: ColorTable,
     cached_analysis_settings: AnalysisChainConfig,
     pub(crate) spectrogram: Spectrogram,
@@ -381,7 +381,7 @@ impl SharedState {
         #[allow(unused_mut)]
         let mut state = Self {
             settings,
-            frame_timing: (Instant::now(), Duration::ZERO, Duration::ZERO),
+            rasterize_duration: Duration::ZERO,
             color_table,
             cached_analysis_settings: AnalysisChainConfig::default(),
             spectrogram: Spectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS),
@@ -484,6 +484,7 @@ pub(crate) fn render(
     egui_ctx.request_repaint();
 
     let start = Instant::now();
+    let frame_elapsed = egui_ctx.input(|input| Duration::from_secs_f32(input.unstable_dt));
 
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -728,8 +729,7 @@ pub(crate) fn render(
         }
 
         if settings.show_performance {
-            let frame_elapsed = shared_state.frame_timing.1;
-            let rasterize_elapsed = shared_state.frame_timing.2;
+            let rasterize_elapsed = shared_state.rasterize_duration;
 
             let rasterize_secs = rasterize_elapsed.as_secs_f32();
             let chunk_secs = chunk_duration.as_secs_f32();
@@ -783,7 +783,7 @@ pub(crate) fn render(
                     y: 16.0,
                 },
                 Align2::RIGHT_TOP,
-                format!("{:2}ms frame", frame_elapsed.as_millis()),
+                format!("{:.1}ms frame", frame_elapsed.as_secs_f32() * 1000.0),
                 FontId {
                     size: 12.0,
                     family: egui::FontFamily::Monospace,
@@ -1590,11 +1590,5 @@ pub(crate) fn render(
         }
     }
 
-    let now = Instant::now();
-
-    shared_state.frame_timing = (
-        now,
-        now.duration_since(shared_state.frame_timing.0),
-        now.duration_since(start),
-    )
+    shared_state.rasterize_duration = start.elapsed();
 }
