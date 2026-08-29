@@ -209,10 +209,20 @@ struct BarCache {
     duration: Option<Duration>,
     contiguous_rows: usize,
     window_rows: usize,
-    data_sums: Vec<(f64, f64)>,
-    amplitude_non_finite: Vec<usize>,
-    masking_sums: Vec<f64>,
-    masking_non_finite: Vec<usize>,
+    data_sums: Vec<BarDataSum>,
+    masking_sums: Vec<FiniteSum>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct BarDataSum {
+    pan: f64,
+    amplitude: FiniteSum,
+}
+
+#[derive(Clone, Copy, Default)]
+struct FiniteSum {
+    value: f64,
+    non_finite: usize,
 }
 
 struct GlResources {
@@ -718,14 +728,19 @@ fn write_history_row(
         return;
     };
     let output = &mut buffer[target_row * width * 4..(target_row + 1) * width * 4];
-    for (index, (&(pan, amplitude), &(_, masking))) in
-        analysis.data.iter().zip(&analysis.masking).enumerate()
+    // Treat each texel as one item so channel writes need no bounds checks.
+    let (output, remainder) = output.as_chunks_mut::<4>();
+    debug_assert!(remainder.is_empty());
+    for (output, (&(pan, amplitude), &(_, masking))) in output
+        .iter_mut()
+        .zip(analysis.data.iter().zip(&analysis.masking))
     {
-        let base = index * 4;
-        output[base] = f16::from_f32(pan);
-        output[base + 1] = finite_half(amplitude);
-        output[base + 2] = finite_half(masking);
-        output[base + 3] = f16::ONE;
+        *output = [
+            f16::from_f32(pan),
+            finite_half(amplitude),
+            finite_half(masking),
+            f16::ONE,
+        ];
     }
 }
 
@@ -794,19 +809,19 @@ fn prepare_bar_row_cached(
         let row = spectrogram
             .at_age(changed + old_age)
             .expect("incremental bar cache only uses retained rows");
-        accumulate_bar_row(cache, row, -1.0);
+        accumulate_bar_row::<false>(cache, row);
     }
     for age in 0..changed.min(window_rows) {
         let row = spectrogram
             .at_age(age)
             .expect("new spectrogram rows are retained");
-        accumulate_bar_row(cache, row, 1.0);
+        accumulate_bar_row::<true>(cache, row);
     }
     for age in changed.saturating_add(cache.window_rows)..window_rows {
         let row = spectrogram
             .at_age(age)
             .expect("expanded bar window rows are retained");
-        accumulate_bar_row(cache, row, 1.0);
+        accumulate_bar_row::<true>(cache, row);
     }
 
     cache.state = Some(state);
@@ -835,24 +850,19 @@ fn rebuild_bar_cache(
     let window_rows = bar_window_rows(duration, averaging, contiguous_rows);
 
     cache.include_masking = include_masking;
-    cache.data_sums.resize(width, (0.0, 0.0));
-    cache.data_sums.fill((0.0, 0.0));
-    cache.amplitude_non_finite.resize(width, 0);
-    cache.amplitude_non_finite.fill(0);
+    cache.data_sums.resize(width, BarDataSum::default());
+    cache.data_sums.fill(BarDataSum::default());
     if include_masking {
-        cache.masking_sums.resize(width, 0.0);
-        cache.masking_sums.fill(0.0);
-        cache.masking_non_finite.resize(width, 0);
-        cache.masking_non_finite.fill(0);
+        cache.masking_sums.resize(width, FiniteSum::default());
+        cache.masking_sums.fill(FiniteSum::default());
     } else {
         cache.masking_sums.clear();
-        cache.masking_non_finite.clear();
     }
     for age in 0..window_rows {
         let row = spectrogram
             .at_age(age)
             .expect("bar window is bounded by retained history");
-        accumulate_bar_row(cache, row, 1.0);
+        accumulate_bar_row::<true>(cache, row);
     }
 
     cache.state = Some(state);
@@ -864,59 +874,82 @@ fn rebuild_bar_cache(
     write_cached_bar_row(cache, state.valid_rows > 0, output);
 }
 
-fn accumulate_bar_row(cache: &mut BarCache, row: &crate::analyzer::BetterAnalysis, sign: f64) {
-    for ((sum, non_finite), &(pan, amplitude)) in cache
-        .data_sums
-        .iter_mut()
-        .zip(&mut cache.amplitude_non_finite)
-        .zip(&row.data)
-    {
-        sum.0 += f64::from(pan) * sign;
-        accumulate_finite(&mut sum.1, non_finite, amplitude, sign);
+fn accumulate_bar_row<const ADD: bool>(
+    cache: &mut BarCache,
+    row: &crate::analyzer::BetterAnalysis,
+) {
+    // The direction is selected when this is monomorphized, keeping its branch and the old sign
+    // multiplication out of the per-bin loops.
+    for (sum, &(pan, amplitude)) in cache.data_sums.iter_mut().zip(&row.data) {
+        if ADD {
+            sum.pan = sum.pan.algebraic_add(f64::from(pan));
+        } else {
+            sum.pan = sum.pan.algebraic_sub(f64::from(pan));
+        }
+        accumulate_finite::<ADD>(&mut sum.amplitude, amplitude);
     }
     if cache.include_masking {
-        for ((sum, non_finite), &(_, masking)) in cache
-            .masking_sums
-            .iter_mut()
-            .zip(&mut cache.masking_non_finite)
-            .zip(&row.masking)
-        {
-            accumulate_finite(sum, non_finite, masking, sign);
+        for (sum, &(_, masking)) in cache.masking_sums.iter_mut().zip(&row.masking) {
+            accumulate_finite::<ADD>(sum, masking);
         }
     }
 }
 
-fn accumulate_finite(sum: &mut f64, non_finite: &mut usize, value: f32, sign: f64) {
+fn accumulate_finite<const ADD: bool>(sum: &mut FiniteSum, value: f32) {
     if value.is_finite() {
-        *sum += f64::from(value) * sign;
-    } else if sign.is_sign_positive() {
-        *non_finite += 1;
+        if ADD {
+            sum.value = sum.value.algebraic_add(f64::from(value));
+        } else {
+            sum.value = sum.value.algebraic_sub(f64::from(value));
+        }
+    } else if ADD {
+        sum.non_finite += 1;
     } else {
-        *non_finite = non_finite.saturating_sub(1);
+        debug_assert!(sum.non_finite > 0);
+        sum.non_finite -= 1;
     }
 }
 
 fn write_cached_bar_row(cache: &BarCache, valid: bool, output: &mut Vec<f16>) {
     output.resize(cache.width * 4, f16::ZERO);
     let count = cache.window_rows.max(1) as f64;
-    for index in 0..cache.width {
-        let base = index * 4;
-        output[base] = f16::from_f32((cache.data_sums[index].0 / count) as f32);
-        output[base + 1] = finite_half(if cache.amplitude_non_finite[index] == 0 {
-            (cache.data_sums[index].1 / count) as f32
-        } else {
-            f32::NEG_INFINITY
-        });
-        output[base + 2] = if cache.include_masking {
-            finite_half(if cache.masking_non_finite[index] == 0 {
-                (cache.masking_sums[index] / count) as f32
-            } else {
-                f32::NEG_INFINITY
-            })
-        } else {
-            f16::ZERO
-        };
-        output[base + 3] = if valid { f16::ONE } else { f16::ZERO };
+    let valid = if valid { f16::ONE } else { f16::ZERO };
+    // Fixed-size texels and zipped cache entries leave only data-dependent finite-value checks in
+    // these loops.
+    let (output, remainder) = output.as_chunks_mut::<4>();
+    debug_assert!(remainder.is_empty());
+
+    if cache.include_masking {
+        debug_assert_eq!(cache.masking_sums.len(), cache.width);
+        for ((output, data), &masking) in output
+            .iter_mut()
+            .zip(&cache.data_sums)
+            .zip(&cache.masking_sums)
+        {
+            *output = [
+                f16::from_f64(data.pan.algebraic_div(count)),
+                cached_average_half(data.amplitude, count),
+                cached_average_half(masking, count),
+                valid,
+            ];
+        }
+    } else {
+        for (output, data) in output.iter_mut().zip(&cache.data_sums) {
+            *output = [
+                f16::from_f64(data.pan.algebraic_div(count)),
+                cached_average_half(data.amplitude, count),
+                f16::ZERO,
+                valid,
+            ];
+        }
+    }
+}
+
+fn cached_average_half(sum: FiniteSum, count: f64) -> f16 {
+    if sum.non_finite == 0 {
+        f16::from_f64(sum.value.algebraic_div(count))
+    } else {
+        f16::MIN
     }
 }
 
