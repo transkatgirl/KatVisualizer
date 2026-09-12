@@ -367,8 +367,8 @@ impl Default for RenderSettings {
             maximum_chroma: 0.09, // Picked using maximum values on https://oklch.com that fit in sRGB w/ all hues
             automatic_gain: true,
             agc_duration: Duration::from_secs_f32(1.0),
-            agc_above_masking: 35.0, // Determined using peak of sawtooth wave @ 440hz
-            agc_below_masking: 45.0 - 35.0, // 45dB of dynamic range
+            agc_above_masking: 40.0, // Determined using peak of square wave @ 440hz
+            agc_below_masking: 55.0 - 40.0, // 55dB of dynamic range
             agc_minimum: (HEARING_THRESHOLD_PHON + 0.1)
                 - AnalysisChainConfig::default().listening_volume,
             agc_maximum: MAX_INFORMATIVE_NORM_PHON
@@ -376,7 +376,7 @@ impl Default for RenderSettings {
             min_db: MIN_COMPLETE_NORM_PHON - AnalysisChainConfig::default().listening_volume,
             max_db: MAX_COMPLETE_NORM_PHON - AnalysisChainConfig::default().listening_volume,
             clamp_using_smr: true,
-            clamp_strength: 0.2, // TODO: more testing to determine a good default
+            clamp_strength: 0.25,
             bargraph_height: 0.25,
             spectrogram_duration: Duration::from_secs_f32(1.0), // TODO: experiment with lower values (0.2s?)
             bargraph_averaging: Duration::from_secs_f32(BASELINE_TARGET_FRAME_SECS), // Ideal value is 1s / display_refresh_rate, up until the critical flicker frequency (in humans, this typically ranges about 50-90Hz (equivalent to 100-180fps) depending on intensity & contrast). alternatively, a different bound for this value could be the critical flutter frequency, which is ~100Hz
